@@ -60,3 +60,14 @@ vite.config.ts.*
 skills-lock.json
 .atomcode
 datalog
+
+# Upstream applications and docs intentionally removed from this thin fork.
+# These rules prevent accidental local reintroduction; tracked upstream changes
+# still need to be resolved when merging upstream/main.
+/apps/web-antd/
+/apps/web-ele/
+/apps/web-naive/
+/apps/web-tdesign/
+/docs/*
+!/docs/ai-context/
+!/docs/ai-context/**
