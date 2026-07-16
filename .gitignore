@@ -1,5 +1,11 @@
 .DS_Store
 
+# Local upstream projects used only for design/reference analysis
+/sourceRepository/
+
+# Java build output in any backend/reference module
+**/target/
+
 # Backend build output and local configuration
 /backend/.env
 /backend/.env.*
