@@ -6,14 +6,18 @@
 
 ```text
 payment-web-platform/
-├── frontend/  # Vben Admin 前端、Playground 和本地 Mock 服务
-└── backend/   # 真实后端项目
+├── frontend/
+│   ├── admin/   # Vben Admin、Playground 和本地 Mock 服务
+│   └── portal/  # Nuxt 4 多应用 Monorepo（待初始化）
+├── backend/     # 真实后端项目
+├── docs/        # 平台文档
+└── infra/       # 部署与基础设施配置
 ```
 
 ## 前端开发
 
 ```bash
-cd frontend
+cd frontend/admin
 pnpm install
 pnpm dev:antdv-next
 ```
@@ -21,7 +25,7 @@ pnpm dev:antdv-next
 Playground 和 Mock 服务仍位于前端工程中：
 
 ```bash
-cd frontend
+cd frontend/admin
 pnpm dev:play
 pnpm --filter @vben/backend-mock dev
 ```
