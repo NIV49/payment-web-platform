@@ -1,6 +1,6 @@
 # Payment Backend
 
-The backend currently contains the executable permission-domain foundation. It is not yet a deployable Spring Boot HTTP application.
+The backend is a Maven multi-module reactor. It currently contains the permission-domain foundation and its database migration, but it is not yet a deployable Spring Boot HTTP application.
 
 ## What it proves
 
@@ -13,17 +13,14 @@ The backend currently contains the executable permission-domain foundation. It i
 - Redis keys are versioned and decoded snapshots are identity-checked;
 - Sa-Token is behind a narrow session facade rather than becoming the business truth source.
 
-## Package boundaries
+## Current module boundaries
 
 ```text
-domain/       framework-free authorization model
-application/  authorization, grant loading, and data-scope orchestration
-datascope/    structured plans and parameterized predicate compiler
-port/         database and business-relation contracts
-cache/        in-memory and Redis cache boundaries
-security/     Sa-Token session bridge boundary
-persistence/  reference entities, MyBatis mappers, and read repositories
-service/      role-grant administration transaction boundary
+backend/
+├── applications/
+│   └── identity-authorization/  composition and migration owner
+└── modules/
+    └── identity-organization/   permission model and current adapters
 ```
 
 ## Verify
@@ -40,10 +37,10 @@ From the repository root:
 docker compose -f infra/docker-compose.local.yml up -d
 ```
 
-The first startup executes `src/main/resources/db/migration/V1__permission_schema.sql` against a fresh local volume.
+The first startup executes `applications/identity-authorization/src/main/resources/db/migration/V1__permission_schema.sql` against a fresh local volume.
 
 ## Deliberate production blockers
 
-The module does not provide credential login, a concrete `StpUtil` adapter, MFA freshness, approval workflow, a Redis codec/client, the atomic role-grant write adapter, relationship providers, or generic MyBatis SQL rewriting. The reference DDL has not been executed against a real PostgreSQL instance in this workspace.
+The modules do not provide credential login, a concrete `StpUtil` adapter, MFA freshness, approval workflow, a Redis codec/client, the atomic role-grant write adapter, relationship providers, generic MyBatis SQL rewriting, or Flyway runtime integration. The reference DDL has only been verified against the local PostgreSQL container.
 
 Do not connect it to balance, ledger, payout, withdrawal, refund, or adjustment write paths until the gates in `../docs/ai-context/permission/09-migration-plan.md` pass.
