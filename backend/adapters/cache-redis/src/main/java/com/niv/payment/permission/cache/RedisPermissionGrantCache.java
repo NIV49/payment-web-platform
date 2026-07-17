@@ -1,6 +1,7 @@
 package com.niv.payment.permission.cache;
 
 import com.niv.payment.permission.domain.GrantSnapshot;
+import com.niv.payment.permission.port.PermissionGrantCache;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -21,7 +22,8 @@ public final class RedisPermissionGrantCache implements PermissionGrantCache {
     }
 
     @Override
-    public Optional<GrantSnapshot> get(PermissionCacheKey key) {
+    public Optional<GrantSnapshot> find(long tenantId, long membershipId, long permissionVersion) {
+        PermissionCacheKey key = new PermissionCacheKey(tenantId, membershipId, permissionVersion);
         return redis.get(key.redisKey())
             .map(codec::decode)
             .filter(snapshot -> snapshot.tenantId() == key.tenantId()
@@ -30,7 +32,9 @@ public final class RedisPermissionGrantCache implements PermissionGrantCache {
     }
 
     @Override
-    public void put(PermissionCacheKey key, GrantSnapshot snapshot) {
+    public void store(GrantSnapshot snapshot) {
+        PermissionCacheKey key = new PermissionCacheKey(
+            snapshot.tenantId(), snapshot.membershipId(), snapshot.permissionVersion());
         redis.set(key.redisKey(), codec.encode(snapshot), ttl);
     }
 }

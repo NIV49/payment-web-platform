@@ -1,6 +1,5 @@
 package com.niv.payment.permission;
 
-import com.niv.payment.permission.cache.PermissionCacheKey;
 import com.niv.payment.permission.cache.RedisPermissionGrantCache;
 import com.niv.payment.permission.cache.RedisValueStore;
 import com.niv.payment.permission.domain.GrantSnapshot;
@@ -38,6 +37,6 @@ class RedisPermissionGrantCacheTest {
             }
         }, Duration.ofMinutes(5));
 
-        assertTrue(cache.get(new PermissionCacheKey(3L, 2L, 7L)).isEmpty());
+        assertTrue(cache.find(3L, 2L, 7L).isEmpty());
     }
 }

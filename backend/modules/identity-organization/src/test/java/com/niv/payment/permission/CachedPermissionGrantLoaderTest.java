@@ -1,11 +1,11 @@
 package com.niv.payment.permission;
 
 import com.niv.payment.permission.application.CachedPermissionGrantLoader;
-import com.niv.payment.permission.cache.InMemoryPermissionGrantCache;
 import com.niv.payment.permission.domain.AuthorizationSubject;
 import com.niv.payment.permission.domain.GrantSnapshot;
 import com.niv.payment.permission.port.MembershipVersionRepository;
 import com.niv.payment.permission.port.PermissionGrantRepository;
+import com.niv.payment.permission.support.InMemoryPermissionGrantCache;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

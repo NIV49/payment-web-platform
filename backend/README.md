@@ -19,9 +19,15 @@ The backend is a Maven multi-module reactor. It currently contains the permissio
 backend/
 ├── applications/
 │   └── identity-authorization/  composition and migration owner
-└── modules/
-    └── identity-organization/   permission model and current adapters
+├── modules/
+│   └── identity-organization/   framework-free permission model, use cases, and ports
+└── adapters/
+    ├── persistence-postgres/    MyBatis persistence adapter
+    ├── cache-redis/             versioned permission snapshot cache adapter
+    └── auth-satoken/            trusted session-to-subject adapter
 ```
+
+Dependencies point inward: applications compose modules and adapters; adapters implement module ports; the domain module does not depend on applications, MyBatis, Redis, or Sa-Token. Test-only fakes stay with the owning module until more than one module needs a shared `test-support` artifact.
 
 ## Verify
 

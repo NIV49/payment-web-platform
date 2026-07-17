@@ -14,6 +14,9 @@
 
     <modules>
         <module>modules/identity-organization</module>
+        <module>adapters/persistence-postgres</module>
+        <module>adapters/cache-redis</module>
+        <module>adapters/auth-satoken</module>
         <module>applications/identity-authorization</module>
     </modules>
 
@@ -26,6 +29,26 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.niv.payment</groupId>
+                <artifactId>identity-organization</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.niv.payment</groupId>
+                <artifactId>persistence-postgres</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.niv.payment</groupId>
+                <artifactId>cache-redis</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.niv.payment</groupId>
+                <artifactId>auth-satoken</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>org.mybatis</groupId>
                 <artifactId>mybatis</artifactId>

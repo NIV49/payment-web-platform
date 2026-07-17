@@ -11,9 +11,9 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
-    <artifactId>identity-authorization-application</artifactId>
-    <name>identity-authorization-application</name>
-    <description>Composition and database migration owner for identity and authorization</description>
+    <artifactId>auth-satoken</artifactId>
+    <name>auth-satoken</name>
+    <description>Sa-Token session adapter for trusted authorization subjects</description>
 
     <dependencies>
         <dependency>
@@ -21,16 +21,9 @@
             <artifactId>identity-organization</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.niv.payment</groupId>
-            <artifactId>persistence-postgres</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.niv.payment</groupId>
-            <artifactId>cache-redis</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.niv.payment</groupId>
-            <artifactId>auth-satoken</artifactId>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

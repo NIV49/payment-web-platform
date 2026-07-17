@@ -9,7 +9,7 @@ payment-web-platform/
 ├── frontend/
 │   ├── admin/   # Vben Admin、Playground 和本地 Mock 服务
 │   └── portal/  # Nuxt 4 多应用 Monorepo（待初始化）
-├── backend/     # 真实后端项目
+├── backend/     # Maven 多模块后端工程
 ├── docs/        # 平台文档
 └── infra/       # 部署与基础设施配置
 ```
@@ -32,7 +32,7 @@ pnpm --filter @vben/backend-mock dev
 
 ## 后端开发
 
-当前后端已迁入 `backend/`，包含支付权限领域核心、MyBatis 持久层边界和 PostgreSQL 初始化脚本：
+当前后端已迁入 `backend/`，按 `applications / modules / adapters` 组织支付权限领域核心、MyBatis、Redis、Sa-Token 边界和 PostgreSQL 初始化脚本：
 
 ```bash
 cd backend

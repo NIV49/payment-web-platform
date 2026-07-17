@@ -1,10 +1,9 @@
 package com.niv.payment.permission.application;
 
-import com.niv.payment.permission.cache.PermissionCacheKey;
-import com.niv.payment.permission.cache.PermissionGrantCache;
 import com.niv.payment.permission.domain.AuthorizationSubject;
 import com.niv.payment.permission.domain.GrantSnapshot;
 import com.niv.payment.permission.port.MembershipVersionRepository;
+import com.niv.payment.permission.port.PermissionGrantCache;
 import com.niv.payment.permission.port.PermissionGrantRepository;
 
 import java.util.Objects;
@@ -25,19 +24,21 @@ public final class CachedPermissionGrantLoader implements PermissionGrantLoader 
     @Override
     public GrantSnapshot load(AuthorizationSubject subject) {
         long currentVersion = versionRepository.findPermissionVersion(subject.tenantId(), subject.membershipId());
-        PermissionCacheKey key = new PermissionCacheKey(subject.tenantId(), subject.membershipId(), currentVersion);
-        return cache.get(key).orElseGet(() -> {
+        return cache.find(subject.tenantId(), subject.membershipId(), currentVersion).orElseGet(() -> {
             GrantSnapshot snapshot = grantRepository.load(subject.tenantId(), subject.membershipId(), currentVersion);
-            validate(snapshot, key);
-            cache.put(key, snapshot);
+            validate(snapshot, subject.tenantId(), subject.membershipId(), currentVersion);
+            cache.store(snapshot);
             return snapshot;
         });
     }
 
-    private static void validate(GrantSnapshot snapshot, PermissionCacheKey key) {
-        if (snapshot.tenantId() != key.tenantId()
-            || snapshot.membershipId() != key.membershipId()
-            || snapshot.permissionVersion() != key.permissionVersion()) {
+    private static void validate(GrantSnapshot snapshot,
+                                 long tenantId,
+                                 long membershipId,
+                                 long permissionVersion) {
+        if (snapshot.tenantId() != tenantId
+            || snapshot.membershipId() != membershipId
+            || snapshot.permissionVersion() != permissionVersion) {
             throw new IllegalStateException("Permission repository returned a snapshot for the wrong cache key");
         }
     }
