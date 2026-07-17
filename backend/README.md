@@ -1,6 +1,6 @@
-# Payment Permission Core
+# Payment Backend
 
-Executable reference implementation for the target permission model. It is a framework boundary module, not a deployable Spring Boot application.
+The backend currently contains the executable permission-domain foundation. It is not yet a deployable Spring Boot HTTP application.
 
 ## What it proves
 
@@ -32,8 +32,18 @@ service/      role-grant administration transaction boundary
 mvn -s maven-settings.xml clean verify
 ```
 
+## Local PostgreSQL
+
+From the repository root:
+
+```bash
+docker compose -f infra/docker-compose.local.yml up -d
+```
+
+The first startup executes `src/main/resources/db/migration/V1__permission_schema.sql` against a fresh local volume.
+
 ## Deliberate production blockers
 
 The module does not provide credential login, a concrete `StpUtil` adapter, MFA freshness, approval workflow, a Redis codec/client, the atomic role-grant write adapter, relationship providers, or generic MyBatis SQL rewriting. The reference DDL has not been executed against a real PostgreSQL instance in this workspace.
 
-Do not connect it to balance, ledger, payout, withdrawal, refund, or adjustment write paths until the gates in `docs/ai-context/permission/09-migration-plan.md` pass.
+Do not connect it to balance, ledger, payout, withdrawal, refund, or adjustment write paths until the gates in `../docs/ai-context/permission/09-migration-plan.md` pass.

@@ -13,7 +13,7 @@
 
 必须先确认：
 
-- 是否允许全局 User 加入多个 Tenant；
+- 是否允许全局 User 加入多个 Tenant； 答：运维用户可跨 Tenant，商户/代理用户默认只属于自己的 Tenant，跨 Tenant 必须显式授权；
 - 平台、代理商、直连/间连商户预置角色；
 - 第一批权限码；
 - FUND 权限和职责分离矩阵；
@@ -139,7 +139,7 @@ resourceFingerprint
 
 ## 11. 当前原型的定位
 
-`resultRepository/backend/permission-core` 用于验证：
+`backend` 当前用于验证：
 
 - RoleGrant 原子授权；
 - 多维范围；

@@ -5,7 +5,7 @@
 数据库目标为 PostgreSQL。DDL 位于：
 
 ```text
-resultRepository/database/migration/V1__permission_schema.sql
+backend/src/main/resources/db/migration/V1__permission_schema.sql
 ```
 
 Verdict：**有条件通过作为新库基线，不允许直接在生产执行。**

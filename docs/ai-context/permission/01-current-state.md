@@ -21,16 +21,16 @@
 | --- | --- | --- |
 | `docs/new-payment-system-target-architecture.md` | 产品/架构基线 | 资金核心、租户、事件、部署和迁移方向 |
 | `docs/permission-refactor-product-requirements.md` | 产品需求基线 | 租户、代理商、多角色、历史订单、MFA 和审计规则 |
-| `sourceRepository/RuoYi-Vue` | 可读源码 | 实际是 RuoYi-Vue 3.9.2，不是 RuoYi-Vue-Plus |
-| `sourceRepository/continew-admin-dev` | 可读源码 | POM 为 ContiNew Admin 4.2.0-SNAPSHOT；目录没有独立 Git 元数据，无法确认源码提交 |
-| `resultRepository` | 本次输出 | 独立设计与参考实现，不修改两个开源项目 |
+| RuoYi-Vue 分析时快照（现已移除） | 已完成源码取证 | 实际是 RuoYi-Vue 3.9.2，不是 RuoYi-Vue-Plus |
+| ContiNew Admin 分析时快照（现已移除） | 已完成源码取证 | POM 为 4.2.0-SNAPSHOT；快照没有独立 Git 元数据，无法确认源码提交 |
+| `backend/` 与 `docs/ai-context/permission/` | 当前正式输出 | 自有设计与实现，不保留两套开源源码副本 |
 
 ### 1.1 重要偏差
 
 用户原始输入把第一套系统描述为 “RuoYi-Vue-Plus / Sa-Token”，但本地源码的事实是：
 
-- `sourceRepository/RuoYi-Vue/pom.xml` 声明 `com.ruoyi:ruoyi:3.9.2`；
-- `ruoyi-common/pom.xml` 引入 Spring Security 和 `jjwt`；
+- 分析时 `RuoYi-Vue/pom.xml` 声明 `com.ruoyi:ruoyi:3.9.2`；
+- 分析时 `ruoyi-common/pom.xml` 引入 Spring Security 和 `jjwt`；
 - `JwtAuthenticationTokenFilter` 与 `TokenService` 实现 JWT + Redis 会话。
 
 因此参考文档统一使用 **RuoYi-Vue** 名称。不得把 RuoYi-Vue-Plus 的能力写成当前源码事实。
