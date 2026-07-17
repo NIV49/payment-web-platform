@@ -32,7 +32,7 @@ pnpm --filter @vben/backend-mock dev
 
 ## 后端开发
 
-当前后端已迁入 `backend/`，按 `applications / modules / adapters` 组织支付权限领域核心、MyBatis、Redis、Sa-Token 边界和 PostgreSQL 初始化脚本：
+当前后端已迁入 `backend/`：`applications` 只允许可启动部署单元，`modules` 按业务领域同时管理核心与所属适配器。Identity 模块包含权限核心、MyBatis、Redis、Sa-Token 边界和 PostgreSQL 初始化脚本：
 
 ```bash
 cd backend

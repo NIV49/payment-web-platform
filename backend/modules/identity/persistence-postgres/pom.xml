@@ -6,19 +6,23 @@
 
     <parent>
         <groupId>com.niv.payment</groupId>
-        <artifactId>payment-backend</artifactId>
+        <artifactId>identity</artifactId>
         <version>0.1.0-SNAPSHOT</version>
-        <relativePath>../../pom.xml</relativePath>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>cache-redis</artifactId>
-    <name>cache-redis</name>
-    <description>Redis adapter for versioned permission grant snapshots</description>
+    <artifactId>identity-persistence-postgres</artifactId>
+    <name>identity-persistence-postgres</name>
+    <description>Identity-owned MyBatis PostgreSQL adapter and schema migrations</description>
 
     <dependencies>
         <dependency>
             <groupId>com.niv.payment</groupId>
-            <artifactId>identity-organization</artifactId>
+            <artifactId>identity-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.mybatis</groupId>
+            <artifactId>mybatis</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

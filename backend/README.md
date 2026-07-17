@@ -18,16 +18,16 @@ The backend is a Maven multi-module reactor. It currently contains the permissio
 ```text
 backend/
 ├── applications/
-│   └── identity-authorization/  composition and migration owner
-├── modules/
-│   └── identity-organization/   framework-free permission model, use cases, and ports
-└── adapters/
-    ├── persistence-postgres/    MyBatis persistence adapter
-    ├── cache-redis/             versioned permission snapshot cache adapter
-    └── auth-satoken/            trusted session-to-subject adapter
+│   └── README.md                 admission rules for runnable deployment units
+└── modules/
+    └── identity/
+        ├── core/                 framework-free model, use cases, and ports
+        ├── persistence-postgres/ identity-owned MyBatis adapter and migrations
+        ├── cache-redis/          identity-owned permission snapshot cache
+        └── session-satoken/      identity-owned trusted-session adapter
 ```
 
-Dependencies point inward: applications compose modules and adapters; adapters implement module ports; the domain module does not depend on applications, MyBatis, Redis, or Sa-Token. Test-only fakes stay with the owning module until more than one module needs a shared `test-support` artifact.
+`applications` means executable composition roots only. Each bounded context owns its core and adapters under `modules`; infrastructure is not pooled into generic repository-wide modules. Dependencies point inward: Identity adapters implement Identity core ports, while `identity-core` does not depend on applications, MyBatis, Redis, or Sa-Token. Test-only fakes stay with the owning module until more than one module needs a shared `test-support` artifact.
 
 ## Verify
 
@@ -43,7 +43,7 @@ From the repository root:
 docker compose -f infra/docker-compose.local.yml up -d
 ```
 
-The first startup executes `applications/identity-authorization/src/main/resources/db/migration/V1__permission_schema.sql` against a fresh local volume.
+The first startup executes `modules/identity/persistence-postgres/src/main/resources/db/migration/V1__permission_schema.sql` against a fresh local volume.
 
 ## Deliberate production blockers
 
