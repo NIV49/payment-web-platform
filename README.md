@@ -30,6 +30,23 @@ pnpm dev:play
 pnpm --filter @vben/backend-mock dev
 ```
 
+## 后端开发
+
+当前后端已迁入 `backend/`，包含支付权限领域核心、MyBatis 持久层边界和 PostgreSQL 初始化脚本：
+
+```bash
+cd backend
+mvn -s maven-settings.xml clean verify
+```
+
+启动本地 PostgreSQL：
+
+```bash
+docker compose -f infra/docker-compose.local.yml up -d
+```
+
+本地数据库只绑定到回环地址，不对局域网开放。首次创建数据卷时会自动执行权限 DDL。
+
 ## Git 远端
 
 - `origin`：业务仓库 `NIV49/payment-web-platform`
