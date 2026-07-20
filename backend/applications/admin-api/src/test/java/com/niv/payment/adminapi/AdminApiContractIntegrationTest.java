@@ -38,7 +38,7 @@ class AdminApiContractIntegrationTest {
     private static final String LOW_PASSWORD = "Low-Test-Password-2026";
 
     @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(DockerImageName.parse("postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777").asCompatibleSubstituteFor("postgres"))
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(DockerImageName.parse("postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15").asCompatibleSubstituteFor("postgres"))
         .withDatabaseName("payment_platform").withUsername("payment_dev").withPassword("payment_dev");
 
     @Container
@@ -299,10 +299,40 @@ class AdminApiContractIntegrationTest {
         Cookie cookie = cookie(login("restricted", LOW_PASSWORD));
         jdbc.update("UPDATE iam_membership SET status='DISABLED' WHERE tenant_id=1 AND id=802");
 
-        mvc.perform(get("/api/user/info").cookie(cookie))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(40102))
-            .andExpect(jsonPath("$.error").value("SESSION_INVALID"));
+        assertSessionInvalid(cookie);
+    }
+
+    @Test
+    void disabledCredentialInvalidatesTheExistingSessionWith401() throws Exception {
+        Cookie cookie = cookie(login("restricted", LOW_PASSWORD));
+        try {
+            jdbc.update("UPDATE iam_authentication_credential SET status='DISABLED' WHERE user_id=801");
+            assertSessionInvalid(cookie);
+        } finally {
+            jdbc.update("UPDATE iam_authentication_credential SET status='ACTIVE' WHERE user_id=801");
+        }
+    }
+
+    @Test
+    void disabledUserInvalidatesTheExistingSessionWith401() throws Exception {
+        Cookie cookie = cookie(login("restricted", LOW_PASSWORD));
+        try {
+            jdbc.update("UPDATE iam_user SET status='DISABLED' WHERE id=801");
+            assertSessionInvalid(cookie);
+        } finally {
+            jdbc.update("UPDATE iam_user SET status='ACTIVE' WHERE id=801");
+        }
+    }
+
+    @Test
+    void disabledTenantInvalidatesTheExistingSessionWith401() throws Exception {
+        Cookie cookie = cookie(login("restricted", LOW_PASSWORD));
+        try {
+            jdbc.update("UPDATE iam_tenant SET status='DISABLED' WHERE id=1");
+            assertSessionInvalid(cookie);
+        } finally {
+            jdbc.update("UPDATE iam_tenant SET status='ACTIVE' WHERE id=1");
+        }
     }
 
     @Test
@@ -372,6 +402,39 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void tenantMembershipUpdateNeverMutatesGlobalIdentityOrAnotherTenant() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_PASSWORD));
+        jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=2 AND id=803");
+        var userBefore = jdbc.queryForMap("""
+            SELECT display_name,status,remark,row_version FROM iam_user WHERE id=801
+            """);
+        var credentialBefore = jdbc.queryForMap("""
+            SELECT username,status,row_version FROM iam_authentication_credential WHERE user_id=801
+            """);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("""
+                    {"deptId":"10","roleIds":[],"status":0,"userVersion":0}
+                    """))
+            .andExpect(status().isOk());
+
+        assertThat(jdbc.queryForObject("""
+            SELECT status FROM iam_membership WHERE tenant_id=1 AND user_id=801
+            """, String.class)).isEqualTo("DISABLED");
+        assertThat(jdbc.queryForObject("""
+            SELECT status FROM iam_membership WHERE tenant_id=2 AND user_id=801
+            """, String.class)).isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForMap("""
+            SELECT display_name,status,remark,row_version FROM iam_user WHERE id=801
+            """)).isEqualTo(userBefore);
+        assertThat(jdbc.queryForMap("""
+            SELECT username,status,row_version FROM iam_authentication_credential WHERE user_id=801
+            """)).isEqualTo(credentialBefore);
+    }
+
+    @Test
     void departmentTreeRejectsCyclesAndOrphaningChildren() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_PASSWORD));
         String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
@@ -391,6 +454,72 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isConflict());
     }
 
+    @Test
+    void putCannotDisableDepartmentWithActiveChild() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_PASSWORD));
+        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Protected Parent\",\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String parentId = JsonPath.read(parentBody, "$.data.id");
+        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"pid\":\"" + parentId
+                    + "\",\"name\":\"Active Child\",\"status\":1}"))
+            .andExpect(status().isOk());
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .put("/api/system/dept/" + parentId).cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Protected Parent\",\"status\":0}"))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void putCannotDisableDepartmentWithActiveMembership() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_PASSWORD));
+        String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Assigned Department\",\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String departmentId = JsonPath.read(departmentBody, "$.data.id");
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"username\":\"assigned-department-user\","
+                    + "\"name\":\"Assigned User\",\"deptId\":\"" + departmentId
+                    + "\",\"roleIds\":[],\"status\":1}"))
+            .andExpect(status().isOk());
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Assigned Department\",\"status\":0}"))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void cannotActivateMembershipInDisabledDepartment() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_PASSWORD));
+        String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Disabled Department\",\"status\":0}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String departmentId = JsonPath.read(departmentBody, "$.data.id");
+
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"username\":\"disabled-department-user\","
+                    + "\"name\":\"Disabled Department User\",\"deptId\":\"" + departmentId
+                    + "\",\"roleIds\":[],\"status\":1}"))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void cannotCreateActiveDepartmentBelowDisabledParent() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_PASSWORD));
+        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Disabled Parent\",\"status\":0}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String parentId = JsonPath.read(parentBody, "$.data.id");
+
+        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"pid\":\"" + parentId
+                    + "\",\"name\":\"Invalid Active Child\",\"status\":1}"))
+            .andExpect(status().isBadRequest());
+    }
+
     private String login(String username, String password) throws Exception {
         String header = mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
@@ -402,6 +531,13 @@ class AdminApiContractIntegrationTest {
                 org.hamcrest.Matchers.containsString("SameSite=Strict"))))
             .andReturn().getResponse().getHeader("Set-Cookie");
         return header.substring("PAYMENT_SESSION=".length(), header.indexOf(';'));
+    }
+
+    private void assertSessionInvalid(Cookie cookie) throws Exception {
+        mvc.perform(get("/api/user/info").cookie(cookie))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value(40102))
+            .andExpect(jsonPath("$.error").value("SESSION_INVALID"));
     }
 
     private static Cookie cookie(String value) {

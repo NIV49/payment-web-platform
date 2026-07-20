@@ -218,7 +218,7 @@ public interface IdentityAdminMapper {
     Long lockTenantForAdministration(@Param("tenantId") long tenantId);
 
     @Select("""
-        SELECT id, assignable, system_role AS "systemRole"
+        SELECT id, assignable, system_role AS "systemRole", status='ACTIVE' AS "active"
           FROM iam_role
          WHERE tenant_id=#{tenantId}
         """)
@@ -269,7 +269,9 @@ public interface IdentityAdminMapper {
     @Insert("""
         INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status)
         SELECT #{id},#{tenantId},#{userId},#{departmentId},#{status}
-        WHERE EXISTS(SELECT 1 FROM iam_department WHERE tenant_id=#{tenantId} AND id=#{departmentId})
+        WHERE EXISTS(SELECT 1 FROM iam_department
+          WHERE tenant_id=#{tenantId} AND id=#{departmentId}
+            AND (#{status}!='ACTIVE' OR status='ACTIVE'))
         """)
     int insertMembership(@Param("id") long id, @Param("tenantId") long tenantId,
                          @Param("userId") long userId, @Param("departmentId") long departmentId,
@@ -285,39 +287,47 @@ public interface IdentityAdminMapper {
                row_version=row_version+1, updated_at=now()
          WHERE tenant_id=#{tenantId} AND user_id=#{userId} AND row_version=#{version}
            AND status!='TERMINATED'
-           AND EXISTS(SELECT 1 FROM iam_department WHERE tenant_id=#{tenantId} AND id=#{departmentId})
+           AND EXISTS(SELECT 1 FROM iam_department
+             WHERE tenant_id=#{tenantId} AND id=#{departmentId}
+               AND (#{status}!='ACTIVE' OR status='ACTIVE'))
         """)
     int updateMembership(@Param("tenantId") long tenantId, @Param("userId") long userId,
                          @Param("departmentId") long departmentId, @Param("status") String status,
                          @Param("version") long version);
 
     @Update("""
-        UPDATE iam_user SET display_name=#{name}, status=#{status}, remark=#{remark}, updated_at=now(),
-               row_version=row_version+1 WHERE id=#{userId}
-        """)
-    int updateUser(@Param("userId") long userId, @Param("name") String name,
-                   @Param("status") String status, @Param("remark") String remark);
-
-    @Update("UPDATE iam_authentication_credential SET username=#{username}, status=#{status}, updated_at=now(), row_version=row_version+1 WHERE user_id=#{userId}")
-    int updateCredential(@Param("userId") long userId, @Param("username") String username,
-                         @Param("status") String status);
-
-    @Update("UPDATE iam_authentication_credential SET status=#{status},updated_at=now(),row_version=row_version+1 WHERE user_id=#{userId}")
-    int updateCredentialStatus(@Param("userId") long userId, @Param("status") String status);
-
-    @Update("UPDATE iam_user SET status=#{status},updated_at=now(),row_version=row_version+1 WHERE id=#{userId}")
-    int updateUserStatus(@Param("userId") long userId, @Param("status") String status);
-
-    @Update("""
         UPDATE iam_membership SET status=#{status}, permission_version=permission_version+1,
                session_version=session_version+1, row_version=row_version+1, updated_at=now()
          WHERE tenant_id=#{tenantId} AND user_id=#{userId} AND row_version=#{version} AND status!='TERMINATED'
+           AND EXISTS(SELECT 1 FROM iam_department d
+             WHERE d.tenant_id=#{tenantId} AND d.id=iam_membership.department_id
+               AND (#{status}!='ACTIVE' OR d.status='ACTIVE'))
         """)
     int updateMembershipStatus(@Param("tenantId") long tenantId, @Param("userId") long userId,
                                @Param("status") String status, @Param("version") long version);
 
     @Select("SELECT row_version FROM iam_membership WHERE tenant_id=#{tenantId} AND user_id=#{userId}")
     Long findUserVersion(@Param("tenantId") long tenantId, @Param("userId") long userId);
+
+    @Select("""
+        SELECT EXISTS(SELECT 1 FROM iam_department
+          WHERE tenant_id=#{tenantId} AND id=#{departmentId}
+            AND (#{status}!='ACTIVE' OR status='ACTIVE'))
+        """)
+    boolean departmentAllowsMembershipStatus(@Param("tenantId") long tenantId,
+                                             @Param("departmentId") long departmentId,
+                                             @Param("status") String status);
+
+    @Select("""
+        SELECT EXISTS(SELECT 1
+          FROM iam_membership m
+          JOIN iam_department d ON d.tenant_id=m.tenant_id AND d.id=m.department_id
+         WHERE m.tenant_id=#{tenantId} AND m.user_id=#{userId} AND m.status!='TERMINATED'
+           AND (#{status}!='ACTIVE' OR d.status='ACTIVE'))
+        """)
+    boolean currentMembershipDepartmentAllowsStatus(@Param("tenantId") long tenantId,
+                                                     @Param("userId") long userId,
+                                                     @Param("status") String status);
 
     @Update("""
         UPDATE iam_membership SET status='TERMINATED', permission_version=permission_version+1,
@@ -398,14 +408,24 @@ public interface IdentityAdminMapper {
            WHERE d.tenant_id=#{tenantId}
         )
         SELECT #{parentId} IS NULL OR (EXISTS(SELECT 1 FROM iam_department WHERE tenant_id=#{tenantId} AND id=#{parentId})
+          AND (#{status}!='ACTIVE' OR EXISTS(SELECT 1 FROM iam_department
+            WHERE tenant_id=#{tenantId} AND id=#{parentId} AND status='ACTIVE'))
           AND NOT EXISTS(SELECT 1 FROM descendants WHERE id=#{parentId}))
         """)
     boolean departmentParentAllowed(@Param("tenantId") long tenantId, @Param("id") long id,
-                                    @Param("parentId") Long parentId);
+                                    @Param("parentId") Long parentId, @Param("status") String status);
 
     @Select("""
-        SELECT EXISTS(SELECT 1 FROM iam_department WHERE tenant_id=#{tenantId} AND parent_id=#{id} AND status='ACTIVE')
-            OR EXISTS(SELECT 1 FROM iam_membership WHERE tenant_id=#{tenantId} AND department_id=#{id} AND status='ACTIVE')
+        WITH RECURSIVE subtree AS (
+          SELECT id FROM iam_department WHERE tenant_id=#{tenantId} AND id=#{id}
+          UNION
+          SELECT d.id FROM iam_department d JOIN subtree s ON d.parent_id=s.id
+           WHERE d.tenant_id=#{tenantId}
+        )
+        SELECT EXISTS(SELECT 1 FROM iam_department d JOIN subtree s ON s.id=d.id
+                       WHERE d.tenant_id=#{tenantId} AND d.id!=#{id} AND d.status='ACTIVE')
+            OR EXISTS(SELECT 1 FROM iam_membership m JOIN subtree s ON s.id=m.department_id
+                       WHERE m.tenant_id=#{tenantId} AND m.status='ACTIVE')
         """)
     boolean departmentHasDependents(@Param("tenantId") long tenantId, @Param("id") long id);
 

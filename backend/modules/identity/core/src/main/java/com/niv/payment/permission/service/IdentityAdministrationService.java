@@ -57,11 +57,11 @@ public final class IdentityAdministrationService {
     public List<IdentityModels.Department> departments(long tenantId) { return departments.findDepartments(tenantId); }
     public List<IdentityModels.Menu> menus(long tenantId) { return menus.findMenus(tenantId); }
 
-    public long createUser(long tenantId, long operatorId, IdentityModels.UserCommand command) {
-        validateUser(command); return users.createUser(tenantId, operatorId, command);
+    public long createUser(long tenantId, long operatorId, IdentityModels.UserCreateCommand command) {
+        validateUserCreate(command); return users.createUser(tenantId, operatorId, command);
     }
-    public void updateUser(long tenantId, long operatorId, long id, IdentityModels.UserCommand command) {
-        validateUser(command); users.updateUser(tenantId, operatorId, positiveId(id), command);
+    public void updateUser(long tenantId, long operatorId, long id, IdentityModels.MembershipUpdateCommand command) {
+        validateMembershipUpdate(command); users.updateUser(tenantId, operatorId, positiveId(id), command);
     }
     public long updateUserStatus(long tenantId, long operatorId, long id, int status, long version) {
         validStatus(status); return users.updateUserStatus(tenantId, operatorId, positiveId(id), status, version);
@@ -98,9 +98,14 @@ public final class IdentityAdministrationService {
         return menus.menuPathExists(tenantId, requiredText(path, "Menu path"), id);
     }
 
-    private static void validateUser(IdentityModels.UserCommand command) {
+    private static void validateUserCreate(IdentityModels.UserCreateCommand command) {
         Objects.requireNonNull(command, "command"); requiredText(command.username(), "Username");
         requiredText(command.name(), "Name"); positiveId(command.departmentId());
+        Objects.requireNonNull(command.roleIds(), "roleIds is required");
+        command.roleIds().forEach(IdentityAdministrationService::positiveId); validStatus(command.status());
+    }
+    private static void validateMembershipUpdate(IdentityModels.MembershipUpdateCommand command) {
+        Objects.requireNonNull(command, "command"); positiveId(command.departmentId());
         Objects.requireNonNull(command.roleIds(), "roleIds is required");
         command.roleIds().forEach(IdentityAdministrationService::positiveId); validStatus(command.status());
         if (command.userVersion() < 0) throw new InvalidCommandException("userVersion is invalid");

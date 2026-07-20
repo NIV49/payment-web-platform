@@ -42,6 +42,8 @@ public final class DefaultAuthorizationService {
         boolean foundMatchingScope = false;
         boolean crossTenant = request.subject().tenantId() != request.resource().tenantId();
         boolean foundCrossTenantEvidence = false;
+        boolean approvalContextRequired = false;
+        boolean separationOfDutyViolated = false;
         for (PermissionGrant grant : snapshot.grants()) {
             if (!grant.active() || !grant.permission().equals(request.permission())) {
                 continue;
@@ -65,12 +67,14 @@ public final class DefaultAuthorizationService {
                 continue;
             }
             if (grant.requiresApproval()) {
-                if (request.initiatorMembershipId() == null) {
-                    return AuthorizationDecision.deny(DecisionReason.APPROVAL_CONTEXT_REQUIRED);
-                }
-                if (request.initiatorMembershipId() == request.subject().membershipId()) {
-                    return AuthorizationDecision.deny(DecisionReason.SEPARATION_OF_DUTY);
-                }
+                // A caller-supplied initiator identifier is not trusted approval evidence.
+                // Until an approval workflow provides a verified approval record, every
+                // approval-bound grant remains fail-closed. Continue so an independent,
+                // ordinary grant can still authorize the same operation.
+                separationOfDutyViolated |= request.initiatorMembershipId() != null
+                    && request.initiatorMembershipId() == request.subject().membershipId();
+                approvalContextRequired = true;
+                continue;
             }
             return AuthorizationDecision.allow(grant.id());
         }
@@ -83,6 +87,12 @@ public final class DefaultAuthorizationService {
         }
         if (!foundMatchingScope) {
             return AuthorizationDecision.deny(DecisionReason.SCOPE_DENIED);
+        }
+        if (separationOfDutyViolated) {
+            return AuthorizationDecision.deny(DecisionReason.SEPARATION_OF_DUTY);
+        }
+        if (approvalContextRequired) {
+            return AuthorizationDecision.deny(DecisionReason.APPROVAL_CONTEXT_REQUIRED);
         }
         return AuthorizationDecision.deny(DecisionReason.STEP_UP_REQUIRED);
     }

@@ -37,12 +37,47 @@ class DataScopePlannerTest {
         assertEquals(List.of(3L, "M1", "PK", "M2", "BR"), predicate.parameters());
     }
 
+    @Test
+    void approvalBoundGrantIsFailClosedWithoutHidingAnOrdinaryGrant() {
+        PermissionCode permission = PermissionCode.of("order:view");
+        PermissionGrant approvalGrant = grant(1L, permission, "M1", "PK", true);
+        PermissionGrant ordinaryGrant = grant(2L, permission, "M2", "BR", false);
+        AuthorizationSubject subject = new AuthorizationSubject(1L, 2L, 3L, 4L, 5L, 6L, false);
+        PermissionGrantLoader loader = ignored -> new GrantSnapshot(
+            2L, 3L, 5L, List.of(approvalGrant, ordinaryGrant));
+
+        DataScopePlan plan = new DefaultDataScopePlanner(loader).plan(subject, permission);
+
+        assertEquals(1, plan.grantPredicates().size());
+        assertEquals(2L, plan.grantPredicates().get(0).grantId());
+    }
+
+    @Test
+    void approvalBoundGrantAloneProducesNoReadablePredicate() {
+        PermissionCode permission = PermissionCode.of("order:view");
+        PermissionGrant approvalGrant = grant(1L, permission, "M1", "PK", true);
+        AuthorizationSubject subject = new AuthorizationSubject(1L, 2L, 3L, 4L, 5L, 6L, false);
+        PermissionGrantLoader loader = ignored -> new GrantSnapshot(2L, 3L, 5L, List.of(approvalGrant));
+
+        DataScopePlan plan = new DefaultDataScopePlanner(loader).plan(subject, permission);
+
+        assertTrue(plan.grantPredicates().isEmpty());
+    }
+
     private static PermissionGrant grant(long id, PermissionCode code, String merchant, String market) {
+        return grant(id, code, merchant, market, false);
+    }
+
+    private static PermissionGrant grant(long id,
+                                         PermissionCode code,
+                                         String merchant,
+                                         String market,
+                                         boolean requiresApproval) {
         return new PermissionGrant(id, id + 100, code, RiskLevel.NORMAL,
             Set.of(ScopeDimension.MERCHANT, ScopeDimension.MARKET),
             List.of(
                 new DimensionScope(ScopeDimension.MERCHANT, ScopeMode.SPECIFIED, Set.of(merchant)),
                 new DimensionScope(ScopeDimension.MARKET, ScopeMode.SPECIFIED, Set.of(market))),
-            false, false, true);
+            false, requiresApproval, true);
     }
 }

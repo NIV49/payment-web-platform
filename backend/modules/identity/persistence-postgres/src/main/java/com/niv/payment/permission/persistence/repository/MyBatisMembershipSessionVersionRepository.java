@@ -14,8 +14,8 @@ public final class MyBatisMembershipSessionVersionRepository implements Membersh
     }
 
     @Override
-    public OptionalLong findSessionVersion(long tenantId, long membershipId) {
-        Long version = mapper.findSessionVersion(tenantId, membershipId);
+    public OptionalLong findActiveSessionVersion(long tenantId, long membershipId, long userId) {
+        Long version = mapper.findActiveSessionVersion(tenantId, membershipId, userId);
         return version == null ? OptionalLong.empty() : OptionalLong.of(version);
     }
 }

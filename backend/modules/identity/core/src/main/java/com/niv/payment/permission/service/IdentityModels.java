@@ -31,9 +31,14 @@ public final class IdentityModels {
     public record Menu(long id, Long parentId, String type, String name, String path, String component,
                        String redirect, String authCode, String metaJson, int status) { }
 
-    public record UserCommand(String username, String name, long departmentId, List<Long> roleIds,
-                              int status, long userVersion, String remark) {
-        public UserCommand { roleIds = List.copyOf(roleIds); }
+    public record UserCreateCommand(String username, String name, long departmentId, List<Long> roleIds,
+                                    int status, String remark) {
+        public UserCreateCommand { roleIds = List.copyOf(roleIds); }
+    }
+
+    public record MembershipUpdateCommand(long departmentId, List<Long> roleIds,
+                                          int status, long userVersion) {
+        public MembershipUpdateCommand { roleIds = List.copyOf(roleIds); }
     }
 
     public record RoleCommand(String name, List<Long> menuIds, int status, String remark) {

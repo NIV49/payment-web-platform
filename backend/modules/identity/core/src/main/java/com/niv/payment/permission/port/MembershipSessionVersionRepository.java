@@ -4,5 +4,5 @@ import java.util.OptionalLong;
 
 @FunctionalInterface
 public interface MembershipSessionVersionRepository {
-    OptionalLong findSessionVersion(long tenantId, long membershipId);
+    OptionalLong findActiveSessionVersion(long tenantId, long membershipId, long userId);
 }

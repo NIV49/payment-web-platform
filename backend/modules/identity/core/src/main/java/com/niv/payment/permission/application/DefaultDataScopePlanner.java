@@ -27,6 +27,9 @@ public final class DefaultDataScopePlanner {
         List<GrantPredicate> predicates = snapshot.grants().stream()
             .filter(grant -> grant.active() && grant.permission().equals(permission))
             .filter(grant -> !grant.needsStepUp() || subject.stepUpVerified())
+            // An approval-bound grant cannot widen a query until a trusted
+            // approval workflow supplies verifiable evidence.
+            .filter(grant -> !grant.requiresApproval())
             .map(grant -> new GrantPredicate(grant.id(), grant.scopes()))
             .toList();
         return new DataScopePlan(subject.tenantId(), subject.membershipId(), permission,

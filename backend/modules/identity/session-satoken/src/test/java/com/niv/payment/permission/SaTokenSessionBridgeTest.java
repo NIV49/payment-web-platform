@@ -26,7 +26,7 @@ class SaTokenSessionBridgeTest {
         SaTokenFacade facade = new FakeSaTokenFacade(attributes);
 
         var subject = new SaTokenSessionBridge(facade,
-            (tenantId, membershipId) -> OptionalLong.of(3L)).currentSubject();
+            (tenantId, membershipId, userId) -> OptionalLong.of(3L)).currentSubject();
 
         assertEquals(20L, subject.membershipId());
         assertEquals(30L, subject.tenantId());
@@ -44,7 +44,7 @@ class SaTokenSessionBridgeTest {
             SessionAttributeNames.STEP_UP_VERIFIED, false);
 
         var bridge = new SaTokenSessionBridge(new FakeSaTokenFacade(attributes),
-            (tenantId, membershipId) -> OptionalLong.of(4L));
+            (tenantId, membershipId, userId) -> OptionalLong.of(4L));
 
         org.junit.jupiter.api.Assertions.assertThrows(InvalidSessionException.class, bridge::currentSubject);
     }
@@ -60,7 +60,25 @@ class SaTokenSessionBridgeTest {
             SessionAttributeNames.STEP_UP_VERIFIED, false);
 
         var bridge = new SaTokenSessionBridge(new FakeSaTokenFacade(attributes),
-            (tenantId, membershipId) -> OptionalLong.empty());
+            (tenantId, membershipId, userId) -> OptionalLong.empty());
+
+        org.junit.jupiter.api.Assertions.assertThrows(InvalidSessionException.class, bridge::currentSubject);
+    }
+
+    @Test
+    void rejectsASessionWhoseUserDoesNotOwnTheActiveMembership() {
+        Map<String, Object> attributes = Map.of(
+            SessionAttributeNames.USER_ID, 10L,
+            SessionAttributeNames.MEMBERSHIP_ID, 20L,
+            SessionAttributeNames.TENANT_ID, 30L,
+            SessionAttributeNames.PERMISSION_VERSION, 7L,
+            SessionAttributeNames.SESSION_VERSION, 3L,
+            SessionAttributeNames.STEP_UP_VERIFIED, false);
+
+        var bridge = new SaTokenSessionBridge(new FakeSaTokenFacade(attributes),
+            (tenantId, membershipId, userId) -> userId == 11L
+                ? OptionalLong.of(3L)
+                : OptionalLong.empty());
 
         org.junit.jupiter.api.Assertions.assertThrows(InvalidSessionException.class, bridge::currentSubject);
     }

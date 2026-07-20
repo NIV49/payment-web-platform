@@ -103,13 +103,14 @@ public class MyBatisIdentityAdministrationRepository implements AuthenticationSe
 
     @Override
     @Transactional
-    public long createUser(long tenantId, long operatorId, IdentityModels.UserCommand command) {
+    public long createUser(long tenantId, long operatorId, IdentityModels.UserCreateCommand command) {
         requirePlatformTenant(tenantId);
         long userId = mapper.nextId();
         long membershipId = mapper.nextId();
         authorizeRoleReplacement(tenantId, operatorId, membershipId, Set.of(), command.roleIds());
         String username = normalize(command.username());
         String status = status(command.status());
+        requireMembershipDepartment(tenantId, command.departmentId(), status);
         mapper.insertUser(userId, username, command.name().trim(), status, command.remark());
         if (mapper.insertMembership(membershipId, tenantId, userId, command.departmentId(), status) != 1) {
             throw new IdentityAdministrationService.ResourceNotFoundException("Department was not found");
@@ -122,29 +123,33 @@ public class MyBatisIdentityAdministrationRepository implements AuthenticationSe
 
     @Override
     @Transactional
-    public void updateUser(long tenantId, long operatorId, long userId, IdentityModels.UserCommand command) {
+    public void updateUser(long tenantId, long operatorId, long userId,
+                           IdentityModels.MembershipUpdateCommand command) {
         requirePlatformTenant(tenantId);
         Long membershipId = mapper.findMembershipId(tenantId, userId);
         if (membershipId == null) throw notFound("User");
         authorizeRoleReplacement(tenantId, operatorId, membershipId,
             Set.copyOf(mapper.findMembershipRoleIds(tenantId, membershipId)), command.roleIds());
         String state = status(command.status());
+        requireMembershipDepartment(tenantId, command.departmentId(), state);
         if (command.status() == 0) protectAdministratorDeactivation(tenantId, userId);
         if (mapper.updateMembership(tenantId, userId, command.departmentId(), state, command.userVersion()) != 1) {
             throw new IdentityAdministrationService.OptimisticLockException();
         }
-        mapper.updateUser(userId, command.name().trim(), state, command.remark());
-        mapper.updateCredential(userId, normalize(command.username()), state);
         replaceRoles(tenantId, membershipId, command.roleIds(), operatorId);
-        audit(tenantId, operatorId, "USER", userId, "UPDATE", "user:update");
+        audit(tenantId, operatorId, "MEMBERSHIP", membershipId, "UPDATE", "user:update");
     }
 
     @Override
     @Transactional
     public long updateUserStatus(long tenantId, long operatorId, long userId, int status, long version) {
         requirePlatformTenant(tenantId);
-        if (status == 0) protectAdministratorDeactivation(tenantId, userId);
+        lockTenant(tenantId);
         String state = status(status);
+        if (!mapper.currentMembershipDepartmentAllowsStatus(tenantId, userId, state)) {
+            throw new IdentityAdministrationService.OptimisticLockException();
+        }
+        if (status == 0) protectAdministratorDeactivation(tenantId, userId);
         if (mapper.updateMembershipStatus(tenantId, userId, state, version) != 1) {
             throw new IdentityAdministrationService.OptimisticLockException();
         }
@@ -213,7 +218,9 @@ public class MyBatisIdentityAdministrationRepository implements AuthenticationSe
         requirePlatformTenant(tenantId);
         lockTenant(tenantId);
         long id = mapper.nextId();
-        if (!mapper.departmentParentAllowed(tenantId, id, command.parentId())) throw new IllegalArgumentException("Invalid department parent");
+        if (!mapper.departmentParentAllowed(tenantId, id, command.parentId(), status(command.status()))) {
+            throw new IllegalArgumentException("Invalid or inactive department parent");
+        }
         mapper.insertDepartment(id, tenantId, command.parentId(), "dept-" + id, command.name().trim(),
             status(command.status()), command.remark());
         audit(tenantId, operatorId, "DEPARTMENT", id, "CREATE", "department:manage");
@@ -225,9 +232,15 @@ public class MyBatisIdentityAdministrationRepository implements AuthenticationSe
     public void updateDepartment(long tenantId, long operatorId, long id, IdentityModels.DepartmentCommand command) {
         requirePlatformTenant(tenantId);
         lockTenant(tenantId);
-        if (!mapper.departmentParentAllowed(tenantId, id, command.parentId())) throw new IllegalArgumentException("Invalid department parent");
+        String state = status(command.status());
+        if (!mapper.departmentParentAllowed(tenantId, id, command.parentId(), state)) {
+            throw new IllegalArgumentException("Invalid or inactive department parent");
+        }
+        if (command.status() == 0 && mapper.departmentHasDependents(tenantId, id)) {
+            throw new IdentityAdministrationService.OptimisticLockException();
+        }
         if (mapper.updateDepartment(tenantId, id, command.parentId(), command.name().trim(),
-            status(command.status()), command.remark()) != 1) throw notFound("Department");
+            state, command.remark()) != 1) throw notFound("Department");
         audit(tenantId, operatorId, "DEPARTMENT", id, "UPDATE", "department:manage");
     }
 
@@ -292,7 +305,7 @@ public class MyBatisIdentityAdministrationRepository implements AuthenticationSe
         Map<Long, RoleAssignmentPolicy.RoleFacts> roleFacts = new HashMap<>();
         for (RoleAssignmentRow row : mapper.findRoleAssignmentFacts(tenantId)) {
             roleFacts.put(row.id(), new RoleAssignmentPolicy.RoleFacts(
-                row.id(), row.assignable(), row.systemRole()));
+                row.id(), row.assignable(), row.systemRole(), row.active()));
         }
         roleAssignmentPolicy.validateReplacement(operatorMembershipId, targetMembershipId,
             currentRoleIds, Set.copyOf(requestedRoleIds),
@@ -318,6 +331,11 @@ public class MyBatisIdentityAdministrationRepository implements AuthenticationSe
     }
     private void requirePlatformTenant(long tenantId) {
         if (!mapper.isActivePlatformTenant(tenantId)) throw new SecurityException("Platform tenant is required");
+    }
+    private void requireMembershipDepartment(long tenantId, long departmentId, String membershipStatus) {
+        if (!mapper.departmentAllowsMembershipStatus(tenantId, departmentId, membershipStatus)) {
+            throw new IdentityAdministrationService.OptimisticLockException();
+        }
     }
     private void replaceMenus(long tenantId, long roleId, List<Long> ids) {
         mapper.deleteRoleMenus(tenantId, roleId);

@@ -19,17 +19,18 @@ public final class SaTokenSessionBridge {
         if (!saToken.isLoggedIn()) {
             throw new InvalidSessionException("Authentication is required");
         }
+        long userId = requiredLong(SessionAttributeNames.USER_ID);
         long membershipId = requiredLong(SessionAttributeNames.MEMBERSHIP_ID);
         long tenantId = requiredLong(SessionAttributeNames.TENANT_ID);
         long sessionVersion = requiredLong(SessionAttributeNames.SESSION_VERSION);
-        long currentSessionVersion = sessionVersionRepository.findSessionVersion(tenantId, membershipId)
+        long currentSessionVersion = sessionVersionRepository.findActiveSessionVersion(tenantId, membershipId, userId)
             .orElseThrow(() -> new InvalidSessionException(
-                "No active membership found for session validation"));
+                "No active tenant, user, credential, and membership tuple found for session validation"));
         if (sessionVersion != currentSessionVersion) {
             throw new InvalidSessionException("Session version is stale");
         }
         return new AuthorizationSubject(
-            requiredLong(SessionAttributeNames.USER_ID),
+            userId,
             membershipId,
             tenantId,
             optionalLong(SessionAttributeNames.DEPARTMENT_ID),

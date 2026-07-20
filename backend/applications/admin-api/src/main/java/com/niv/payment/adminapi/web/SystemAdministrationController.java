@@ -73,7 +73,7 @@ public class SystemAdministrationController {
     }
 
     @PostMapping("/user")
-    ApiResponse<IdResponse> createUser(@Valid @RequestBody UserRequest body, HttpServletRequest request) {
+    ApiResponse<IdResponse> createUser(@Valid @RequestBody UserCreateRequest body, HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
         if (!body.roleIds().isEmpty()) requirePermission(subject, "user:assign-role");
         long id = identities.createUser(subject.tenantId(), subject.membershipId(), body.command());
@@ -81,7 +81,7 @@ public class SystemAdministrationController {
     }
 
     @PutMapping("/user/{id}")
-    ApiResponse<Void> updateUser(@PathVariable("id") long id, @Valid @RequestBody UserRequest body,
+    ApiResponse<Void> updateUser(@PathVariable("id") long id, @Valid @RequestBody MembershipUpdateRequest body,
                                  HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
         if (identities.userRolesChanged(subject.tenantId(), id,
@@ -288,12 +288,18 @@ public class SystemAdministrationController {
                         String authCode,Map<String,Object> meta,int status,List<MenuResponse> children) { }
     record UserStatusResponse(long userVersion) { }
 
-    record UserRequest(@NotBlank @Size(max=100) String username,@NotBlank @Size(max=128) String name,
+    record UserCreateRequest(@NotBlank @Size(max=100) String username,@NotBlank @Size(max=128) String name,
         @NotBlank @Pattern(regexp="[1-9][0-9]*") String deptId,
         @NotNull List<@Pattern(regexp="[1-9][0-9]*") String> roleIds,
-        @NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion,@Size(max=500) String remark) {
-        IdentityModels.UserCommand command(){ return new IdentityModels.UserCommand(username,name,longId(deptId),
-            roleIds.stream().map(SystemAdministrationController::longId).toList(),status,userVersion,remark); }
+        @NotNull @Min(0) @Max(1) Integer status,@Size(max=500) String remark) {
+        IdentityModels.UserCreateCommand command(){ return new IdentityModels.UserCreateCommand(username,name,
+            longId(deptId),roleIds.stream().map(SystemAdministrationController::longId).toList(),status,remark); }
+    }
+    record MembershipUpdateRequest(@NotBlank @Pattern(regexp="[1-9][0-9]*") String deptId,
+        @NotNull List<@Pattern(regexp="[1-9][0-9]*") String> roleIds,
+        @NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion) {
+        IdentityModels.MembershipUpdateCommand command(){ return new IdentityModels.MembershipUpdateCommand(
+            longId(deptId),roleIds.stream().map(SystemAdministrationController::longId).toList(),status,userVersion); }
     }
     record UserStatusRequest(@NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion) { }
     record RoleRequest(@NotBlank @Size(max=128) String name,@NotNull List<@Pattern(regexp="[1-9][0-9]*") String> menuIds,

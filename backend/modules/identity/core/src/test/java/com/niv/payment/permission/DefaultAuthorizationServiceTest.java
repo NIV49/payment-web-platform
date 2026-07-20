@@ -89,6 +89,38 @@ class DefaultAuthorizationServiceTest {
     }
 
     @Test
+    void callerSuppliedInitiatorDoesNotCountAsTrustedApprovalEvidence() {
+        PermissionGrant grant = new PermissionGrant(1L, 10L, PAYOUT_APPROVE, RiskLevel.FUND,
+            Set.of(ScopeDimension.MERCHANT, ScopeDimension.MARKET),
+            List.of(specified(ScopeDimension.MERCHANT, "M1"), specified(ScopeDimension.MARKET, "PK")),
+            true, true, true);
+
+        AuthorizationDecision decision = serviceWith(grant)
+            .authorize(request(subject(true), "M1", "PK", 999L));
+
+        assertFalse(decision.allowed());
+        assertEquals(DecisionReason.APPROVAL_CONTEXT_REQUIRED, decision.reason());
+    }
+
+    @Test
+    void blockedApprovalGrantDoesNotHideAnOrdinaryMatchingGrant() {
+        PermissionGrant approvalGrant = new PermissionGrant(1L, 10L, PAYOUT_APPROVE, RiskLevel.FUND,
+            Set.of(ScopeDimension.MERCHANT, ScopeDimension.MARKET),
+            List.of(specified(ScopeDimension.MERCHANT, "M1"), specified(ScopeDimension.MARKET, "PK")),
+            true, true, true);
+        PermissionGrant ordinaryGrant = new PermissionGrant(2L, 11L, PAYOUT_APPROVE, RiskLevel.FUND,
+            Set.of(ScopeDimension.MERCHANT, ScopeDimension.MARKET),
+            List.of(specified(ScopeDimension.MERCHANT, "M1"), specified(ScopeDimension.MARKET, "PK")),
+            true, false, true);
+
+        AuthorizationDecision decision = serviceWith(approvalGrant, ordinaryGrant)
+            .authorize(request(subject(true), "M1", "PK", 999L));
+
+        assertTrue(decision.allowed());
+        assertEquals(2L, decision.matchedGrantId());
+    }
+
+    @Test
     void tenantMismatchIsDeniedBeforeScopeEvaluation() {
         PermissionGrant grant = grant(1L, PAYOUT_APPROVE, RiskLevel.FUND,
             specified(ScopeDimension.MERCHANT, "M1"),

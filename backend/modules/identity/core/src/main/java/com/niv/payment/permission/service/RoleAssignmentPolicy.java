@@ -30,17 +30,18 @@ public final class RoleAssignmentPolicy {
         boolean operatorIsSystemAdministrator = operatorRoleIds.stream()
             .map(roleFacts::get)
             .filter(Objects::nonNull)
-            .anyMatch(RoleFacts::systemRole);
+            .anyMatch(role -> role.active() && role.systemRole());
 
         for (Long roleId : added) {
             RoleFacts role = requireFacts(roleFacts, roleId);
-            if (!role.assignable() || role.systemRole()) {
+            if (!role.active() || !role.assignable() || role.systemRole()) {
                 throw new RoleNotAssignableException();
             }
             if (operatorMembershipId == targetMembershipId) {
                 throw new RoleNotAssignableException();
             }
-            if (!operatorIsSystemAdministrator && !operatorRoleIds.contains(roleId)) {
+            if (!operatorIsSystemAdministrator
+                && (!role.active() || !operatorRoleIds.contains(roleId))) {
                 throw new RoleNotAssignableException();
             }
         }
@@ -48,6 +49,9 @@ public final class RoleAssignmentPolicy {
         for (Long roleId : removed) {
             RoleFacts role = requireFacts(roleFacts, roleId);
             if (!role.assignable() || role.systemRole()) {
+                throw new RoleNotAssignableException();
+            }
+            if (!operatorIsSystemAdministrator && !operatorRoleIds.contains(roleId)) {
                 throw new RoleNotAssignableException();
             }
         }
@@ -74,7 +78,7 @@ public final class RoleAssignmentPolicy {
         return Set.copyOf(result);
     }
 
-    public record RoleFacts(long id, boolean assignable, boolean systemRole) {
+    public record RoleFacts(long id, boolean assignable, boolean systemRole, boolean active) {
         public RoleFacts {
             if (id <= 0) {
                 throw new IllegalArgumentException("Role identifier must be positive");

@@ -16,14 +16,25 @@ public interface MembershipMapper {
                                @Param("membershipId") long membershipId);
 
     @Select("""
-        SELECT session_version
-          FROM iam_membership
-         WHERE tenant_id = #{tenantId}
-           AND id = #{membershipId}
-           AND status = 'ACTIVE'
+        SELECT m.session_version
+          FROM iam_membership m
+          JOIN iam_tenant t
+            ON t.id = m.tenant_id
+           AND t.status = 'ACTIVE'
+          JOIN iam_user u
+            ON u.id = m.user_id
+           AND u.status = 'ACTIVE'
+          JOIN iam_authentication_credential c
+            ON c.user_id = u.id
+           AND c.status = 'ACTIVE'
+         WHERE m.tenant_id = #{tenantId}
+           AND m.id = #{membershipId}
+           AND m.user_id = #{userId}
+           AND m.status = 'ACTIVE'
         """)
-    Long findSessionVersion(@Param("tenantId") long tenantId,
-                            @Param("membershipId") long membershipId);
+    Long findActiveSessionVersion(@Param("tenantId") long tenantId,
+                                  @Param("membershipId") long membershipId,
+                                  @Param("userId") long userId);
 
     @Update("""
         UPDATE iam_membership m
