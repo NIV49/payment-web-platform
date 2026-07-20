@@ -1,3 +1,5 @@
+import type { PreferencesExtension } from '../src/types';
+
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { defaultPreferences } from '../src/config';
@@ -59,6 +61,18 @@ describe('preferences', () => {
   it('loads default preferences if no saved preferences found', () => {
     const preferences = preferenceManager.getPreferences();
     expect(preferences).toEqual(defaultPreferences);
+  });
+
+  it('does not create an unscoped local-storage manager before initialization', () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const uninitializedManager = new PreferenceManager();
+
+    expect(warning).not.toHaveBeenCalledWith(
+      expect.stringContaining('empty prefix combined with LocalStorageDriver'),
+    );
+    expect(uninitializedManager.getPreferences()).toEqual(defaultPreferences);
+    warning.mockRestore();
   });
 
   it('initializes preferences with overrides', async () => {
@@ -279,7 +293,7 @@ describe('preferences', () => {
       ],
       tabLabel: '扩展',
       title: '业务偏好',
-    } as const;
+    } satisfies PreferencesExtension;
 
     await preferenceManager.initPreferences({
       extension,
@@ -310,7 +324,7 @@ describe('preferences', () => {
       ],
       tabLabel: '扩展',
       title: '业务偏好',
-    } as const;
+    } satisfies PreferencesExtension;
 
     await preferenceManager.initPreferences({
       extension,

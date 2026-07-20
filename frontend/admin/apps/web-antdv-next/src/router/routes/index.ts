@@ -2,6 +2,8 @@ import type { RouteRecordRaw } from 'vue-router';
 
 import { mergeRouteModules, traverseTreeValues } from '@vben/utils';
 
+import { MENU_PAGE_COMPONENTS } from '#/api/system/menu-contract';
+
 import { coreRoutes, fallbackNotFoundRoute } from './core';
 
 const dynamicRouteFiles = import.meta.glob('./modules/**/*.ts', {
@@ -34,4 +36,20 @@ const coreRouteNames = traverseTreeValues(coreRoutes, (route) => route.name);
 
 /** 有权限校验的路由列表，包含动态路由和静态路由 */
 const accessRoutes = [...dynamicRoutes, ...staticRoutes];
-export { accessRoutes, coreRouteNames, routes };
+
+const availablePageComponents = new Set(
+  Object.keys(import.meta.glob('../../views/**/*.vue')).map((value) =>
+    value.replace('../../views/', '/').replace(/\.vue$/, ''),
+  ),
+);
+const missingPageComponents = MENU_PAGE_COMPONENTS.filter(
+  (component) => !availablePageComponents.has(component),
+);
+if (missingPageComponents.length > 0) {
+  throw new Error(
+    `Registered menu components do not exist: ${missingPageComponents.join(', ')}`,
+  );
+}
+const componentKeys: string[] = [...MENU_PAGE_COMPONENTS];
+
+export { accessRoutes, componentKeys, coreRouteNames, routes };

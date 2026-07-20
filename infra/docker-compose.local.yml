@@ -2,18 +2,17 @@ name: payment-web-platform-local
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     container_name: payment-web-platform-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: payment_platform
       POSTGRES_USER: payment_dev
-      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_PASSWORD: payment_dev
     ports:
       - "127.0.0.1:15432:5432"
     volumes:
       - payment_postgres_data:/var/lib/postgresql/data
-      - ../backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V1__permission_schema.sql:/docker-entrypoint-initdb.d/001_permission_schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payment_dev -d payment_platform"]
       interval: 5s
@@ -21,6 +20,24 @@ services:
       retries: 20
       start_period: 10s
 
+  redis:
+    image: valkey/valkey:7.2.13-alpine@sha256:ac32d5e70f29e2be83384f5173180911b666c79a0e91ac0d074de5771638ed91
+    container_name: payment-web-platform-redis
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:16379:6379"
+    volumes:
+      - payment_redis_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
 volumes:
   payment_postgres_data:
     name: payment-web-platform-postgres-data
+  payment_redis_data:
+    name: payment-web-platform-redis-data

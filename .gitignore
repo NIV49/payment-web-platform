@@ -2,6 +2,7 @@
 
 # Local upstream projects used only for design/reference analysis
 /sourceRepository/
+/resultRepository/
 
 # Java build output in any backend/reference module
 **/target/

@@ -4,6 +4,7 @@ import com.niv.payment.permission.persistence.mapper.MembershipMapper;
 import com.niv.payment.permission.port.MembershipSessionVersionRepository;
 
 import java.util.Objects;
+import java.util.OptionalLong;
 
 public final class MyBatisMembershipSessionVersionRepository implements MembershipSessionVersionRepository {
     private final MembershipMapper mapper;
@@ -13,11 +14,8 @@ public final class MyBatisMembershipSessionVersionRepository implements Membersh
     }
 
     @Override
-    public long findSessionVersion(long tenantId, long membershipId) {
+    public OptionalLong findSessionVersion(long tenantId, long membershipId) {
         Long version = mapper.findSessionVersion(tenantId, membershipId);
-        if (version == null) {
-            throw new IllegalStateException("No active membership found for session validation");
-        }
-        return version;
+        return version == null ? OptionalLong.empty() : OptionalLong.of(version);
     }
 }

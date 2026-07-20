@@ -17,14 +17,16 @@ public final class SaTokenSessionBridge {
 
     public AuthorizationSubject currentSubject() {
         if (!saToken.isLoggedIn()) {
-            throw new IllegalStateException("Authentication is required");
+            throw new InvalidSessionException("Authentication is required");
         }
         long membershipId = requiredLong(SessionAttributeNames.MEMBERSHIP_ID);
         long tenantId = requiredLong(SessionAttributeNames.TENANT_ID);
         long sessionVersion = requiredLong(SessionAttributeNames.SESSION_VERSION);
-        long currentSessionVersion = sessionVersionRepository.findSessionVersion(tenantId, membershipId);
+        long currentSessionVersion = sessionVersionRepository.findSessionVersion(tenantId, membershipId)
+            .orElseThrow(() -> new InvalidSessionException(
+                "No active membership found for session validation"));
         if (sessionVersion != currentSessionVersion) {
-            throw new IllegalStateException("Session version is stale");
+            throw new InvalidSessionException("Session version is stale");
         }
         return new AuthorizationSubject(
             requiredLong(SessionAttributeNames.USER_ID),
@@ -42,7 +44,7 @@ public final class SaTokenSessionBridge {
             return null;
         }
         if (!(value instanceof Number number)) {
-            throw new IllegalStateException("Invalid trusted numeric session attribute: " + name);
+            throw new InvalidSessionException("Invalid trusted numeric session attribute: " + name);
         }
         return number.longValue();
     }
@@ -50,7 +52,7 @@ public final class SaTokenSessionBridge {
     private long requiredLong(String name) {
         Object value = saToken.sessionAttribute(name);
         if (!(value instanceof Number number)) {
-            throw new IllegalStateException("Missing trusted numeric session attribute: " + name);
+            throw new InvalidSessionException("Missing trusted numeric session attribute: " + name);
         }
         return number.longValue();
     }
@@ -58,7 +60,7 @@ public final class SaTokenSessionBridge {
     private boolean requiredBoolean(String name) {
         Object value = saToken.sessionAttribute(name);
         if (!(value instanceof Boolean booleanValue)) {
-            throw new IllegalStateException("Missing trusted boolean session attribute: " + name);
+            throw new InvalidSessionException("Missing trusted boolean session attribute: " + name);
         }
         return booleanValue;
     }

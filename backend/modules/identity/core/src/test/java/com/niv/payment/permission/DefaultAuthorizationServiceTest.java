@@ -103,6 +103,69 @@ class DefaultAuthorizationServiceTest {
         assertEquals(DecisionReason.TENANT_MISMATCH, decision.reason());
     }
 
+    @Test
+    void allowsCrossTenantReadOnlyResourceWhenGrantScopeAndBusinessRelationshipBothMatch() {
+        PermissionCode orderView = PermissionCode.of("order:view");
+        PermissionGrant grant = new PermissionGrant(1L, 10L, orderView, RiskLevel.NORMAL,
+            CrossTenantMode.RELATED_PARTY_READ, Set.of(ScopeDimension.MERCHANT, ScopeDimension.MARKET),
+            List.of(specified(ScopeDimension.MERCHANT, "M1"), specified(ScopeDimension.MARKET, "PK")),
+            false, false, true);
+        PermissionGrantLoader loader = subject -> new GrantSnapshot(subject.membershipId(), subject.tenantId(),
+            subject.permissionVersion(), List.of(grant));
+        DefaultScopeMatcher matcher = new DefaultScopeMatcher((ancestor, child) -> false,
+            (subject, scope, resource) -> false);
+        var service = new DefaultAuthorizationService(loader, matcher,
+            (subject, matchedGrant, resource) -> "M1".equals(resource.merchantRef()));
+        ResourceContext merchantOwnedResource = new ResourceContext(
+            999L, 300L, null, null, "M1", "PK", null);
+
+        AuthorizationDecision decision = service.authorize(new AuthorizationRequest(
+            subject(true), orderView, merchantOwnedResource, null));
+
+        assertTrue(decision.allowed());
+        assertEquals(1L, decision.matchedGrantId());
+    }
+
+    @Test
+    void businessRelationshipAloneCannotCreateCrossTenantPermission() {
+        PermissionCode orderView = PermissionCode.of("order:view");
+        PermissionGrant tenantBoundGrant = new PermissionGrant(1L, 10L, orderView, RiskLevel.NORMAL,
+            Set.of(ScopeDimension.MERCHANT),
+            List.of(specified(ScopeDimension.MERCHANT, "M1")),
+            false, false, true);
+        PermissionGrantLoader loader = subject -> new GrantSnapshot(subject.membershipId(), subject.tenantId(),
+            subject.permissionVersion(), List.of(tenantBoundGrant));
+        DefaultScopeMatcher matcher = new DefaultScopeMatcher((ancestor, child) -> false,
+            (subject, scope, resource) -> false);
+        var service = new DefaultAuthorizationService(loader, matcher,
+            (subject, matchedGrant, resource) -> true);
+
+        AuthorizationDecision decision = service.authorize(new AuthorizationRequest(subject(true), orderView,
+            new ResourceContext(999L, 300L, null, null, "M1", "PK", null), null));
+
+        assertFalse(decision.allowed());
+        assertEquals(DecisionReason.TENANT_MISMATCH, decision.reason());
+    }
+
+    @Test
+    void fundPermissionsRemainTenantBoundEvenWhenBusinessRelationshipMatches() {
+        PermissionGrant grant = grant(1L, PAYOUT_APPROVE, RiskLevel.FUND,
+            specified(ScopeDimension.MERCHANT, "M1"),
+            specified(ScopeDimension.MARKET, "PK"));
+        PermissionGrantLoader loader = subject -> new GrantSnapshot(subject.membershipId(), subject.tenantId(),
+            subject.permissionVersion(), List.of(grant));
+        DefaultScopeMatcher matcher = new DefaultScopeMatcher((ancestor, child) -> false,
+            (subject, scope, resource) -> false);
+        var service = new DefaultAuthorizationService(loader, matcher,
+            (subject, matchedGrant, resource) -> true);
+
+        AuthorizationDecision decision = service.authorize(new AuthorizationRequest(subject(true), PAYOUT_APPROVE,
+            new ResourceContext(999L, 300L, null, null, "M1", "PK", null), null));
+
+        assertFalse(decision.allowed());
+        assertEquals(DecisionReason.TENANT_MISMATCH, decision.reason());
+    }
+
     private static DefaultAuthorizationService serviceWith(PermissionGrant... grants) {
         PermissionGrantLoader loader = subject -> new GrantSnapshot(subject.membershipId(), subject.tenantId(),
             subject.permissionVersion(), List.of(grants));

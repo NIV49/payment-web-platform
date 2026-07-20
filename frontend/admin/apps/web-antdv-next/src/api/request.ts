@@ -18,6 +18,7 @@ import { message } from 'antdv-next';
 import { useAuthStore } from '#/store';
 
 import { refreshTokenApi } from './core';
+import { COOKIE_SESSION_MARKER, formatSessionAuthorization } from './session';
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 
@@ -25,6 +26,7 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   const client = new RequestClient({
     ...options,
     baseURL,
+    withCredentials: true,
   });
 
   /**
@@ -52,12 +54,11 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
     const accessStore = useAccessStore();
     const resp = await refreshTokenApi();
     const newToken = resp.data;
-    accessStore.setAccessToken(newToken);
-    return newToken;
-  }
-
-  function formatToken(token: null | string) {
-    return token ? `Bearer ${token}` : null;
+    if (newToken !== COOKIE_SESSION_MARKER) {
+      throw new Error('Invalid cookie-session refresh response');
+    }
+    accessStore.setAccessToken(COOKIE_SESSION_MARKER);
+    return COOKIE_SESSION_MARKER;
   }
 
   // 请求头处理
@@ -65,7 +66,12 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
     fulfilled: async (config) => {
       const accessStore = useAccessStore();
 
-      config.headers.Authorization = formatToken(accessStore.accessToken);
+      const authorization = formatSessionAuthorization(accessStore.accessToken);
+      if (authorization) {
+        config.headers.Authorization = authorization;
+      } else {
+        delete config.headers.Authorization;
+      }
       config.headers['Accept-Language'] = preferences.app.locale;
       return config;
     },
@@ -87,7 +93,7 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
       doReAuthenticate,
       doRefreshToken,
       enableRefreshToken: preferences.app.enableRefreshToken,
-      formatToken,
+      formatToken: formatSessionAuthorization,
     }),
   );
 
@@ -110,4 +116,7 @@ export const requestClient = createRequestClient(apiURL, {
   responseReturn: 'data',
 });
 
-export const baseRequestClient = new RequestClient({ baseURL: apiURL });
+export const baseRequestClient = new RequestClient({
+  baseURL: apiURL,
+  withCredentials: true,
+});

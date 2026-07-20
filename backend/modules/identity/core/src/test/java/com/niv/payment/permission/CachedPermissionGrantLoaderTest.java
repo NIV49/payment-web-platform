@@ -8,6 +8,9 @@ import com.niv.payment.permission.port.PermissionGrantRepository;
 import com.niv.payment.permission.support.InMemoryPermissionGrantCache;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -33,6 +36,28 @@ class CachedPermissionGrantLoaderTest {
         loader.load(subject);
         version.incrementAndGet();
         loader.load(subject);
+
+        assertEquals(2, repositoryLoads.get());
+    }
+
+    @Test
+    void temporalBoundaryForcesReloadWithoutAPermissionVersionChange() {
+        AtomicInteger repositoryLoads = new AtomicInteger();
+        Instant boundary = Instant.parse("2026-07-20T12:00:00Z");
+        var cache = new InMemoryPermissionGrantCache();
+        PermissionGrantRepository grantRepository = (tenantId, membershipId, permissionVersion) -> {
+            repositoryLoads.incrementAndGet();
+            return new GrantSnapshot(membershipId, tenantId, permissionVersion, List.of(), boundary);
+        };
+        var beforeBoundary = new CachedPermissionGrantLoader((tenantId, membershipId) -> 1L,
+            grantRepository, cache, Clock.fixed(boundary.minusSeconds(1), ZoneOffset.UTC));
+        AuthorizationSubject subject = new AuthorizationSubject(10L, 20L, 30L, 40L, 1L, 1L, false);
+
+        beforeBoundary.load(subject);
+        beforeBoundary.load(subject);
+        var atBoundary = new CachedPermissionGrantLoader((tenantId, membershipId) -> 1L,
+            grantRepository, cache, Clock.fixed(boundary, ZoneOffset.UTC));
+        atBoundary.load(subject);
 
         assertEquals(2, repositoryLoads.get());
     }

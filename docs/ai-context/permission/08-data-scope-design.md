@@ -5,8 +5,9 @@
 数据范围必须同时满足：
 
 - 默认拒绝；
-- tenant predicate 永不缺失；
-- 不信任前端 scope；
+- 授权工作区身份永远来自可信 Session；
+- 资源归属租户 predicate 不缺失；跨归属租户时关系 predicate 不缺失；
+- 不信任前端 tenant、relationship 或 scope；
 - 不跨 Grant 扁平化维度；
 - 不通过可控 `${}` 拼接 SQL；
 - 支持部门、商户、市场、渠道、客户和历史关系；
@@ -32,12 +33,15 @@ membership -> membership_role -> role_grant -> grant_dimension -> grant_target
 
 ```text
 DataScopePlan {
-  tenantId,
+  authorizationWorkspaceTenantId,
   permissionCode,
   permissionVersion,
+  crossTenantMode,
   grantPredicates[]
 }
 ```
+
+`authorizationWorkspaceTenantId` 表示 Grant 属于哪个安全工作区，不等同于每条业务资源的 `resource_owner_tenant_id`。当前 `DataScopePlan` 尚未扩展到跨归属租户查询；在完成关系 Provider 与真实订单 Mapper 之前必须 fail closed。
 
 ## 3. GrantPredicate
 
@@ -53,12 +57,22 @@ GrantPredicate B:
   market IN (BR, TH)
 ```
 
-SQL 语义：
+同租户 SQL 语义：
 
 ```text
-tenant
+resource_owner_tenant = authorization_workspace_tenant
 AND ((A.merchant AND A.market) OR (B.merchant AND B.market))
 ```
+
+跨资源归属租户只读 SQL 语义：
+
+```text
+permission.cross_tenant_mode = RELATED_PARTY_READ
+AND trusted_relationship(resource_owner_tenant, merchant)
+AND ((A.merchant AND A.market) OR (B.merchant AND B.market))
+```
+
+不能用关系条件替代 Grant 条件，也不能只凭 `TENANT_ALL` 跨租户。
 
 ## 4. Mapper 集成
 
@@ -85,7 +99,9 @@ Page<OrderRow> selectOrderPage(...);
 
 | 维度 | 解析方式 | 注意事项 |
 | --- | --- | --- |
-| TENANT | 强制 `resource.tenant_id = session.tenant_id` | 不允许关闭 |
+| TENANT | 校验 Grant 属于 Session 的授权工作区；同租户资源再要求 owner tenant 相等 | 跨归属租户不能靠 TENANT_ALL 放行 |
+| RESOURCE_OWNER_TENANT | 业务资源表或授权视图 | 必须来自服务端，不接收请求 tenant |
+| RELATIONSHIP | Party/Relationship Provider 或历史关系快照 | 只补充 RELATED_PARTY_READ Grant，不能生成权限 |
 | OWNER/SELF | `owner_membership_id` | 不使用全局 userId 代替 membershipId |
 | DEPARTMENT | dept_id 或 closure table | 部门必须属于同租户 |
 | CUSTOMER | SalesCustomerRelation Provider | 离职/解绑立即失效，历史业绩另算 |
@@ -119,12 +135,13 @@ selectById(id) -> 返回后再判断 tenant/merchant
 优先：
 
 ```text
-select authorization view by id
+select trusted authorization view by id
+-> obtain resourceOwnerTenant + merchant/customer + market + relationship snapshot
 -> authorize
--> select masked detail by id and tenant
+-> select masked detail by id and the same verified scope tuple
 ```
 
-或在同一查询中强制 tenant + scope。无权和不存在统一返回，避免枚举。
+同租户查询强制 owner tenant + scope；跨归属租户只读查询强制显式 metadata + relationship + scope。无权和不存在统一返回，避免枚举。
 
 ## 8. 缓存
 
@@ -136,25 +153,31 @@ tenantId + membershipId + permissionCode + permissionVersion
 
 短期缓存。关系型范围必须额外包含 relationshipVersion，或由关系变更同时递增 permissionVersion。
 
+时间型 Grant 的下一 `valid_from/valid_until` 边界必须进入快照；边界到达即强制回源，不能让固定 TTL 延长或延迟授权。
+
 资金操作不缓存最终 Allow 结果；只缓存可验证的 Grant 数据。
 
 ## 9. 测试矩阵
 
 必须覆盖：
 
-1. tenant 不一致拒绝；
-2. 空 Grant 拒绝；
-3. 空 SPECIFIED 拒绝；
-4. 多角色不跨 Grant 拼接；
-5. 本部门和下级；
-6. 当前代理关系；
-7. 解除后的历史订单可见，新订单不可见；
-8. 市场匹配但商户不匹配拒绝；
-9. 商户匹配但渠道不匹配拒绝；
-10. 超管对 FUND 权限无隐式绕过；
-11. 权限版本变化后旧 Plan 不再命中；
-12. UNION/CTE/子查询无法安全改写时 fail closed。
+1. tenant 不一致且无显式 metadata 时拒绝；
+2. 只有关系证据、没有 RELATED_PARTY_READ metadata 时拒绝；
+3. 只有 metadata、没有可信关系证据时拒绝；
+4. RELATED_PARTY_READ + 显式商户/客户范围 + 关系证据同时满足才允许普通只读；
+5. FUND 即使关系匹配也拒绝跨资源归属租户；
+6. 空 Grant 拒绝；
+7. 空 SPECIFIED 拒绝；
+8. 多角色不跨 Grant 拼接；
+9. 本部门和下级；
+10. 当前代理关系；
+11. 解除后的历史订单可见，新订单不可见；
+12. 市场匹配但商户不匹配拒绝；
+13. 商户匹配但渠道不匹配拒绝；
+14. 超管对 FUND 权限无隐式绕过；
+15. 权限版本变化后旧 Plan 不再命中；
+16. UNION/CTE/子查询无法安全改写时 fail closed。
 
 ## 10. Verdict
 
-**有条件通过。** 当前参考实现只负责结构化决策和 Plan，不宣称已经安全改写任意 SQL。真实 Mapper 与订单表确定后再实现数据库集成层。
+**有条件通过。** Core 已实现 `SAME_TENANT_ONLY` 默认值、`RELATED_PARTY_READ` 显式 permission metadata 和关系证据端口，数据库也以约束禁止 FUND 跨租户。但 Admin API 尚未接入 Party/Relationship 适配器，`DataScopePlan` 也未生成真实跨租户订单 SQL，因此当前运行时仍默认拒绝。真实订单 Mapper、关系版本和 PostgreSQL 查询测试完成前，不得声称跨租户数据权限已投产。

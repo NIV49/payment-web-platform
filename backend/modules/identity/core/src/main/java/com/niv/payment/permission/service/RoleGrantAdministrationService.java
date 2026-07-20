@@ -37,6 +37,7 @@ public final class RoleGrantAdministrationService {
                 throw new IllegalArgumentException("Permission is disabled: " + grant.permission());
             }
             if (grant.riskLevel() != definition.riskLevel()
+                || grant.crossTenantMode() != definition.crossTenantMode()
                 || !grant.requiredDimensions().equals(definition.requiredDimensions())
                 || grant.requiresStepUp() != definition.requiresStepUp()
                 || grant.requiresApproval() != definition.requiresApproval()) {

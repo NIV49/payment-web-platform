@@ -6,6 +6,8 @@
 
 ```text
 backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V1__permission_schema.sql
+...
+backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V7__separate_permission_outbox_relay_state.sql
 ```
 
 Verdict：**有条件通过作为新库基线，不允许直接在生产执行。**
@@ -29,7 +31,8 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 | iam_menu | Presentation | 菜单/按钮展示 |
 | iam_role_menu | Presentation | 角色菜单展示关系 |
 | iam_audit_event | Audit | 权限、会话和高风险操作审计 |
-| iam_permission_change_outbox | Authorization | 权限版本和缓存失效的事务事件 |
+| iam_permission_change_outbox | Authorization | append-only 权限版本和缓存失效事件事实 |
+| iam_permission_change_relay_state | Authorization Infrastructure | polling relay 的租约、重试和发布状态 |
 
 代理商、商户、销售、渠道和市场由各自业务模块拥有；IAM 通过 ID/Code 和 Provider 校验，不复制业务关系真相。
 
@@ -50,8 +53,9 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 - 一条 Grant 内不同维度按 AND，维度内多个 Target 按 OR，多条 Grant 按 OR；需要保持相关性的范围必须拆成多条 Grant，禁止合并成错误的笛卡尔积；
 - Role 与 Permission 不能通过菜单间接推导；
 - `risk_level` 以 Permission 为真相源，Grant 不允许降低风险；
-- FUND Permission 必须 `requires_step_up=true`；
-- 角色、Grant 和 Membership 必须属于同一租户安全域。
+- FUND Permission 必须 `requires_step_up=true` 且 `cross_tenant_mode=SAME_TENANT_ONLY`；
+- `RELATED_PARTY_READ` 是显式 opt-in，仍需可信关系 Provider 和商户/客户范围；
+- 角色、Grant 和 Membership 必须属于同一授权工作区。
 - MembershipRole、RoleGrant、RoleMenu、部门父子和菜单父子均使用带 `tenant_id` 的组合外键，数据库拒绝跨租户关系写入。
 
 ### 3.3 GrantDimension
@@ -60,6 +64,15 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 - `SPECIFIED` 必须至少存在一个 `iam_grant_target`；
 - `SELF/TENANT_ALL/DEPARTMENT` 等模式不允许带任意 Target；
 - Target 不使用前端自由文本直接写入，必须由对应业务 Provider 校验存在和归属。
+
+### 3.4 Outbox
+
+- `iam_permission_change_outbox` 是 append-only 事件事实，数据库 trigger 拒绝 UPDATE/DELETE；
+- 事件包含 UUID eventId、aggregateVersion、schemaVersion、partitionKey 和 traceId；
+- 新事件 INSERT 后由 trigger 在同一事务初始化 `iam_permission_change_relay_state=PENDING`；
+- relay 只更新 state 表中的 lease、attempts、lastError 和 publishedAt；
+- 当前只有 schema 与写入约束，没有 relay 进程，因此不能声称事件已经发布；
+- Payment/Ledger 必须复用这个形态，不能复制 V1 中状态与事件混表的旧设计。
 
 ## 4. 索引与查询场景
 
@@ -74,6 +87,8 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 | grant_target `(dimension_id,target_ref)` unique | SPECIFIED 目标匹配 | 大范围角色可能产生较多行 |
 | audit `(tenant_id,occurred_at desc)` | 租户审计时间线 | 审计高写成本，需要分区门槛 |
 | audit `(trace_id)` | 事故追踪 | 额外写索引 |
+| outbox `(event_id)` unique | 消息幂等 | 每事件一次唯一性检查 |
+| relay `(status,available_at,event_record_id)` partial | polling 批次领取 | mutable state 写放大，与事件事实隔离 |
 
 不预先给 `iam_audit_event` 分区。达到真实行数、保留周期和查询证据后按月分区。
 
@@ -124,8 +139,8 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 
 ## 9. 不确定项
 
-> 不确定：最终采用 Flyway 还是 Liquibase；当前文件使用 Flyway 风格命名，但 SQL 本身不依赖 Flyway 专有语法。
+当前迁移工具已定为 Flyway，已执行版本禁止改 checksum，只能追加前向迁移。
 
-> 不确定：ID 是否采用雪花、数据库 sequence 或其他全局生成器。
+> 不确定：长期公开 ID 是否采用 UUIDv7、雪花或其他生成器；当前 IAM 仍使用经 V5 修复的共享 sequence。
 
-> 不确定：用户多租户工作空间是否开放；Schema 支持，但产品交互尚未确认。
+用户多工作区在 Schema 和登录 API 中已开放：单一活动 Membership 可省略 tenantId，多个活动 Membership 必须显式选择 tenantId。

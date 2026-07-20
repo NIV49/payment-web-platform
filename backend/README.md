@@ -1,6 +1,6 @@
 # Payment Backend
 
-The backend is a Maven multi-module reactor. It currently contains the permission-domain foundation and its database migration, but it is not yet a deployable Spring Boot HTTP application.
+The backend is a runnable Spring Boot Maven reactor. `applications/admin-api` is the current deployment unit; Identity business rules and adapters remain owned by `modules/identity`.
 
 ## What it proves
 
@@ -12,13 +12,16 @@ The backend is a Maven multi-module reactor. It currently contains the permissio
 - list predicates use parameter values plus server-owned column whitelists;
 - Redis keys are versioned and decoded snapshots are identity-checked;
 - Sa-Token is behind a narrow session facade rather than becoming the business truth source.
+- the Admin API provides local credential login, cookie sessions, explicit permission-policy admission and the Vben user/menu/system-management contract;
+- PostgreSQL migrations and Redis-backed login throttling are wired into the runnable application.
 
 ## Current module boundaries
 
 ```text
 backend/
 ├── applications/
-│   └── README.md                 admission rules for runnable deployment units
+│   ├── README.md                 admission rules for runnable deployment units
+│   └── admin-api/                Spring Boot composition root and HTTP adapters
 └── modules/
     └── identity/
         ├── core/                 framework-free model, use cases, and ports
@@ -32,7 +35,7 @@ backend/
 ## Verify
 
 ```bash
-mvn -s maven-settings.xml clean verify
+./mvnw -s maven-settings.xml clean verify
 ```
 
 ## Local PostgreSQL
@@ -43,10 +46,19 @@ From the repository root:
 docker compose -f infra/docker-compose.local.yml up -d
 ```
 
-The first startup executes `modules/identity/persistence-postgres/src/main/resources/db/migration/V1__permission_schema.sql` against a fresh local volume.
+The first startup executes all Flyway migrations under `modules/identity/persistence-postgres/src/main/resources/db/migration` against a fresh local volume. Existing local volumes are upgraded forward; applied migrations must not be edited.
+
+Run the current application from `backend/`:
+
+```bash
+./mvnw -s maven-settings.xml -pl applications/admin-api -am package -DskipTests
+java -jar applications/admin-api/target/admin-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=local
+```
+
+The local API is available at `http://127.0.0.1:8080/api`. The local password initializer provides `admin / Admin@123456` and can be overridden through environment variables. The historical V2 migration still contains fixed-ID bootstrap rows; do not enable production Flyway until persistent-environment inventory and fixture separation are complete.
 
 ## Deliberate production blockers
 
-The modules do not provide credential login, a concrete `StpUtil` adapter, MFA freshness, approval workflow, a Redis codec/client, the atomic role-grant write adapter, relationship providers, generic MyBatis SQL rewriting, or Flyway runtime integration. The reference DDL has only been verified against the local PostgreSQL container.
+The runnable Admin CRUD now uses the versioned Grant snapshot and full authorization service for same-tenant resources; `/api/auth/codes` remains UI-only. MFA freshness, approval evidence, atomic RoleGrant writes, relationship providers, business-list DataScopePlan application, permission-catalog validation for menu `authCode`, fixture separation, and production deployment hardening remain incomplete.
 
 Do not connect it to balance, ledger, payout, withdrawal, refund, or adjustment write paths until the gates in `../docs/ai-context/permission/09-migration-plan.md` pass.

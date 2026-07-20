@@ -41,6 +41,16 @@ class AuthorizationPolicyHardeningTest {
     }
 
     @Test
+    void fundPermissionMetadataCannotEnableCrossTenantAccess() {
+        assertThrows(IllegalArgumentException.class, () ->
+            new PermissionDefinition(PermissionCode.of("payout:approve"), RiskLevel.FUND,
+                CrossTenantMode.RELATED_PARTY_READ, Set.of(), true, true, true));
+        assertThrows(IllegalArgumentException.class, () ->
+            new PermissionGrant(1L, 2L, PermissionCode.of("payout:approve"), RiskLevel.FUND,
+                CrossTenantMode.RELATED_PARTY_READ, Set.of(), List.of(), true, true, true));
+    }
+
+    @Test
     void noMatchingGrantCompilesToTenantBoundDenyPredicate() {
         AuthorizationSubject subject = new AuthorizationSubject(10L, 20L, 30L, 40L, 1L, 1L, false);
         DataScopePlan plan = new DataScopePlan(30L, 20L, PermissionCode.of("order:view"), 1L, List.of());

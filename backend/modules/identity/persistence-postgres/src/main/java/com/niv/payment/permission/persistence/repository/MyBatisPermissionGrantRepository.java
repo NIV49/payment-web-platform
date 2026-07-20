@@ -1,5 +1,6 @@
 package com.niv.payment.permission.persistence.repository;
 
+import com.niv.payment.permission.domain.CrossTenantMode;
 import com.niv.payment.permission.domain.DimensionScope;
 import com.niv.payment.permission.domain.GrantSnapshot;
 import com.niv.payment.permission.domain.PermissionCode;
@@ -11,7 +12,7 @@ import com.niv.payment.permission.persistence.mapper.GrantRecordRow;
 import com.niv.payment.permission.persistence.mapper.PermissionGrantMapper;
 import com.niv.payment.permission.port.PermissionGrantRepository;
 
-import java.util.ArrayList;
+import java.time.OffsetDateTime;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -30,11 +31,24 @@ public final class MyBatisPermissionGrantRepository implements PermissionGrantRe
     @Override
     public GrantSnapshot load(long tenantId, long membershipId, long permissionVersion) {
         Map<Long, GrantAssembly> grants = new LinkedHashMap<>();
+        OffsetDateTime refreshAfter = null;
         for (GrantRecordRow row : mapper.findActiveGrantRows(tenantId, membershipId)) {
-            grants.computeIfAbsent(row.grantId(), ignored -> new GrantAssembly(row)).add(row);
+            if (row == null) {
+                continue;
+            }
+            if (row.refreshAfter() != null) {
+                if (refreshAfter != null && !refreshAfter.equals(row.refreshAfter())) {
+                    throw new IllegalStateException("Permission rows disagree on the temporal refresh boundary");
+                }
+                refreshAfter = row.refreshAfter();
+            }
+            if (row.grantId() != null) {
+                grants.computeIfAbsent(row.grantId(), ignored -> new GrantAssembly(row)).add(row);
+            }
         }
         return new GrantSnapshot(membershipId, tenantId, permissionVersion,
-            grants.values().stream().map(GrantAssembly::build).toList());
+            grants.values().stream().map(GrantAssembly::build).toList(),
+            refreshAfter == null ? null : refreshAfter.toInstant());
     }
 
     private static final class GrantAssembly {
@@ -66,17 +80,19 @@ public final class MyBatisPermissionGrantRepository implements PermissionGrantRe
                 .map(entry -> new DimensionScope(entry.getKey(), entry.getValue().mode, entry.getValue().targets))
                 .toList();
             return new PermissionGrant(header.grantId(), header.roleId(), PermissionCode.of(header.permissionCode()),
-                RiskLevel.valueOf(header.riskLevel()), parseDimensions(header.requiredDimensions()), dimensions,
-                header.requiresStepUp(), header.requiresApproval(), true);
+                RiskLevel.valueOf(header.riskLevel()), CrossTenantMode.valueOf(header.crossTenantMode()),
+                parseDimensions(header.requiredDimensions()), dimensions, Boolean.TRUE.equals(header.requiresStepUp()),
+                Boolean.TRUE.equals(header.requiresApproval()), true);
         }
 
         private void validateHeader(GrantRecordRow row) {
-            if (row.roleId() != header.roleId()
+            if (!Objects.equals(row.roleId(), header.roleId())
                 || !Objects.equals(row.permissionCode(), header.permissionCode())
                 || !Objects.equals(row.riskLevel(), header.riskLevel())
+                || !Objects.equals(row.crossTenantMode(), header.crossTenantMode())
                 || !Objects.equals(row.requiredDimensions(), header.requiredDimensions())
-                || row.requiresStepUp() != header.requiresStepUp()
-                || row.requiresApproval() != header.requiresApproval()) {
+                || !Objects.equals(row.requiresStepUp(), header.requiresStepUp())
+                || !Objects.equals(row.requiresApproval(), header.requiresApproval())) {
                 throw new IllegalStateException("Joined permission rows disagree on grant metadata");
             }
         }

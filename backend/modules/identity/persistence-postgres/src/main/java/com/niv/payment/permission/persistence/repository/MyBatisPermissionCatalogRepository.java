@@ -1,5 +1,6 @@
 package com.niv.payment.permission.persistence.repository;
 
+import com.niv.payment.permission.domain.CrossTenantMode;
 import com.niv.payment.permission.domain.PermissionCode;
 import com.niv.payment.permission.domain.PermissionDefinition;
 import com.niv.payment.permission.domain.RiskLevel;
@@ -27,7 +28,8 @@ public final class MyBatisPermissionCatalogRepository implements PermissionCatal
             throw new IllegalStateException("Permission catalog returned the wrong definition");
         }
         return new PermissionDefinition(code, RiskLevel.valueOf(row.riskLevel()),
-            parseDimensions(row.requiredDimensions()), row.requiresStepUp(), row.requiresApproval(), true);
+            CrossTenantMode.valueOf(row.crossTenantMode()), parseDimensions(row.requiredDimensions()),
+            row.requiresStepUp(), row.requiresApproval(), true);
     }
 
     private static Set<ScopeDimension> parseDimensions(String value) {

@@ -1,16 +1,20 @@
 package com.niv.payment.permission.persistence.mapper;
 
+import java.time.OffsetDateTime;
+
 public record GrantRecordRow(
-    long grantId,
-    long roleId,
+    Long grantId,
+    Long roleId,
     String permissionCode,
     String riskLevel,
+    String crossTenantMode,
     String requiredDimensions,
-    boolean requiresStepUp,
-    boolean requiresApproval,
+    Boolean requiresStepUp,
+    Boolean requiresApproval,
     Long dimensionId,
     String dimensionCode,
     String scopeMode,
-    String targetRef
+    String targetRef,
+    OffsetDateTime refreshAfter
 ) {
 }

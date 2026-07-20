@@ -12,12 +12,22 @@
 
 ```text
 Allow(request)
-= exists grant in effectiveGrants
-  where grant.permission == request.permission
-    and grant.tenant == request.tenant
-    and every required dimension is covered by this grant
-    and grant.constraints are satisfied
+= snapshot.tenant == subject.authorizationWorkspaceTenant
+  and exists grant in snapshot.effectiveGrants
+    where grant.permission == request.permission
+      and every required dimension is covered by this grant
+      and grant.constraints are satisfied
+      and (
+        resource.ownerTenant == subject.authorizationWorkspaceTenant
+        or (
+          grant.crossTenantMode == RELATED_PARTY_READ
+          and grant has explicit CUSTOMER or MERCHANT scope
+          and trusted RelationshipProvider confirms the relationship
+        )
+      )
 ```
+
+业务关系只能补充已有 Grant，不能创造 Permission。`SAME_TENANT_ONLY` 是权限目录默认值；没有显式元数据、没有关系适配器、关系证据缺失或范围不完整时一律 Deny。
 
 禁止：
 
@@ -34,7 +44,9 @@ allow = permission exists AND resource in scopes
 | 对象 | 职责 | 关键不变量 |
 | --- | --- | --- |
 | User | 全局自然人身份，与 IdP subject 对应 | 不直接拥有租户权限 |
-| Tenant | 安全隔离空间 | 代理商/商户租户彼此独立 |
+| Tenant / AuthorizationWorkspace | 权限来源的安全隔离空间 | 不是 Merchant，也不必等于资源归属租户 |
+| ResourceOwnerTenant | 业务资源的归属租户 | 只由服务端资源事实提供，不能取请求 tenant |
+| BusinessRelationshipEvidence | Party/Relationship 上下文提供的可信关系事实 | 只能补充显式 Grant，不能生成权限 |
 | TenantMembership | User 在 Tenant 中的工作身份 | 同租户单部门；状态和版本控制会话 |
 | Department | 租户内部组织树 | 只表达组织，不表达代理关系 |
 | Role | 租户内可复用授权集合 | 不继承；不能跨租户分配 |
@@ -53,7 +65,7 @@ allow = permission exists AND resource in scopes
 
 | 维度 | 示例 | 数据来源 |
 | --- | --- | --- |
-| TENANT | 当前租户全部 | 服务端 TenantContext |
+| TENANT | 当前授权工作区全部 | 服务端可信 AuthorizationSubject |
 | OWNER | 本人创建/负责 | 业务资源 ownerMembershipId |
 | DEPARTMENT | 本部门/下级/指定部门 | IAM 部门树 |
 | CUSTOMER | 分配的代理商或商户 | SalesCustomerRelation |
@@ -87,7 +99,9 @@ RELATION_AT_EVENT
 - `RELATION_CURRENT` 用于代理商查看当前名下商户；
 - `RELATION_AT_EVENT` 用于历史订单，必须使用订单快照，不根据当前关系回算；
 - `SPECIFIED` 读取 GrantTarget；
-- `TENANT_ALL` 仍不能跨 Tenant。
+- `TENANT_ALL` 只描述授权工作区内的范围，不能单独放开其他资源归属租户；
+- 跨资源归属租户还必须由 Permission 的 `RELATED_PARTY_READ` 元数据和可信关系证据共同放行；
+- `FUND` 权限在领域模型和数据库约束中固定为 `SAME_TENANT_ONLY`。
 
 ## 5. 多角色合并语义
 
@@ -167,12 +181,15 @@ balance:unfreeze
 当前订单访问：
 
 ```text
-membership belongs to agent tenant
-AND grant has order:view
-AND scope covers merchant
-AND AgentMerchantRelation is ACTIVE
-AND order.merchantId matches
+membership belongs to agent authorization workspace
+AND order.resourceOwnerTenant may be the related merchant tenant
+AND permission metadata is RELATED_PARTY_READ
+AND grant has order:view with explicit merchant/customer scope
+AND trusted AgentMerchantRelation is ACTIVE
+AND order.merchantId and market match the same grant tuple
 ```
+
+当前应用尚未接入 Party/Relationship 适配器，因此运行时仍 fail closed；这份模型只建立安全扩展边界，不代表现有 Admin API 已经开放跨租户订单访问。
 
 历史订单访问：
 
@@ -222,6 +239,8 @@ iam:session:{membershipId}:v{sessionVersion}
 -> 事务提交
 -> 删除旧缓存/通知节点
 ```
+
+GrantSnapshot 同时携带当前成员全部角色 Grant 的最近 `valid_from/valid_until` 边界；到达该边界时必须忽略同版本缓存并重新加载，不能仅依赖固定 TTL。
 
 资金接口必须校验当前数据库/强一致版本或使用极短版本缓存；普通读接口可以接受受控的秒级版本缓存。
 

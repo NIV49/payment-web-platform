@@ -1,0 +1,39 @@
+server:
+  port: ${PAYMENT_ADMIN_PORT:8080}
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: payment-admin-api
+  datasource:
+    url: ${PAYMENT_DB_URL}
+    username: ${PAYMENT_DB_USERNAME}
+    password: ${PAYMENT_DB_PASSWORD}
+  data:
+    redis:
+      host: ${PAYMENT_REDIS_HOST}
+      port: ${PAYMENT_REDIS_PORT}
+      password: ${PAYMENT_REDIS_PASSWORD:}
+  flyway:
+    enabled: ${PAYMENT_FLYWAY_ENABLED:false}
+    locations: classpath:db/migration
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
+payment:
+  time-zone: ${PAYMENT_TIME_ZONE:UTC}
+  menu:
+    # Keep in sync with deliberate route pages under web-antdv-next/src/views.
+    allowed-page-components: /dashboard/analytics/index,/dashboard/workspace/index,/demos/antd/index,/system/dept/list,/system/menu/list,/system/role/list,/system/user/list
+  security:
+    cookie-secure: ${PAYMENT_COOKIE_SECURE:true}
+    allowed-origins: ${PAYMENT_ALLOWED_ORIGINS}
+
+logging:
+  level:
+    root: INFO
+    com.niv.payment: INFO

@@ -10,6 +10,7 @@ public record PermissionGrant(
     long roleId,
     PermissionCode permission,
     RiskLevel riskLevel,
+    CrossTenantMode crossTenantMode,
     Set<ScopeDimension> requiredDimensions,
     List<DimensionScope> scopes,
     boolean requiresStepUp,
@@ -22,8 +23,12 @@ public record PermissionGrant(
         }
         Objects.requireNonNull(permission, "permission");
         Objects.requireNonNull(riskLevel, "riskLevel");
+        crossTenantMode = crossTenantMode == null ? CrossTenantMode.SAME_TENANT_ONLY : crossTenantMode;
         requiredDimensions = requiredDimensions == null ? Set.of() : Set.copyOf(requiredDimensions);
         scopes = scopes == null ? List.of() : List.copyOf(scopes);
+        if (riskLevel == RiskLevel.FUND && crossTenantMode != CrossTenantMode.SAME_TENANT_ONLY) {
+            throw new IllegalArgumentException("FUND permissions must remain tenant-bound");
+        }
 
         Set<ScopeDimension> dimensions = new HashSet<>();
         for (DimensionScope scope : scopes) {
@@ -34,6 +39,19 @@ public record PermissionGrant(
         if (!dimensions.containsAll(requiredDimensions)) {
             throw new IllegalArgumentException("Every required dimension must have a scope in the same grant");
         }
+    }
+
+    public PermissionGrant(long id,
+                           long roleId,
+                           PermissionCode permission,
+                           RiskLevel riskLevel,
+                           Set<ScopeDimension> requiredDimensions,
+                           List<DimensionScope> scopes,
+                           boolean requiresStepUp,
+                           boolean requiresApproval,
+                           boolean active) {
+        this(id, roleId, permission, riskLevel, CrossTenantMode.SAME_TENANT_ONLY, requiredDimensions, scopes,
+            requiresStepUp, requiresApproval, active);
     }
 
     public boolean needsStepUp() {

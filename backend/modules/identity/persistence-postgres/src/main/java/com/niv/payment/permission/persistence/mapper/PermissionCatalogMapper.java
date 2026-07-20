@@ -12,6 +12,7 @@ public interface PermissionCatalogMapper {
     @Select("""
         SELECT permission_code,
                risk_level,
+               cross_tenant_mode,
                array_to_string(required_dimensions, ',') AS required_dimensions,
                requires_step_up,
                requires_approval
@@ -22,6 +23,7 @@ public interface PermissionCatalogMapper {
     @ConstructorArgs({
         @Arg(column = "permission_code", javaType = String.class),
         @Arg(column = "risk_level", javaType = String.class),
+        @Arg(column = "cross_tenant_mode", javaType = String.class),
         @Arg(column = "required_dimensions", javaType = String.class),
         @Arg(column = "requires_step_up", javaType = boolean.class),
         @Arg(column = "requires_approval", javaType = boolean.class)

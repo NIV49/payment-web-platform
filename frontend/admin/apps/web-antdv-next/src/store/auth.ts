@@ -11,6 +11,7 @@ import { notification } from 'antdv-next';
 import { defineStore } from 'pinia';
 
 import { getAccessCodesApi, getUserInfoApi, loginApi, logoutApi } from '#/api';
+import { COOKIE_SESSION_MARKER } from '#/api/session';
 import { $t } from '#/locales';
 
 export const useAuthStore = defineStore('auth', () => {
@@ -33,40 +34,44 @@ export const useAuthStore = defineStore('auth', () => {
     let userInfo: null | UserInfo = null;
     try {
       loginLoading.value = true;
-      const { accessToken } = await loginApi(params);
+      const { accessToken } = await loginApi({
+        password: String(params.password ?? ''),
+        username: String(params.username ?? ''),
+      });
 
-      // 如果成功获取到 accessToken
-      if (accessToken) {
-        accessStore.setAccessToken(accessToken);
+      // 真实会话只存在于 HttpOnly Cookie，store 仅保存非敏感登录态标记。
+      if (accessToken !== COOKIE_SESSION_MARKER) {
+        throw new Error('Invalid cookie-session login response');
+      }
+      accessStore.setAccessToken(COOKIE_SESSION_MARKER);
 
-        // 获取用户信息并存储到 accessStore 中
-        const [fetchUserInfoResult, accessCodes] = await Promise.all([
-          fetchUserInfo(),
-          getAccessCodesApi(),
-        ]);
+      // 获取用户信息并存储到 accessStore 中
+      const [fetchUserInfoResult, accessCodes] = await Promise.all([
+        fetchUserInfo(),
+        getAccessCodesApi(),
+      ]);
 
-        userInfo = fetchUserInfoResult;
+      userInfo = fetchUserInfoResult;
 
-        userStore.setUserInfo(userInfo);
-        accessStore.setAccessCodes(accessCodes);
+      userStore.setUserInfo(userInfo);
+      accessStore.setAccessCodes(accessCodes);
 
-        if (accessStore.loginExpired) {
-          accessStore.setLoginExpired(false);
-        } else {
-          onSuccess
-            ? await onSuccess?.()
-            : await router.push(
-                userInfo.homePath || preferences.app.defaultHomePath,
-              );
-        }
+      if (accessStore.loginExpired) {
+        accessStore.setLoginExpired(false);
+      } else {
+        onSuccess
+          ? await onSuccess?.()
+          : await router.push(
+              userInfo.homePath || preferences.app.defaultHomePath,
+            );
+      }
 
-        if (userInfo?.realName) {
-          notification.success({
-            description: `${$t('authentication.loginSuccessDesc')}:${userInfo?.realName}`,
-            duration: 3,
-            title: $t('authentication.loginSuccess'),
-          });
-        }
+      if (userInfo?.realName) {
+        notification.success({
+          description: `${$t('authentication.loginSuccessDesc')}:${userInfo?.realName}`,
+          duration: 3,
+          title: $t('authentication.loginSuccess'),
+        });
       }
     } finally {
       loginLoading.value = false;
@@ -77,14 +82,20 @@ export const useAuthStore = defineStore('auth', () => {
     };
   }
 
+  const isLoggingOut = ref(false);
+
   async function logout(redirect: boolean = true) {
+    if (isLoggingOut.value) return;
+    isLoggingOut.value = true;
     try {
       await logoutApi();
     } catch {
       // 不做任何处理
+    } finally {
+      resetAllStores();
+      accessStore.setLoginExpired(false);
+      isLoggingOut.value = false;
     }
-    resetAllStores();
-    accessStore.setLoginExpired(false);
 
     // 回登录页带上当前路由地址
     await router.replace({
@@ -105,6 +116,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function $reset() {
     loginLoading.value = false;
+    isLoggingOut.value = false;
   }
 
   return {

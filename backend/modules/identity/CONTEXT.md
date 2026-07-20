@@ -8,9 +8,17 @@ This context defines who may act in the payment platform, in which tenant worksp
 A global human or service identity mapped from a verified external identity-provider subject.
 _Avoid_: Account, operator record
 
-**Tenant**:
-An authorization isolation space in which memberships, departments, roles, and grants are evaluated.
-_Avoid_: Merchant, customer
+**Tenant (Authorization Workspace)**:
+An authorization isolation space in which memberships, departments, roles, and grants are evaluated. It identifies where authority comes from; it is not necessarily the owner of a business resource.
+_Avoid_: Merchant, customer, resource owner
+
+**Resource Owner Tenant**:
+The tenant that owns a business resource. It may differ from the actor's Authorization Workspace only for explicitly scoped, read-only access backed by trusted Business Relationship Evidence.
+_Avoid_: Request tenant, caller-supplied tenant
+
+**Business Relationship Evidence**:
+A trusted Party/Relationship fact proving that the actor's workspace is related to a customer or merchant resource. It supplements an explicit IAM grant and never creates a permission by itself.
+_Avoid_: Role, implicit permission, frontend scope
 
 **Tenant Membership**:
 A User's tenant-scoped working identity, including organization placement and permission/session versions.
