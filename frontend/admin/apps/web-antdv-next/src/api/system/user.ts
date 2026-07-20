@@ -19,13 +19,19 @@ export namespace SystemUserApi {
     userVersion: number;
   }
 
-  export interface UserSaveParams {
+  export interface UserCreateParams {
     deptId: string;
     name: string;
     remark?: string;
     roleIds: string[];
     status: 0 | 1;
     username: string;
+  }
+
+  export interface MembershipUpdateParams {
+    deptId: string;
+    roleIds: string[];
+    status: 0 | 1;
     userVersion: number;
   }
 
@@ -46,11 +52,14 @@ async function getUserList(params: Recordable<any>) {
   );
 }
 
-async function createUser(data: SystemUserApi.UserSaveParams) {
+async function createUser(data: SystemUserApi.UserCreateParams) {
   return requestClient.post('/system/user', data);
 }
 
-async function updateUser(id: string, data: SystemUserApi.UserSaveParams) {
+async function updateUser(
+  id: string,
+  data: SystemUserApi.MembershipUpdateParams,
+) {
   return requestClient.put(`/system/user/${id}`, data);
 }
 

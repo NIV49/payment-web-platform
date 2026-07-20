@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { UserFormValues } from './form-contract';
+
 import type { SystemUserApi } from '#/api/system/user';
 
 import { computed, ref } from 'vue';
@@ -16,6 +18,7 @@ import {
 import { $t } from '#/locales';
 
 import { useFormSchema } from '../data';
+import { toMembershipUpdateParams, toUserCreateParams } from './form-contract';
 
 const emits = defineEmits(['success']);
 const formData = ref<SystemUserApi.SystemUser>();
@@ -24,34 +27,31 @@ const { hasAccessByCodes } = useAccess();
 const canAssignRoles = computed(() =>
   hasAccessByCodes([PERMISSION_CODES.userAssignRole]),
 );
+const id = ref<string>();
+const isEditing = computed(() => Boolean(id.value));
 
 const [Form, formApi] = useVbenForm({
-  schema: useFormSchema(canAssignRoles),
+  schema: useFormSchema(canAssignRoles, isEditing),
   showDefaultActions: false,
 });
 
-const id = ref<string>();
 const [Drawer, drawerApi] = useVbenDrawer({
   async onConfirm() {
     const { valid } = await formApi.validate();
     if (!valid) return;
 
-    const values = await formApi.getValues<SystemUserApi.UserSaveParams>();
+    const values = await formApi.getValues<UserFormValues>();
     const roleIds =
       id.value && !canAssignRoles.value
         ? formData.value?.roleIds
         : values.roleIds;
     if (!hasExplicitRoleIds(roleIds)) return;
-    const payload = { ...values, roleIds };
 
     drawerApi.lock();
     try {
       await (id.value
-        ? updateUser(id.value, payload)
-        : createUser({
-            ...payload,
-            userVersion: payload.userVersion ?? 0,
-          }));
+        ? updateUser(id.value, toMembershipUpdateParams(values, roleIds))
+        : createUser(toUserCreateParams(values, roleIds)));
       emits('success');
       drawerApi.close();
     } finally {

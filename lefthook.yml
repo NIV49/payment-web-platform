@@ -1,0 +1,42 @@
+min_version: 2.1.9
+
+pre-commit:
+  # 前端工具安装在 frontend/admin，仓库级 Hook 只在该目录发生变更时运行。
+  # root 同时让 Lefthook 将暂存文件路径转换为前端工作区的相对路径。
+  jobs:
+    - name: oxlint
+      root: frontend/admin/
+      glob: '*.{js,jsx,ts,tsx,vue,cjs,mjs,cts,mts}'
+      run: pnpm exec oxlint --fix --type-aware --threads=4 --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+    - name: oxfmt
+      root: frontend/admin/
+      glob: '*.{js,jsx,ts,tsx,vue,cjs,mjs,cts,mts,json,jsonc}'
+      run: pnpm exec oxfmt --threads=4 --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+    - name: eslint
+      root: frontend/admin/
+      glob: '*.{js,jsx,ts,tsx,vue,cjs,mjs,cts,mts}'
+      run: pnpm exec eslint --fix {staged_files}
+      stage_fixed: true
+    - name: stylelint
+      root: frontend/admin/
+      glob: '*.{vue,css,less,scss}'
+      run: pnpm exec stylelint --fix {staged_files}
+      stage_fixed: true
+    - name: checkType
+      root: frontend/admin/
+      glob: '**/*'
+      run: pnpm check:type
+
+post-merge:
+  jobs:
+    - name: install frontend dependencies
+      root: frontend/admin/
+      run: pnpm install
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      root: frontend/admin/
+      run: pnpm exec commitlint --edit {1}

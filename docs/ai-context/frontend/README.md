@@ -36,7 +36,7 @@ apps/web-antdv-next
 | `internal/vite-config` | `defineConfig`、插件和默认 Loading | 应用 Vite 配置的统一入口 |
 | `scripts/turbo-run` | 交互选择并运行 turbo task | 工程命令 |
 | `scripts/vsh` | 循环依赖、依赖、lint、发布检查 CLI | 工程质量门禁 |
-| `scripts/deploy` | 前端容器/Nginx 构建 | 部署脚本，未代表平台最终部署方案 |
+| `scripts/deploy` | 产品 Admin 容器/Nginx 构建与生产安全回归测试 | 只构建、复制 `web-antdv-next`，禁止部署 Playground |
 | `.changeset` | 上游包版本变更 | 当前业务仓库暂不发布 Vben 包 |
 | `.github` | 上游 Issue/Actions 配置 | 与业务仓库 CI 需分开判断 |
 | `.vscode` | 推荐开发配置 | 编辑器辅助 |
@@ -161,9 +161,17 @@ views/system/*/list.vue
 pnpm install
 pnpm dev:antdv-next
 pnpm -F @vben/web-antdv-next run typecheck
+pnpm run test:production-safety
 pnpm build:antdv-next
 pnpm test:unit
 ```
+
+### 生产部署边界
+
+- `apps/web-antdv-next/.env.production` 固定使用同源 `/api`；生产入口网关必须把 `/api` 转发到后端，产品构建不得连接 Vben 公网 Mock。
+- 产品入口默认不加载第三方统计脚本。确需接入分析服务时必须单独完成数据合规、安全评审和显式配置，不能在 HTML 中硬编码。
+- `scripts/deploy/Dockerfile` 只执行 `build:antdv-next`，且只复制 `apps/web-antdv-next/dist`。Playground 仅用于本地示例，禁止进入产品镜像。
+- `scripts/deploy/production-safety.test.ts` 守护上述边界；根目录 `.github/workflows/frontend.yml` 在前端变更时执行 typecheck、单测和产品构建。
 
 Playground：
 

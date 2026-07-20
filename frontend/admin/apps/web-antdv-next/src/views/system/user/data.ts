@@ -15,16 +15,19 @@ import { $t } from '#/locales';
 
 export function useFormSchema(
   canAssignRoles: ComputedRef<boolean>,
+  isEditing: ComputedRef<boolean>,
 ): VbenFormSchema[] {
   return [
     {
       component: 'Input',
+      componentProps: () => ({ disabled: isEditing.value }),
       fieldName: 'username',
       label: $t('system.user.username'),
       rules: 'required',
     },
     {
       component: 'Input',
+      componentProps: () => ({ disabled: isEditing.value }),
       fieldName: 'name',
       label: $t('system.user.name'),
       rules: 'required',
@@ -75,6 +78,7 @@ export function useFormSchema(
     },
     {
       component: 'Textarea',
+      componentProps: () => ({ disabled: isEditing.value }),
       fieldName: 'remark',
       label: $t('system.user.remark'),
     },

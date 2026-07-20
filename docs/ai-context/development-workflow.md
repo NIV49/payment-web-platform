@@ -49,6 +49,7 @@
 | 改动 | 最低验证 |
 | --- | --- |
 | Admin 前端业务代码 | `pnpm -F @vben/web-antdv-next run typecheck`，相关 Vitest，必要时 `pnpm build:antdv-next` |
+| Admin 生产配置或部署脚本 | `pnpm run test:production-safety`，`pnpm build:antdv-next` |
 | Vben 公共包 | 受影响包 typecheck、相关单测、Admin 构建 |
 | Playground | `pnpm -F @vben/playground run typecheck`，必要时 Playwright |
 | 后端 Core | `./mvnw -s maven-settings.xml -pl modules/identity/core -am test` |

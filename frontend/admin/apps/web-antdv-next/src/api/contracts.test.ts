@@ -55,13 +55,19 @@ describe('admin API contracts', () => {
     }>();
   });
 
-  it('requires roleIds and userVersion for user writes', () => {
-    expectTypeOf<SystemUserApi.UserSaveParams>().toMatchTypeOf<{
+  it('separates global user creation from membership updates', () => {
+    expectTypeOf<SystemUserApi.UserCreateParams>().toEqualTypeOf<{
       deptId: string;
       name: string;
+      remark?: string;
       roleIds: string[];
       status: 0 | 1;
       username: string;
+    }>();
+    expectTypeOf<SystemUserApi.MembershipUpdateParams>().toEqualTypeOf<{
+      deptId: string;
+      roleIds: string[];
+      status: 0 | 1;
       userVersion: number;
     }>();
     expectTypeOf<SystemUserApi.UserStatusParams>().toEqualTypeOf<{
