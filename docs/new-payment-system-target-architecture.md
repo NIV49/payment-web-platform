@@ -909,15 +909,15 @@ eventId
 
 | 层次 | 推荐 |
 |---|---|
-| 语言 | Java 25 LTS；生态兼容不足时使用 Java 21 LTS |
-| 框架 | Spring Boot 4.1 候选基线，需先做兼容性 Spike |
+| 语言 | Java 25 LTS（已接受的工程基线） |
+| 框架 | Spring Boot 4.1.x；版本由根 Maven BOM 统一管理 |
 | 构建 | Maven Wrapper，多模块单仓库 |
-| 核心数据库 | PostgreSQL |
-| 数据访问 | jOOQ 或 MyBatis，资金 SQL 显式可审查 |
+| 核心数据库 | PostgreSQL 18；Flyway 是 Schema 唯一事实来源 |
+| 数据访问 | jOOQ 3.21.x（跟随 Spring Boot BOM）；从临时 PostgreSQL 18 完整迁移后生成类型模型，生成物纳入版本控制 |
 | 消息 | Kafka |
 | Outbox | 首期 Polling Relay，成熟后可切 Debezium CDC |
-| 缓存 | Redis |
-| 身份认证 | Keycloak 或等价托管 OIDC IdP |
+| 缓存 | Redis 协议；本地使用 Valkey，生产产品必须由部署决策明确并通过兼容性测试 |
+| 身份认证 | Keycloak 或等价托管 OIDC IdP；应用只维护业务授权和短期会话 |
 | 长流程 | Temporal，按团队能力条件引入 |
 | 分析 | ClickHouse，按报表规模条件引入 |
 | 对象存储 | S3 兼容存储 |
@@ -926,8 +926,9 @@ eventId
 
 ### 21.2 选型原则
 
-- 不为追求新版本牺牲驱动、监控、SDK 和团队能力；
-- Java/Spring 最终版本必须经过数据库、Kafka、Keycloak、Temporal 和可观测性兼容性验证；
+- Java 25、Spring Boot 4.1、jOOQ 3.21 和 PostgreSQL 18 是同一条受测试约束的基线，禁止模块自行降级或引入第二套 ORM；
+- 基线升级必须经过数据库、Kafka、OIDC IdP、Temporal 和可观测性兼容性验证；
+- jOOQ 代码只能从执行全部 Flyway 迁移后的全新 PostgreSQL 18 实例生成，禁止从共享开发库、生产库或 H2 DDL 回放生成；
 - 如果团队 PostgreSQL 运维能力不足，应先做压测和故障演练，而不是直接宣布迁移；
 - 如果 ClickHouse 和 Temporal 没有明确价值，可推迟引入；
 - 任何新基础设施必须有 Owner、备份、监控、升级和灾难恢复方案。
@@ -937,51 +938,39 @@ eventId
 建议使用一个主代码仓库承载核心应用和共享契约，减少跨仓库版本漂移。
 
 ```text
-payment-platform/
-├── applications/
-│   ├── public-payment-edge/
-│   ├── management-edge/
-│   ├── identity-authorization/
-│   ├── payment-core/
-│   ├── callback-edge/
-│   ├── channel-runtime/
-│   └── async-worker/
-├── modules/
-│   ├── identity-organization/
-│   ├── party-relationship/
-│   ├── product-pricing/
-│   ├── collection/
-│   ├── payout/
-│   ├── withdrawal/
-│   ├── refund-reversal/
-│   ├── account-ledger/
-│   ├── routing/
-│   ├── notification/
-│   └── reconciliation/
-├── adapters/
-│   ├── persistence-postgres/
-│   ├── messaging-kafka/
-│   ├── identity-keycloak/
-│   ├── channel-*/
-│   └── object-storage-s3/
-├── contracts/
-│   ├── public-api/
-│   ├── internal-api/
-│   └── events/
-├── test-support/
+payment-web-platform/
+├── frontend/
+│   ├── admin/                    Vben 管理后台 monorepo
+│   └── portal/                   Nuxt 4 门户/收银台 monorepo
+├── backend/
+│   ├── applications/             仅放可启动、可部署的组合根
+│   │   ├── admin-api/
+│   │   ├── public-payment-edge/  未来按部署需要建立
+│   │   └── async-worker/         未来按部署需要建立
+│   ├── modules/
+│   │   ├── identity/
+│   │   │   ├── core/
+│   │   │   ├── persistence-postgres/
+│   │   │   ├── cache-redis/
+│   │   │   └── session-satoken/  过渡会话适配器，不是身份事实源
+│   │   └── <bounded-context>/
+│   │       ├── core/
+│   │       └── <owned-adapter>/
+│   ├── contracts/                只有跨部署且版本化的契约
+│   └── test-support/             确有跨模块复用后再建立
 ├── docs/
-│   ├── architecture/
 │   ├── adr/
-│   ├── api/
-│   └── runbooks/
-└── deploy/
+│   ├── ai-context/
+│   └── ai-contract/
+└── infra/
 ```
 
 规则：
 
+- `applications` 中的每个目录必须有可启动入口；用户、登录、角色和权限等业务不能伪装成 application；
 - Module 不能依赖 Application；
-- 领域 Module 不依赖具体 Adapter；
-- Adapter 实现 Module 定义的 Port；
+- 领域 Core 不依赖具体 Adapter；
+- Adapter 实现 Core 定义的 Port，并由所属 bounded context 持有，不建立全仓库共享的 `persistence-postgres` 大模块；
 - 跨部署调用只使用版本化 Contract；
 - 不创建只为透传而存在的 Module；
 - 测试通过 Module Interface 验证行为。
@@ -1289,18 +1278,20 @@ flowchart TD
 
 ## 29. 必须产出的 ADR
 
-以下决策成本高、难以反转，建议技术评审后形成 ADR：
+以下决策成本高、难以反转。已接受项必须以 ADR 为目标事实，未接受项不得由实现先斩后奏：
 
 1. Payment Core 与 Ledger 初期同部署、同数据库事务；
 2. 采用复式账本并以账本作为资金事实来源；
-3. PostgreSQL 作为核心数据库；
+3. PostgreSQL 18 作为核心数据库，以及 Java 25 / Spring Boot 4.1 / jOOQ 3.21 基线（[ADR-0003](./adr/0003-java-spring-jooq-postgresql-baseline.md)）；
 4. Kafka + Outbox + Inbox 的消息一致性模型；
 5. 代理商、直连商户、间连商户使用独立租户；
-6. 认证交给 IdP、业务授权由应用维护；
+6. 认证交给 OIDC IdP、业务授权由应用维护（[ADR-0004](./adr/0004-external-idp-and-application-authorization-boundary.md)）；
 7. 路由和费率采用版本化业务数据；
 8. 旧订单不跨系统迁移执行；
 9. 是否以及何时采用 Temporal、ClickHouse、Debezium；
-10. Java/Spring 最终版本基线。
+10. 启动组合根、bounded context 和 adapter 所有权（[ADR-0005](./adr/0005-bounded-context-owned-adapters-and-composition-roots.md)）；
+11. Redis 协议与具体缓存产品边界（[ADR-0006](./adr/0006-redis-protocol-cache-product-boundary.md)）；
+12. 生产迁移与本地演示数据隔离（[ADR-0007](./adr/0007-separate-production-migrations-from-local-fixtures.md)）。
 
 ## 30. 开放问题
 
