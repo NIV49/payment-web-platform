@@ -17,6 +17,8 @@ spring:
   flyway:
     enabled: ${PAYMENT_FLYWAY_ENABLED:false}
     locations: classpath:db/migration
+  jooq:
+    sql-dialect: POSTGRES
   jackson:
     default-property-inclusion: non_null
 

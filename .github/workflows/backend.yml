@@ -25,20 +25,49 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+        env:
+          POSTGRES_DB: payment_codegen
+          POSTGRES_USER: payment_codegen
+          POSTGRES_PASSWORD: payment_codegen
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U payment_codegen -d payment_codegen"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Check out repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - name: Set up Java 17
+      - name: Set up Java 25
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "25"
           cache: maven
           cache-dependency-path: |
             backend/pom.xml
             backend/**/pom.xml
+
+      - name: Regenerate jOOQ model from clean PostgreSQL
+        working-directory: backend
+        env:
+          JOOQ_CODEGEN_DB_URL: jdbc:postgresql://127.0.0.1:5432/payment_codegen
+          JOOQ_CODEGEN_DB_USERNAME: payment_codegen
+          JOOQ_CODEGEN_DB_PASSWORD: payment_codegen
+        run: >-
+          ./mvnw -s maven-settings.xml --batch-mode --no-transfer-progress
+          -Pjooq-codegen -pl modules/identity/persistence-postgres -am generate-sources
+
+      - name: Reject stale generated schema
+        run: >-
+          git diff --exit-code --
+          backend/modules/identity/persistence-postgres/src/main/java/com/niv/payment/permission/persistence/jooq/generated
 
       - name: Verify backend
         working-directory: backend

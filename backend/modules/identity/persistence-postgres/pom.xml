@@ -13,7 +13,7 @@
 
     <artifactId>identity-persistence-postgres</artifactId>
     <name>identity-persistence-postgres</name>
-    <description>Identity-owned MyBatis PostgreSQL adapter and schema migrations</description>
+    <description>Identity-owned jOOQ and transitional MyBatis PostgreSQL adapter with schema migrations</description>
 
     <dependencies>
         <dependency>
@@ -25,6 +25,10 @@
             <artifactId>mybatis</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.jooq</groupId>
+            <artifactId>jooq</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-tx</artifactId>
         </dependency>
@@ -34,4 +38,104 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <profile>
+            <id>jooq-codegen</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-maven-plugin</artifactId>
+                        <version>${flyway.version}</version>
+                        <configuration>
+                            <url>${env.JOOQ_CODEGEN_DB_URL}</url>
+                            <user>${env.JOOQ_CODEGEN_DB_USERNAME}</user>
+                            <password>${env.JOOQ_CODEGEN_DB_PASSWORD}</password>
+                            <locations>
+                                <location>filesystem:${project.basedir}/src/main/resources/db/migration</location>
+                            </locations>
+                            <cleanDisabled>true</cleanDisabled>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>migrate-jooq-codegen-database</id>
+                                <phase>generate-sources</phase>
+                                <goals>
+                                    <goal>migrate</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.flywaydb</groupId>
+                                <artifactId>flyway-database-postgresql</artifactId>
+                                <version>${flyway.version}</version>
+                            </dependency>
+                            <dependency>
+                                <groupId>org.postgresql</groupId>
+                                <artifactId>postgresql</artifactId>
+                                <version>${postgresql.version}</version>
+                            </dependency>
+                        </dependencies>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.jooq</groupId>
+                        <artifactId>jooq-codegen-maven</artifactId>
+                        <version>${jooq.version}</version>
+                        <configuration>
+                            <jdbc>
+                                <driver>org.postgresql.Driver</driver>
+                                <url>${env.JOOQ_CODEGEN_DB_URL}</url>
+                                <user>${env.JOOQ_CODEGEN_DB_USERNAME}</user>
+                                <password>${env.JOOQ_CODEGEN_DB_PASSWORD}</password>
+                            </jdbc>
+                            <generator>
+                                <database>
+                                    <name>org.jooq.meta.postgres.PostgresDatabase</name>
+                                    <inputSchema>public</inputSchema>
+                                    <includes>iam_.*</includes>
+                                    <excludes>flyway_schema_history</excludes>
+                                    <includeTables>true</includeTables>
+                                    <includeSequences>true</includeSequences>
+                                    <includeIndexes>true</includeIndexes>
+                                    <includeRoutines>false</includeRoutines>
+                                    <includeTriggers>false</includeTriggers>
+                                </database>
+                                <generate>
+                                    <deprecated>false</deprecated>
+                                    <relations>true</relations>
+                                    <records>true</records>
+                                    <pojos>false</pojos>
+                                    <daos>false</daos>
+                                    <javaTimeTypes>true</javaTimeTypes>
+                                </generate>
+                                <target>
+                                    <packageName>com.niv.payment.permission.persistence.jooq.generated</packageName>
+                                    <directory>${project.basedir}/src/main/java</directory>
+                                    <clean>true</clean>
+                                </target>
+                            </generator>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>generate-jooq-model</id>
+                                <phase>generate-sources</phase>
+                                <goals>
+                                    <goal>generate</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.postgresql</groupId>
+                                <artifactId>postgresql</artifactId>
+                                <version>${postgresql.version}</version>
+                            </dependency>
+                        </dependencies>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

@@ -18,10 +18,13 @@
     </modules>
 
     <properties>
-        <maven.compiler.release>17</maven.compiler.release>
+        <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <flyway.version>12.4.0</flyway.version>
+        <jooq.version>3.21.5</jooq.version>
         <mybatis.version>3.5.19</mybatis.version>
         <mybatis-spring-boot.version>4.0.0</mybatis-spring-boot.version>
+        <postgresql.version>42.7.11</postgresql.version>
         <spring-boot.version>4.1.0</spring-boot.version>
         <sa-token.version>1.45.0</sa-token.version>
     </properties>
@@ -101,7 +104,7 @@
                                     <version>[3.9.9,4.0.0)</version>
                                 </requireMavenVersion>
                                 <requireJavaVersion>
-                                    <version>[17,18)</version>
+                                    <version>[25,26)</version>
                                 </requireJavaVersion>
                                 <dependencyConvergence/>
                             </rules>
