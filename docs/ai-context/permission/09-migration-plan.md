@@ -13,7 +13,9 @@
 
 必须先确认：
 
-- 是否允许全局 User 加入多个 Tenant； 答：运维用户可跨 Tenant，商户/代理用户默认只属于自己的 Tenant，跨 Tenant 必须显式授权；
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+
+- [待确认，IAM-GLOBAL-USER-MULTI-TENANT] 一个全局 User 是否允许关联多个 TenantMembership，以及登录后的工作空间选择方式。[ADR-0001](../../adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md) 定义受控的跨资源归属租户访问，[ADR-0004](../../adr/0004-external-idp-and-application-authorization-boundary.md) 定义 IdP subject 到全局 User 和 active Membership 的认证边界；两者均未决定 Membership 基数。结论须由产品、安全与架构共同确认，并写入产品基线或 accepted ADR 后方可实施；
 - 平台、代理商、直连/间连商户预置角色；
 - 第一批权限码；
 - FUND 权限和职责分离矩阵；

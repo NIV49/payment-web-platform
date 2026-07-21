@@ -63,6 +63,8 @@
 
 ### 2.2 未决项
 
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+
 > 不确定：一个全局用户是否允许加入多个租户，以及登录时如何选择工作空间；产品文档要求技术评审确认。
 
 > 不确定：权限撤销的最终 SLA；架构候选为普通权限 60 秒内、资金权限立即生效。

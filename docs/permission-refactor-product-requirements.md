@@ -809,6 +809,8 @@ traceId
 
 ## 21. 技术评审必须回答的问题
 
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+
 以下内容尚未完全定案，需要在技术方案前由产品与技术共同确认：
 
 1. 一个全局用户是否允许同时加入多个租户，以及登录后的工作空间切换方式；

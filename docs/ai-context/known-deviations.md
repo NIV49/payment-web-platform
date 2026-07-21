@@ -156,6 +156,8 @@ Admin 创建用户现在只建立不可登录的身份骨架：`iam_user=PENDING
 
 ## P1：代理商与商户后台身份边界尚未定版且未实现
 
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+
 产品基线要求平台、代理商和商户具备各自的管理界面，并要求代理商、直连商户和间连商户具有彼此独立的用户、部门、角色与数据边界。但它同时把 `User` 定义为全局自然人身份、把 `TenantMembership` 定义为租户内工作身份，并将“一个全局用户是否允许加入多个租户，以及如何选择工作空间”列为技术评审未决项。见 `docs/permission-refactor-product-requirements.md` 的 5.2、7 和 21 节，以及 `docs/new-payment-system-target-architecture.md` 的 30 节。因此，当前没有依据把“三类账号必须物理隔离且不得复用全局 User”描述为已确认目标。
 
 当前实现只有一个 `frontend/admin/apps/web-antdv-next` 和一个 `backend/applications/admin-api`。认证模型采用全局 `User` 加租户 `Membership`，`backend/applications/admin-api/src/main/java/com/niv/payment/adminapi/web/AuthUserMenuController.java` 的 `LoginRequest` 还接受可选 `tenantId`；`docs/ai-contract/identity-admin-api-contract.md` 的 1.13 节则明确当前写链路只支持 ACTIVE PLATFORM Tenant，代理商和商户后台身份管理不在本轮范围。这证明代理商、商户管理入口及其身份边界尚未实现，但不能反向证明全局 User 模型必然错误。

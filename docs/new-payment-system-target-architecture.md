@@ -1295,6 +1295,8 @@ flowchart TD
 
 ## 30. 开放问题
 
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+
 进入技术实施计划前必须回答：
 
 1. 首期上线哪些国家/市场、产品和交易类型？
