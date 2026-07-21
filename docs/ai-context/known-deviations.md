@@ -153,3 +153,11 @@ Admin 创建用户现在只建立不可登录的身份骨架：`iam_user=PENDING
 ## P2：Portal 尚未初始化
 
 `frontend/portal` 只有 `.gitkeep`。在创建 Nuxt 4 大型 pnpm monorepo 前，需要先确定：按国家拆 app 的命名、共享 layers/packages、运行时配置、i18n、支付收银台安全边界、官网与收银台的部署关系。不能复制 Admin 的 Vben package 层次作为默认答案。
+
+## P1：代理商与商户后台身份边界尚未定版且未实现
+
+产品基线要求平台、代理商和商户具备各自的管理界面，并要求代理商、直连商户和间连商户具有彼此独立的用户、部门、角色与数据边界。但它同时把 `User` 定义为全局自然人身份、把 `TenantMembership` 定义为租户内工作身份，并将“一个全局用户是否允许加入多个租户，以及如何选择工作空间”列为技术评审未决项。见 `docs/permission-refactor-product-requirements.md` 的 5.2、7 和 21 节，以及 `docs/new-payment-system-target-architecture.md` 的 30 节。因此，当前没有依据把“三类账号必须物理隔离且不得复用全局 User”描述为已确认目标。
+
+当前实现只有一个 `frontend/admin/apps/web-antdv-next` 和一个 `backend/applications/admin-api`。认证模型采用全局 `User` 加租户 `Membership`，`backend/applications/admin-api/src/main/java/com/niv/payment/adminapi/web/AuthUserMenuController.java` 的 `LoginRequest` 还接受可选 `tenantId`；`docs/ai-contract/identity-admin-api-contract.md` 的 1.13 节则明确当前写链路只支持 ACTIVE PLATFORM Tenant，代理商和商户后台身份管理不在本轮范围。这证明代理商、商户管理入口及其身份边界尚未实现，但不能反向证明全局 User 模型必然错误。
+
+在建设代理商端和商户端前，产品与技术必须先定版全局用户多租户规则，再据此明确登录入口、应用边界、会话/Token audience、工作空间选择、接口边界、缓存隔离策略和数据查询边界。在该决策完成前，当前可选 `tenantId` 的登录行为只能视为原型实现，不能静默固化为目标模型。

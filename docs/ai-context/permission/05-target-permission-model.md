@@ -49,7 +49,7 @@ allow = permission exists AND resource in scopes
 | ResourceOwnerTenant | 业务资源的归属租户 | 只由服务端资源事实提供，不能取请求 tenant |
 | BusinessRelationshipEvidence | Party/Relationship 上下文提供的可信关系事实 | 只能补充显式 Grant，不能生成权限 |
 | TenantMembership | User 在 Tenant 中的工作身份 | 同租户单部门；状态和版本控制会话 |
-| Department | 租户内部组织树 | 只表达组织，不表达代理关系 |
+| Department | 租户内部组织树 | 只表达组织和数据范围，不表达代理关系，不直接分配菜单或权限 |
 | Role | 租户内可复用授权集合 | 不继承；不能跨租户分配 |
 | Permission | 稳定资源动作及风险元数据 | 独立于菜单和 URL |
 | RoleGrant | Role 对某 Permission 的完整授权 | 动作、范围、限制原子绑定 |
@@ -59,6 +59,8 @@ allow = permission exists AND resource in scopes
 | Menu | 前端导航和按钮展示 | 不是后端授权真相源 |
 | Session | Sa-Token 会话摘要 | 包含 session/permission version |
 | AuthorizationDecision | 单次授权证据 | 记录 matchedGrant/reason/traceId |
+
+部门不参与菜单和权限码授权。菜单、权限码及完整数据授权始终通过角色分配；部门仅用于用户组织归属和 `DEPARTMENT` 数据范围计算。禁止合并“部门菜单/部门权限”与角色权限，避免产生隐式授权。该边界来自 `docs/permission-refactor-product-requirements.md` 的 11.1 至 11.4 节；当前 `backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V1__permission_schema.sql` 也只通过 `iam_membership_role` 和 `iam_role_menu` 建立授权关系，不存在部门到菜单或权限的关系表。
 
 同一角色可以对同一 Permission 持有多条 RoleGrant。每条 Grant 用稳定的 `grantKey` 区分一组原子范围；这不是重复数据，而是为了保留商户、市场、渠道之间的相关 tuple，避免把多个维度错误展开成笛卡尔积。
 
