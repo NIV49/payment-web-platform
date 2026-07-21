@@ -8,6 +8,9 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 SKILL = REPOSITORY / ".agents/skills/payment-modernization/SKILL.md"
 REIMAGINE = REPOSITORY / ".agents/skills/payment-modernization/references/reimagine.md"
 TRANSFORM = REPOSITORY / ".agents/skills/payment-modernization/references/transform.md"
+ARTIFACT_CONTRACTS = (
+    REPOSITORY / ".agents/skills/payment-modernization/references/artifact-contracts.md"
+)
 
 
 class PaymentModernizationGovernanceTest(unittest.TestCase):
@@ -41,6 +44,36 @@ class PaymentModernizationGovernanceTest(unittest.TestCase):
         self.assertIn("`${ENV_VAR}`", content)
         self.assertIn("secret scan", content)
         self.assertIn("python3 scripts/check_sensitive_artifacts.py", content)
+
+    def test_legacy_evidence_is_bound_to_immutable_repository_snapshots(self) -> None:
+        skill = SKILL.read_text(encoding="utf-8")
+        contracts = ARTIFACT_CONTRACTS.read_text(encoding="utf-8")
+
+        self.assertIn("multi-repository workspace", skill)
+        self.assertIn("exclude `_worktrees`", skill)
+        self.assertIn("live checkout", skill)
+        self.assertIn("`git show <sourceCommitSha>:<evidencePath>`", skill)
+        self.assertIn(
+            "whose worktree is detached and pinned to `sourceCommitSha`", skill
+        )
+        self.assertIn("Never run `git worktree add`", skill)
+        self.assertIn("disposable least-privilege sandbox", skill)
+        self.assertIn("SHA-256", skill)
+
+        for field in (
+            "sourceSnapshots:",
+            "repositoryPath:",
+            "sourceCommitSha:",
+            "evidencePaths:",
+            "targetRepositoryPath:",
+            "targetBaseSha:",
+            "nonGitEvidence:",
+            "sha256:",
+            "kind: git",
+            "kind: non-git",
+            "kind: decision",
+        ):
+            self.assertIn(field, contracts)
 
 
 if __name__ == "__main__":

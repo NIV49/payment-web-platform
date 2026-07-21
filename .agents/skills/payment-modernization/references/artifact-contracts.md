@@ -5,6 +5,18 @@
 ```yaml
 sliceId: stable-id
 path: reimagine | transform
+sourceSnapshots:
+  - sourceSnapshotId: stable-source-id
+    repositoryPath: /absolute/canonical/repository-path
+    sourceCommitSha: full-40-character-sha
+    evidencePaths: []
+    readMethod: git-show | git-archive | isolated-clone
+targetRepositoryPath: /absolute/canonical/target-repository-path
+targetBaseSha: full-40-character-sha
+nonGitEvidence:
+  - absolutePath: /absolute/human-approved-evidence-path
+    sha256: full-64-character-sha256
+    purpose: why-this-file-is-required
 actors: []
 inputs: []
 outputs: []
@@ -16,6 +28,8 @@ entryCriteria: []
 exitCriteria: []
 judgeCommands: []
 ```
+
+`repositoryPath` must identify a canonical Git repository, not its multi-repository parent or an `_worktrees` entry. Resolve Git evidence only from `sourceCommitSha` and the declared `evidencePaths`; do not use live-checkout content. Omit `nonGitEvidence` when it is not required. Every non-Git entry requires explicit human scope and a SHA-256 digest before inspection. A missing or unverifiable source object, path, digest, or `targetBaseSha` blocks the slice.
 
 ## Rule Card
 
@@ -29,11 +43,23 @@ when: []
 then: []
 counterexamples: []
 evidence:
-  - source: path-or-decision
+  - kind: git
+    sourceSnapshotId: stable-source-id
+    evidencePath: repository-relative-path
+    location: line-or-section
+  - kind: non-git
+    source: /absolute/human-approved-evidence-path
+    sha256: full-64-character-sha256
+    location: line-or-section
+  - kind: decision
+    source: docs/adr/NNNN-decision.md
+    targetBaseSha: full-40-character-sha
     location: line-or-section
 confidence: high | medium
 judgeTests: []
 ```
+
+Use only the fields for the selected evidence `kind`; do not represent missing identities with placeholder values. A `git` entry resolves through the matching Capability Slice `sourceSnapshotId`. A `decision` entry resolves from `targetBaseSha`.
 
 Only approved rules can produce an automatic PASS.
 
@@ -72,7 +98,8 @@ limitations: []
 Maintain these edges:
 
 ```text
-legacy evidence -> rule ID
+sourceSnapshotId + repositoryPath + sourceCommitSha + evidencePath -> rule ID
+human-approved non-Git evidence path + SHA-256 -> rule ID
 decision/ADR -> rule ID
 rule ID -> capability slice
 rule ID -> target code

@@ -7,22 +7,31 @@ description: "Govern payment-platform modernization with Judge-first gates, capa
 
 Modernize the payment platform without treating legacy behavior as truth. Keep business decisions in project docs, deterministic verdicts in Judge tests and CI, and orchestration state in event loops.
 
-## Repository Pair
+## Repository Baseline
 
-Use these fixed repositories unless a human explicitly changes the project baseline:
+Use these fixed locations unless a human explicitly changes the project baseline:
 
-- Legacy evidence source: `/Users/mac/Documents/work/backend`
+- Legacy evidence workspace (multi-repository workspace): `/Users/mac/Documents/work/backend`
 - Target implementation repository: `/Users/mac/Documents/demo/payment-web-platform`
 
-Treat the legacy repository as read-only evidence. Never edit, format, commit, reset, or generate artifacts inside it. Write specifications, Rulebook entries, Judge assets, implementation, queues, and traceability only in the target repository or its dedicated Git worktrees.
+The legacy workspace is a container, not one Git repository. Its canonical source repositories are direct child directories that resolve beneath the workspace root and own a `.git` entry. Always exclude `_worktrees`, nested worktrees, and non-Git files at the workspace root unless a human explicitly adds a specific source to the slice baseline.
 
-Before starting a slice, record an immutable legacy source commit for every source repository involved and an immutable target base commit. Do not silently replace either path with the current working directory.
+Treat every canonical source repository as read-only evidence. Never edit, format, commit, reset, or generate artifacts inside the legacy workspace. Write specifications, Rulebook entries, Judge assets, implementation, queues, and traceability only in the target repository or its dedicated Git worktrees.
+
+Before starting a slice:
+
+1. Record the canonical repository path, full `sourceCommitSha`, and exact `evidencePaths` for every source repository involved, plus the target repository path and full `targetBaseSha`.
+2. Read tracked evidence with `git show <sourceCommitSha>:<evidencePath>`. If a filesystem is required, materialize that commit outside the legacy workspace with `git archive`, or use an isolated clone whose worktree is detached and pinned to `sourceCommitSha`. Never run `git worktree add` against a legacy repository because it mutates that repository's Git metadata. Keep the isolated checkout clean and verify its HEAD before and after evidence collection.
+3. Never read frozen evidence from a live checkout. Ignore its tracked modifications and untracked files. Accept non-Git evidence only when a human explicitly scopes the exact file and its SHA-256 digest is recorded before inspection.
+4. Store this source snapshot manifest in the Capability Slice contract described in [references/artifact-contracts.md](references/artifact-contracts.md). Do not silently replace a baseline path or SHA with the current working directory or HEAD.
+
+Do not execute a legacy build, test, hook, or script unless a human explicitly approves it and it runs in a disposable least-privilege sandbox without credentials or access to target write paths. Static evidence collection is the default.
 
 ## Start Here
 
 1. Read `/Users/mac/Documents/demo/payment-web-platform/AGENTS.md` and its mandatory context routes.
 2. Read the relevant approved requirements, ADRs, contracts, known deviations, and domain context under `/Users/mac/Documents/demo/payment-web-platform/docs/`.
-3. Identify the immutable source commit, target commit, Rulebook version, and capability slice.
+3. Identify the immutable source snapshot manifest, target base commit, Rulebook version, and capability slice.
 4. Choose exactly one path:
    - **Reimagine**: rebuild a capability from approved intent when the target model or architecture deliberately differs from legacy.
    - **Transform**: replace one bounded vertical slice when specified observable behavior must remain compatible.
