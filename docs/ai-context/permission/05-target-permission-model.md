@@ -21,6 +21,7 @@ Allow(request)
         resource.ownerTenant == subject.authorizationWorkspaceTenant
         or (
           grant.crossTenantMode == RELATED_PARTY_READ
+          and grant.permission.action in {READ, VIEW}
           and grant has explicit CUSTOMER or MERCHANT scope
           and trusted RelationshipProvider confirms the relationship
         )
@@ -61,6 +62,18 @@ allow = permission exists AND resource in scopes
 
 同一角色可以对同一 Permission 持有多条 RoleGrant。每条 Grant 用稳定的 `grantKey` 区分一组原子范围；这不是重复数据，而是为了保留商户、市场、渠道之间的相关 tuple，避免把多个维度错误展开成笛卡尔积。
 
+会话有效性不是只比较 Membership 版本。每次从会话恢复主体时必须以同一 tenant + membership + user 组合核对：
+
+```text
+Tenant.status = ACTIVE
+AND User.status = ACTIVE
+AND Credential.status = ACTIVE
+AND Membership.status = ACTIVE
+AND Membership.sessionVersion = session.sessionVersion
+```
+
+任一条件失败都统一失效会话并返回 401，不能退化成 500，也不能让其他租户 Membership 的存在替代当前组合。租户内 Membership 更新无权修改全局 User/Credential；全局身份禁用属于独立管理用例并应撤销该 User 的全部会话。
+
 ## 3. 数据范围维度
 
 | 维度 | 示例 | 数据来源 |
@@ -100,8 +113,22 @@ RELATION_AT_EVENT
 - `RELATION_AT_EVENT` 用于历史订单，必须使用订单快照，不根据当前关系回算；
 - `SPECIFIED` 读取 GrantTarget；
 - `TENANT_ALL` 只描述授权工作区内的范围，不能单独放开其他资源归属租户；
-- 跨资源归属租户还必须由 Permission 的 `RELATED_PARTY_READ` 元数据和可信关系证据共同放行；
+- 跨资源归属租户还必须由 Permission 的 `RELATED_PARTY_READ` 元数据、受控 `READ/VIEW` action 和可信关系证据共同放行；未知或写 action 默认拒绝；
 - `FUND` 权限在领域模型和数据库约束中固定为 `SAME_TENANT_ONLY`。
+
+`DimensionScope` 的允许矩阵已经定版；未列出的组合一律 fail closed：
+
+| Dimension | Allowed ScopeMode |
+| --- | --- |
+| TENANT | `TENANT_ALL` |
+| OWNER | `SELF` |
+| DEPARTMENT | `SELF`、`DEPARTMENT`、`DEPARTMENT_AND_CHILDREN`、`SPECIFIED` |
+| CUSTOMER | `ASSIGNED`、`SPECIFIED` |
+| MERCHANT | `ASSIGNED`、`SPECIFIED`、`RELATION_CURRENT`、`RELATION_AT_EVENT` |
+| MARKET | `SPECIFIED` |
+| CHANNEL | `SPECIFIED` |
+
+Core 构造 `DimensionScope` 时执行该矩阵，V10 在 `iam_grant_dimension` 使用同一数据库 CHECK。历史非法行会阻断 V10，禁止迁移代码猜测改成哪个权限。
 
 ## 5. 多角色合并语义
 
@@ -240,7 +267,9 @@ iam:session:{membershipId}:v{sessionVersion}
 -> 删除旧缓存/通知节点
 ```
 
-GrantSnapshot 同时携带当前成员全部角色 Grant 的最近 `valid_from/valid_until` 边界；到达该边界时必须忽略同版本缓存并重新加载，不能仅依赖固定 TTL。
+GrantSnapshot 同时携带当前成员全部角色 Grant 的最近 `valid_from/valid_until` 边界。只要该 temporal boundary 存在，快照就不得进入或命中 Redis，每次授权都必须以数据库 `statement_timestamp()` 重新加载；不能用应用节点 Clock 比较数据库绝对时间。无时间边界的 cache-hit 在返回前再次复核 permissionVersion，复核前已提交的撤权必须使旧命中失效。
+
+`requiresApproval=true` 的 Grant 在没有服务端验证的 workflowId、审批状态/版本、资源指纹、金额币种、审批人和过期时间前始终 fail closed。客户端传来的 `initiatorMembershipId` 不是审批证据，也不能通过换一个 ID 绕过职责分离。数据范围规划同样排除这类未获可信审批证据的 Grant。
 
 资金接口必须校验当前数据库/强一致版本或使用极短版本缓存；普通读接口可以接受受控的秒级版本缓存。
 

@@ -21,25 +21,33 @@ public final class AuthenticationService {
         this.limiter = Objects.requireNonNull(limiter, "limiter");
         this.sessions = Objects.requireNonNull(sessions, "sessions");
         this.dummyPasswordHash = Objects.requireNonNull(dummyPasswordHash, "dummyPasswordHash");
+        if (!LoginCredentialPolicy.isLoginCapableHash(dummyPasswordHash)) {
+            throw new IllegalArgumentException("Dummy password hash must be a supported BCrypt credential");
+        }
     }
 
     public LoginSession login(LoginCommand command) {
         Objects.requireNonNull(command, "command");
         String username = normalizeUsername(command.username());
-        String bucketKey = command.clientKey() + ":" + username;
-        limiter.requireAllowed(bucketKey);
+        limiter.acquire(command.clientKey(), username);
 
         Optional<CredentialAccount> found = credentials.findActiveByUsername(username, command.tenantId());
-        String encodedPassword = found.map(CredentialAccount::passwordHash).orElse(dummyPasswordHash);
-        boolean passwordMatches = passwordVerifier.matches(command.password(), encodedPassword);
-        if (found.isEmpty() || !passwordMatches) {
-            limiter.recordFailure(bucketKey);
+        Optional<CredentialAccount> loginCapable = found.filter(account ->
+            LoginCredentialPolicy.isLoginCapableHash(account.passwordHash()));
+        String encodedPassword = loginCapable.map(CredentialAccount::passwordHash).orElse(dummyPasswordHash);
+        boolean passwordMatches;
+        try {
+            passwordMatches = passwordVerifier.matches(command.password(), encodedPassword);
+        } catch (IllegalArgumentException exception) {
+            passwordMatches = false;
+        }
+        if (loginCapable.isEmpty() || !passwordMatches) {
             throw new AuthenticationFailedException();
         }
 
-        limiter.clear(bucketKey);
-        credentials.markLoginSucceeded(found.get().userId());
-        return sessions.login(found.get());
+        limiter.recordSuccess(command.clientKey(), username);
+        credentials.markLoginSucceeded(loginCapable.get().userId());
+        return sessions.login(loginCapable.get());
     }
 
     public void logout() {
@@ -109,11 +117,11 @@ public final class AuthenticationService {
     }
 
     public interface LoginAttemptLimiter {
-        void requireAllowed(String bucketKey);
+        /** Atomically reserves capacity in both the client and client/username failure buckets. */
+        void acquire(String clientKey, String normalizedUsername);
 
-        void recordFailure(String bucketKey);
-
-        void clear(String bucketKey);
+        /** Releases the successful attempt and resets this client/username's prior failures. */
+        void recordSuccess(String clientKey, String normalizedUsername);
     }
 
     @FunctionalInterface

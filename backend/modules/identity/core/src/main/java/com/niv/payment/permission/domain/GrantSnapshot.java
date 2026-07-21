@@ -3,6 +3,13 @@ package com.niv.payment.permission.domain;
 import java.time.Instant;
 import java.util.List;
 
+/**
+ * A permission snapshot evaluated by the grant repository.
+ *
+ * <p>{@code refreshAfter} records a temporal boundary observed by PostgreSQL. A non-null value is
+ * a cache-exclusion marker, not an application-clock deadline: callers must reload from the
+ * repository and must never compare it with an application-node clock.</p>
+ */
 public record GrantSnapshot(
     long membershipId,
     long tenantId,
@@ -22,9 +29,5 @@ public record GrantSnapshot(
                          long permissionVersion,
                          List<PermissionGrant> grants) {
         this(membershipId, tenantId, permissionVersion, grants, null);
-    }
-
-    public boolean isFreshAt(Instant instant) {
-        return refreshAfter == null || instant.isBefore(refreshAfter);
     }
 }

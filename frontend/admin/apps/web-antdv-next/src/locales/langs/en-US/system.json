@@ -13,6 +13,14 @@
     "id": "User ID",
     "dept": "Department",
     "status": "Status",
+    "identityStatus": "Identity Status",
+    "membershipStatus": "Workspace Status",
+    "identityState": {
+      "pendingActivation": "Pending activation",
+      "active": "Active",
+      "disabled": "Disabled",
+      "locked": "Locked"
+    },
     "remark": "Remark",
     "createTime": "Creation Time",
     "operation": "Operation",
@@ -85,6 +93,8 @@
     "remark": "Remark",
     "createTime": "Creation Time",
     "operation": "Operation",
-    "visibleMenus": "Visible menus"
+    "visibleMenus": "Visible menus",
+    "navigationOnlyWarningTitle": "This only configures navigation visibility",
+    "navigationOnlyWarningDescription": "Selecting menus only controls navigation and page visibility; it does not grant API permissions. Until the RoleGrant management loop is complete, a new role is not a production-ready authorization state."
   }
 }

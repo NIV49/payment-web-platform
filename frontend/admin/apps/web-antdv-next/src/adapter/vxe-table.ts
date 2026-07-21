@@ -108,11 +108,13 @@ setupVbenVxeTable({
       renderTableDefault({ attrs, props }, { column, row }) {
         const { hasAccessByCodes } = useAccess();
         const loadingKey = `__loading_${column.field}`;
-        const authCodes = attrs?.auth
-          ? Array.isArray(attrs.auth)
-            ? attrs.auth
-            : [attrs.auth]
-          : [];
+        const auth = attrs?.auth;
+        let authCodes: string[] = [];
+        if (Array.isArray(auth)) {
+          authCodes = auth;
+        } else if (auth) {
+          authCodes = [auth];
+        }
         const finallyProps = {
           checkedChildren: $t('common.enabled'),
           checkedValue: 1,

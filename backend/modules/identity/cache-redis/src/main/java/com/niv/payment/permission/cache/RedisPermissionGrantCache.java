@@ -26,6 +26,7 @@ public final class RedisPermissionGrantCache implements PermissionGrantCache {
         PermissionCacheKey key = new PermissionCacheKey(tenantId, membershipId, permissionVersion);
         return redis.get(key.redisKey())
             .map(codec::decode)
+            .filter(snapshot -> snapshot.refreshAfter() == null)
             .filter(snapshot -> snapshot.tenantId() == key.tenantId()
                 && snapshot.membershipId() == key.membershipId()
                 && snapshot.permissionVersion() == key.permissionVersion());
@@ -33,6 +34,9 @@ public final class RedisPermissionGrantCache implements PermissionGrantCache {
 
     @Override
     public void store(GrantSnapshot snapshot) {
+        if (snapshot.refreshAfter() != null) {
+            return;
+        }
         PermissionCacheKey key = new PermissionCacheKey(
             snapshot.tenantId(), snapshot.membershipId(), snapshot.permissionVersion());
         redis.set(key.redisKey(), codec.encode(snapshot), ttl);

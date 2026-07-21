@@ -13,13 +13,14 @@ spring:
       password: ${PAYMENT_REDIS_PASSWORD:}
   flyway:
     enabled: ${PAYMENT_FLYWAY_ENABLED:true}
-    baseline-on-migrate: true
-    baseline-version: 1
 
 payment:
   time-zone: ${PAYMENT_TIME_ZONE:Asia/Shanghai}
   # Public local fixture only. The initializer bean does not exist outside this profile.
   bootstrap-password: ${PAYMENT_BOOTSTRAP_PASSWORD:Admin@123456}
   security:
-    cookie-secure: ${PAYMENT_COOKIE_SECURE:false}
     allowed-origins: ${PAYMENT_ALLOWED_ORIGINS:http://localhost:5999,http://127.0.0.1:5999}
+
+sa-token:
+  cookie:
+    secure: ${PAYMENT_COOKIE_SECURE:false}

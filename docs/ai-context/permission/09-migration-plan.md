@@ -46,7 +46,7 @@
 - 菜单展示绑定；
 - 权限缓存和事务后失效。
 
-验证：多角色动作/范围不拼接、最后管理员保护、自提权拒绝。
+验证：多角色动作/范围不拼接、RELATED_PARTY_READ 不能包装写 action、非法 BCrypt hash 不能充当备用管理员、最后管理员保护、自提权拒绝。
 
 ## 5. 阶段 3：业务范围 Provider
 
@@ -139,13 +139,17 @@ resourceFingerprint
 
 ## 11. 当前原型的定位
 
-`backend` 当前用于验证：
+`backend/applications/admin-api` 已是可启动的本地管理应用，当前已经验证：
 
 - RoleGrant 原子授权；
 - 多维范围；
 - 多角色不拼接；
 - 版本化缓存；
-- Sa-Token 会话桥接边界；
-- DataScopePlan 保留 Grant 元组。
+- Sa-Token 会话对 Tenant/User/Credential/Membership 四态和版本的 fail-closed 校验；
+- 普通角色分配的委派上限、自提权拒绝和基于统一 BCrypt 可登录规则的最后管理员保护；
+- Admin HTTP PEP 接入完整授权服务；
+- Java 25 / Spring Boot 4.1 / jOOQ / PostgreSQL 18 构建与生成门禁；
+- 生产 Flyway 与 local fixture 隔离；
+- DataScopePlan 保留 Grant 元组并排除无可信审批证据的 Grant。
 
-它不是完整应用，不包含生产数据库连接、Controller、MFA、审批工作流和真实订单 Mapper。
+它仍不是生产身份或支付权限系统：外部 IdP、MFA 时效、可信审批工作流、RoleGrant 管理闭环、关系 Provider、真实订单 Mapper、Outbox relay、生产 provisioning/observability 和资金业务规格尚未完成。任何真实资金写路径仍被发布门禁阻断。

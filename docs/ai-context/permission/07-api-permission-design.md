@@ -15,11 +15,10 @@
 
 Sa-Token 负责：
 
-- 登录态和 Token 生命周期；
+- 当前原型的 Cookie 登录态和 Session 生命周期；
 - Session 定位；
-- 普通权限码注解；
 - 踢下线和会话撤销；
-- step-up 状态容器。
+- 保存经过服务端验证的 step-up 摘要（当前只有布尔原型，不能用于资金生产）。
 
 业务 AuthorizationService 负责：
 
@@ -30,6 +29,8 @@ Sa-Token 负责：
 - 决策审计。
 
 不能把 `@SaCheckPermission("payout:approve")` 当成完整资金授权。
+
+长期身份真相源由外部 OIDC IdP 承担，Sa-Token 只保留为应用 Session adapter；两者不能并列成为账号、MFA 和凭证状态的双真相源。接入 IdP 前，本地 credential 仅是开发原型和未来受控 break-glass 的候选，不是默认生产方案。
 
 ## 3. 目标接口
 
@@ -79,8 +80,9 @@ PUT /api/v1/iam/memberships/{membershipId}/roles
 - 目标 Membership 属于当前租户；
 - 所有 Role 属于当前租户且有效；
 - 操作者有权授予每个 Role；
-- 不能删除最后一个最高 IAM 管理员；
+- 不能删除最后一个可登录的最高 IAM 管理员；备用管理员必须 User/Membership/Credential/Role 全部 ACTIVE，且凭证符合统一 BCrypt 格式与 cost 10..14，非空但非法的 hash 不计数；
 - 不能普通流程自提权；
+- 操作者只能委派自己当前拥有且允许普通分配的角色能力；禁用的 system role 不产生超级管理员绕过；
 - 版本冲突返回 `IAM_VERSION_CONFLICT`；
 - 同事务更新关系、版本、审计和 Outbox。
 
@@ -110,6 +112,8 @@ PUT /api/v1/iam/roles/{roleId}/grants
 权限：`role:grant:update`。FUND Grant 还要求安全管理员或批准流程。
 
 `riskLevel`、`requiresStepUp`、`requiresApproval` 和 `requiredDimensions` 不属于请求字段，必须从服务端 Permission Catalog 读取并校验。`grantKey` 只用于角色内的幂等定位；同一权限的多组相关范围必须使用不同 key，不能把商户和市场 target 扁平合并。
+
+`requiresApproval=true` 必须绑定由审批工作流服务端签发并重新读取验证的证据。客户端提交的 initiator/approver ID 不可信；在 workflowId、状态/版本、资源指纹、金额币种、审批人、有效期和防重放规则落地前，此类 Grant 一律拒绝，不能回退成普通授权。
 
 ### 3.4 授权预检
 

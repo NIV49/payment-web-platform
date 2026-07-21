@@ -4,6 +4,7 @@ import type { SystemDeptApi, SystemUserApi } from '#/api';
 
 import { onMounted, ref, watch } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { Page, Tree, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -17,15 +18,21 @@ import {
   PERMISSION_CODES,
   updateUserStatus,
 } from '#/api';
+import { isOptimisticLockConflict } from '#/api/error-contract';
 import { $t } from '#/locales';
 
 import { useColumns, useGridFormSchema } from './data';
 import Detail from './modules/detail.vue';
 import Form from './modules/form.vue';
+import {
+  hasAllAccessCodes,
+  USER_EDIT_PERMISSION_CODES,
+} from './permission-contract';
 
 const deptList = ref<SystemDeptApi.SystemDept[]>([]);
 const inputSearchValue = ref('');
 const selectedDeptId = ref<string>('');
+const { hasAccessByCodes } = useAccess();
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -118,7 +125,8 @@ async function onStatusChange(
     });
     row.userVersion = result.userVersion;
     return true;
-  } catch {
+  } catch (error) {
+    if (isOptimisticLockConflict(error)) onRefresh();
     return false;
   }
 }
@@ -137,7 +145,7 @@ function onDelete(row: SystemUserApi.SystemUser) {
     duration: 0,
     key: 'action_process_msg',
   });
-  deleteUser(row.id)
+  deleteUser(row.id, row.userVersion)
     .then(() => {
       message.success({
         content: $t('ui.actionMessage.deleteSuccess', [row.name]),
@@ -145,8 +153,9 @@ function onDelete(row: SystemUserApi.SystemUser) {
       });
       onRefresh();
     })
-    .catch(() => {
+    .catch((error) => {
       hideLoading();
+      if (isOptimisticLockConflict(error)) onRefresh();
     });
 }
 
@@ -156,6 +165,10 @@ function onRefresh() {
 
 function onCreate() {
   formDrawerApi.setData({}).open();
+}
+
+function canEditUser() {
+  return hasAllAccessCodes(USER_EDIT_PERMISSION_CODES, hasAccessByCodes);
 }
 
 async function loadDeptList() {
@@ -235,6 +248,7 @@ watch(inputSearchValue, (value) => {
                   text: $t('common.edit'),
                   icon: 'lucide:edit',
                   auth: PERMISSION_CODES.userUpdate,
+                  ifShow: canEditUser,
                   onClick: () => onEdit(row),
                 },
               ]"

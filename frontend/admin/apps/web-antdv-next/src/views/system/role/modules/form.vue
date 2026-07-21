@@ -1,8 +1,6 @@
 <script lang="ts" setup>
 import type { DataNode } from 'antdv-next/dist/tree';
 
-import type { Recordable } from '@vben/types';
-
 import type { SystemRoleApi } from '#/api/system/role';
 
 import { computed, nextTick, ref } from 'vue';
@@ -10,14 +8,16 @@ import { computed, nextTick, ref } from 'vue';
 import { Tree, useVbenDrawer } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 
-import { Spin } from 'antdv-next';
+import { Alert, Spin } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
+import { isOptimisticLockConflict } from '#/api/error-contract';
 import { getMenuList } from '#/api/system/menu';
 import { createRole, updateRole } from '#/api/system/role';
 import { $t } from '#/locales';
 
 import { useFormSchema } from '../data';
+import { filterNavigableMenuTree } from '../menu-tree';
 
 const emits = defineEmits(['success']);
 
@@ -38,13 +38,31 @@ const [Drawer, drawerApi] = useVbenDrawer({
     if (!valid) return;
     const values = await formApi.getValues<SystemRoleApi.RoleSaveParams>();
     drawerApi.lock();
-    (id.value ? updateRole(id.value, values) : createRole(values))
+    const currentRole = formData.value;
+    let request;
+    if (id.value) {
+      if (!currentRole) {
+        drawerApi.unlock();
+        return;
+      }
+      request = updateRole(id.value, {
+        ...values,
+        expectedVersion: currentRole.rowVersion,
+      });
+    } else {
+      request = createRole(values);
+    }
+    request
       .then(() => {
         emits('success');
         drawerApi.close();
       })
-      .catch(() => {
+      .catch((error) => {
         drawerApi.unlock();
+        if (isOptimisticLockConflict(error)) {
+          emits('success');
+          drawerApi.close();
+        }
       });
   },
 
@@ -79,7 +97,7 @@ async function loadMenuOptions() {
   loadingMenuOptions.value = true;
   try {
     const res = await getMenuList();
-    menuOptions.value = res as unknown as DataNode[];
+    menuOptions.value = filterNavigableMenuTree(res) as unknown as DataNode[];
   } finally {
     loadingMenuOptions.value = false;
   }
@@ -90,18 +108,19 @@ const getDrawerTitle = computed(() => {
     ? $t('common.edit', $t('system.role.name'))
     : $t('common.create', $t('system.role.name'));
 });
-
-function getNodeClass(node: Recordable<any>) {
-  const classes: string[] = [];
-  if (node.value?.type === 'button') {
-    classes.push('inline-flex');
-  }
-
-  return classes.join(' ');
-}
 </script>
 <template>
   <Drawer :title="getDrawerTitle">
+    <Alert
+      class="mb-4"
+      show-icon
+      :title="$t('system.role.navigationOnlyWarningTitle')"
+      type="warning"
+    >
+      <template #description>
+        {{ $t('system.role.navigationOnlyWarningDescription') }}
+      </template>
+    </Alert>
     <Form>
       <template #menuIds="slotProps">
         <Spin :spinning="loadingMenuOptions" :classes="{ root: 'w-full' }">
@@ -110,7 +129,6 @@ function getNodeClass(node: Recordable<any>) {
             multiple
             bordered
             :default-expanded-level="2"
-            :get-node-class="getNodeClass"
             v-bind="slotProps"
             value-field="id"
             label-field="meta.title"

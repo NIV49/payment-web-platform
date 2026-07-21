@@ -11,12 +11,21 @@ export namespace SystemRoleApi {
     menuIds: string[];
     name: string;
     remark?: string;
+    rowVersion: number;
     status: 0 | 1;
   }
 
-  export type RoleSaveParams = Omit<SystemRole, 'createTime' | 'id'>;
+  export type RoleSaveParams = Omit<
+    SystemRole,
+    'createTime' | 'id' | 'rowVersion'
+  >;
+
+  export type RoleUpdateParams = RoleSaveParams & {
+    expectedVersion: number;
+  };
 
   export interface RoleStatusParams {
+    expectedVersion: number;
     status: 0 | 1;
   }
 }
@@ -32,7 +41,7 @@ async function createRole(data: SystemRoleApi.RoleSaveParams) {
   return requestClient.post('/system/role', data);
 }
 
-async function updateRole(id: string, data: SystemRoleApi.RoleSaveParams) {
+async function updateRole(id: string, data: SystemRoleApi.RoleUpdateParams) {
   return requestClient.put(`/system/role/${id}`, data);
 }
 
@@ -46,8 +55,10 @@ async function updateRoleStatus(
   });
 }
 
-async function deleteRole(id: string) {
-  return requestClient.delete(`/system/role/${id}`);
+async function deleteRole(id: string, expectedVersion: number) {
+  return requestClient.delete(`/system/role/${id}`, {
+    params: { expectedVersion },
+  });
 }
 
 export { createRole, deleteRole, getRoleList, updateRole, updateRoleStatus };

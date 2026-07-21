@@ -50,8 +50,8 @@ class DefaultAuthorizationServiceTest {
             specified(ScopeDimension.MERCHANT, "M1"),
             specified(ScopeDimension.MARKET, "PK"));
         PermissionGrant broadReport = new PermissionGrant(2L, 20L, PermissionCode.of("report:view"),
-            RiskLevel.NORMAL, Set.of(ScopeDimension.MERCHANT),
-            List.of(new DimensionScope(ScopeDimension.MERCHANT, ScopeMode.TENANT_ALL, Set.of())),
+            RiskLevel.NORMAL, Set.of(ScopeDimension.TENANT),
+            List.of(new DimensionScope(ScopeDimension.TENANT, ScopeMode.TENANT_ALL, Set.of())),
             false, false, true);
 
         var service = serviceWith(narrowPayout, broadReport);
@@ -156,6 +156,20 @@ class DefaultAuthorizationServiceTest {
 
         assertTrue(decision.allowed());
         assertEquals(1L, decision.matchedGrantId());
+    }
+
+    @Test
+    void relatedPartyReadMetadataCannotRepresentCrossTenantMutationActions() {
+        for (PermissionCode mutation : List.of(
+            PermissionCode.of("merchant:update"),
+            PermissionCode.of("order:update"))) {
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
+                new PermissionGrant(1L, 10L, mutation, RiskLevel.NORMAL,
+                    CrossTenantMode.RELATED_PARTY_READ, Set.of(ScopeDimension.MERCHANT),
+                    List.of(specified(ScopeDimension.MERCHANT, "M1")),
+                    false, false, true));
+            assertTrue(error.getMessage().contains("read-only"), mutation.toString());
+        }
     }
 
     @Test

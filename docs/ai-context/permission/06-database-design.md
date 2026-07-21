@@ -7,7 +7,7 @@
 ```text
 backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V1__permission_schema.sql
 ...
-backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V7__separate_permission_outbox_relay_state.sql
+backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V10__enforce_grant_dimension_mode_compatibility.sql
 ```
 
 Verdict：**有条件通过作为新库基线，不允许直接在生产执行。**
@@ -54,7 +54,7 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 - Role 与 Permission 不能通过菜单间接推导；
 - `risk_level` 以 Permission 为真相源，Grant 不允许降低风险；
 - FUND Permission 必须 `requires_step_up=true` 且 `cross_tenant_mode=SAME_TENANT_ONLY`；
-- `RELATED_PARTY_READ` 是显式 opt-in，仍需可信关系 Provider 和商户/客户范围；
+- `RELATED_PARTY_READ` 是显式 opt-in，只能搭配 `read/view` action，且仍需可信关系 Provider 和商户/客户范围；V12 CHECK 同时约束历史行和后续直接 SQL；
 - 角色、Grant 和 Membership 必须属于同一授权工作区。
 - MembershipRole、RoleGrant、RoleMenu、部门父子和菜单父子均使用带 `tenant_id` 的组合外键，数据库拒绝跨租户关系写入。
 
@@ -65,7 +65,29 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 - `SELF/TENANT_ALL/DEPARTMENT` 等模式不允许带任意 Target；
 - Target 不使用前端自由文本直接写入，必须由对应业务 Provider 校验存在和归属。
 
-### 3.4 Outbox
+Dimension/mode 允许矩阵：
+
+| dimension_code | allowed scope_mode |
+| --- | --- |
+| TENANT | `TENANT_ALL` |
+| OWNER | `SELF` |
+| DEPARTMENT | `SELF`、`DEPARTMENT`、`DEPARTMENT_AND_CHILDREN`、`SPECIFIED` |
+| CUSTOMER | `ASSIGNED`、`SPECIFIED` |
+| MERCHANT | `ASSIGNED`、`SPECIFIED`、`RELATION_CURRENT`、`RELATION_AT_EVENT` |
+| MARKET | `SPECIFIED` |
+| CHANNEL | `SPECIFIED` |
+
+Core `DimensionScope` 与 V10 `ck_iam_grant_dimension_mode_compatibility` 同时执行该矩阵，其他组合全部拒绝。V10 先增加 `NOT VALID` CHECK 再验证既有行；发现历史非法组合时迁移失败，不静默收窄、扩大或转换授权。
+
+### 3.4 Menu
+
+- V9 在 tenant 内对 `lower(coalesce(route_name, menu_name))` 建唯一索引，route name 大小写不敏感；
+- V9 对非空 `route_path` 建 partial unique index，BUTTON 等空 path 不参与；
+- 创建索引前显式扫描历史重复，发现冲突直接拒绝迁移，不猜测删除或合并；
+- 仓储在 tenant 锁事务中按相同语义预检，数据库唯一索引处理最终并发竞态；
+- ACTIVE 菜单必须挂 ACTIVE 直接父节点；禁用或逻辑删除祖先前检查完整后代树，存在 ACTIVE 深层后代时拒绝。
+
+### 3.5 Outbox
 
 - `iam_permission_change_outbox` 是 append-only 事件事实，数据库 trigger 拒绝 UPDATE/DELETE；
 - 事件包含 UUID eventId、aggregateVersion、schemaVersion、partitionKey 和 traceId；
@@ -85,6 +107,8 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 | role_grant `(role_id,permission_id)` | 按角色和权限加载全部 tuple | 额外写索引 |
 | grant_dimension `(grant_id,dimension_code)` unique | 组装授权范围 | 低写高读合适 |
 | grant_target `(dimension_id,target_ref)` unique | SPECIFIED 目标匹配 | 大范围角色可能产生较多行 |
+| menu `(tenant_id,lower(effective route name))` unique | Vben route name 稳定解析 | 改名增加唯一性检查，历史重复需先人工分类 |
+| menu `(tenant_id,route_path) WHERE route_path IS NOT NULL` unique | tenant 内路由唯一定位 | 非空 path 写入增加唯一性检查 |
 | audit `(tenant_id,occurred_at desc)` | 租户审计时间线 | 审计高写成本，需要分区门槛 |
 | audit `(trace_id)` | 事故追踪 | 额外写索引 |
 | outbox `(event_id)` unique | 消息幂等 | 每事件一次唯一性检查 |
@@ -116,6 +140,8 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 8. 影子比对新旧授权结果；
 9. 强制重新登录后灰度。
 
+升级既有库时，V9/V10 都采取拒绝式迁移：重复菜单路由和非法 dimension/mode 组合必须先由业务负责人分类并通过新的前向修复迁移处理，不能在约束迁移里自动选边或改权。
+
 ## 7. 回滚
 
 - 新系统未承接流量前可以删除新库重建；
@@ -133,6 +159,7 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 - FUND 权限允许通配绕过；
 - 角色全量覆盖没有版本控制；
 - 唯一索引前未检查迁移重复数据；
+- dimension/mode 不在批准矩阵，或迁移试图自动猜测修复历史授权；
 - 审计记录包含密码、Token、MFA Secret 或完整敏感数据；
 - 数据范围查询可以丢失 tenant predicate；
 - 没有迁移验证、回滚和权限差异报表。

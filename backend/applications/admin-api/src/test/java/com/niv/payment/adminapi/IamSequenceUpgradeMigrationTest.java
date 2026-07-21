@@ -39,13 +39,19 @@ class IamSequenceUpgradeMigrationTest {
                 """.formatted(existingUserId));
         }
 
-        migrateTo(null);
+        migrateTo("7");
 
         try (Connection connection = connection(); Statement statement = connection.createStatement();
              ResultSet result = statement.executeQuery("SELECT nextval('iam_id_seq')")) {
             result.next();
             assertThat(result.getLong(1)).isGreaterThan(existingUserId);
         }
+
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("DELETE FROM iam_user WHERE id = " + existingUserId);
+        }
+
+        migrateTo(null);
 
         try (Connection connection = connection(); Statement statement = connection.createStatement();
              ResultSet requiredVersions = statement.executeQuery("""
@@ -59,12 +65,22 @@ class IamSequenceUpgradeMigrationTest {
         }
 
         try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            try (ResultSet tenants = statement.executeQuery("SELECT count(*) FROM iam_tenant")) {
+                tenants.next();
+                assertThat(tenants.getInt(1)).isZero();
+            }
+            statement.executeUpdate("""
+                INSERT INTO iam_tenant(id, tenant_code, tenant_name, tenant_type, status)
+                VALUES(nextval('iam_id_seq'), 'migration-test', 'Migration Test', 'PLATFORM', 'ACTIVE')
+                """);
             statement.executeUpdate("""
                 INSERT INTO iam_permission_change_outbox(
                     id, tenant_id, aggregate_type, aggregate_ref, event_type, payload,
                     aggregate_version, schema_version, partition_key, trace_id
                 )
-                VALUES(nextval('iam_id_seq'), 1, 'MEMBERSHIP', '1000', 'PermissionChanged',
+                VALUES(nextval('iam_id_seq'),
+                       (SELECT id FROM iam_tenant WHERE tenant_code='migration-test'),
+                       'MEMBERSHIP', '1000', 'PermissionChanged',
                        '{}'::jsonb, 1, 1, '1000', 'migration-test-trace')
                 """);
             try (ResultSet relay = statement.executeQuery("""

@@ -1,6 +1,6 @@
-import { baseRequestClient, requestClient } from '#/api/request';
-
 import type { COOKIE_SESSION_MARKER } from '../session';
+
+import { baseRequestClient, requestClient } from '#/api/request';
 
 export namespace AuthApi {
   /** 登录接口参数 */

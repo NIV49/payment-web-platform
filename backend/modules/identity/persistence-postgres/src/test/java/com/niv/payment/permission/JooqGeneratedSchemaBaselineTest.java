@@ -50,4 +50,12 @@ class JooqGeneratedSchemaBaselineTest {
         assertTrue(tables.stream().allMatch(name -> name.startsWith("iam_")));
         assertEquals("iam_id_seq", IAM_ID_SEQ.getName());
     }
+
+    @Test
+    void generatedModelCarriesTheAuthorizationAndCredentialSafetyChecks() {
+        assertTrue(IAM_PERMISSION.getChecks().stream().anyMatch(check ->
+            check.getName().equals("ck_iam_permission_related_party_read_action")));
+        assertTrue(IAM_AUTHENTICATION_CREDENTIAL.getChecks().stream().anyMatch(check ->
+            check.getName().equals("ck_iam_authentication_bcrypt_hash")));
+    }
 }

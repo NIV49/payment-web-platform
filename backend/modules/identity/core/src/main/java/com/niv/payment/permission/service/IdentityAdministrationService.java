@@ -1,5 +1,6 @@
 package com.niv.payment.permission.service;
 
+import com.niv.payment.permission.domain.AdministrationActor;
 import com.niv.payment.permission.port.DepartmentAdministrationPort;
 import com.niv.payment.permission.port.IdentityQueryPort;
 import com.niv.payment.permission.port.MenuAdministrationPort;
@@ -8,10 +9,18 @@ import com.niv.payment.permission.port.UserAdministrationPort;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /** Tenant and operator identifiers come only from the trusted server-side session. */
 public final class IdentityAdministrationService {
+    public static final int MAX_TREE_NODES = 2_000;
+    public static final int MAX_TREE_DEPTH = 32;
+    private static final int MAX_ROLES_PER_MEMBERSHIP = 256;
+    private static final int MAX_MENUS_PER_ROLE = 2_048;
     private final IdentityQueryPort queries;
     private final UserAdministrationPort users;
     private final RoleAdministrationPort roles;
@@ -36,61 +45,89 @@ public final class IdentityAdministrationService {
         return queries.findPermissionCodes(tenantId, membershipId);
     }
     public List<IdentityModels.Menu> accessibleMenus(long tenantId, long membershipId) {
-        return queries.findAccessibleMenus(tenantId, membershipId);
+        return boundedTree(queries.findAccessibleMenus(tenantId, membershipId),
+            IdentityModels.Menu::id, IdentityModels.Menu::parentId);
     }
     public IdentityModels.Page<IdentityModels.User> users(long tenantId, IdentityModels.UserQuery query) {
         Objects.requireNonNull(query, "query"); if (query.status()!=null) validStatus(query.status());
         validRange(query.startTime(), query.endTime());
+        int page = validPage(query.page());
+        int pageSize = validPageSize(query.pageSize());
+        validOffset(page, pageSize);
         return users.findUsers(tenantId, new IdentityModels.UserQuery(query.username(), query.name(), query.id(),
-            query.status(), query.departmentId(), query.startTime(), query.endTime(), validPage(query.page()),
-            validPageSize(query.pageSize())));
-    }
-    public boolean userRolesChanged(long tenantId, long userId, List<Long> requestedRoleIds) {
-        return !Set.copyOf(users.findUserRoleIds(tenantId, positiveId(userId))).equals(Set.copyOf(requestedRoleIds));
+            query.status(), query.departmentId(), query.startTime(), query.endTime(), page, pageSize));
     }
     public IdentityModels.Page<IdentityModels.Role> roles(long tenantId, IdentityModels.RoleQuery query) {
         Objects.requireNonNull(query, "query"); if (query.status()!=null) validStatus(query.status());
         validRange(query.startTime(), query.endTime());
+        int page = validPage(query.page());
+        int pageSize = validPageSize(query.pageSize());
+        validOffset(page, pageSize);
         return roles.findRoles(tenantId, new IdentityModels.RoleQuery(query.name(), query.id(), query.status(),
-            query.remark(), query.startTime(), query.endTime(), validPage(query.page()), validPageSize(query.pageSize())));
+            query.remark(), query.startTime(), query.endTime(), page, pageSize));
     }
-    public List<IdentityModels.Department> departments(long tenantId) { return departments.findDepartments(tenantId); }
-    public List<IdentityModels.Menu> menus(long tenantId) { return menus.findMenus(tenantId); }
+    public List<IdentityModels.Department> departments(long tenantId) {
+        return boundedTree(departments.findDepartments(tenantId),
+            IdentityModels.Department::id, IdentityModels.Department::parentId);
+    }
+    public List<IdentityModels.Menu> menus(long tenantId) {
+        return boundedTree(menus.findMenus(tenantId), IdentityModels.Menu::id, IdentityModels.Menu::parentId);
+    }
 
-    public long createUser(long tenantId, long operatorId, IdentityModels.UserCreateCommand command) {
-        validateUserCreate(command); return users.createUser(tenantId, operatorId, command);
+    public long createUser(long tenantId, AdministrationActor actor, IdentityModels.UserCreateCommand command) {
+        validateUserCreate(command); return users.createUser(tenantId, validActor(actor), command);
     }
-    public void updateUser(long tenantId, long operatorId, long id, IdentityModels.MembershipUpdateCommand command) {
-        validateMembershipUpdate(command); users.updateUser(tenantId, operatorId, positiveId(id), command);
+    public void updateUser(long tenantId, AdministrationActor actor, long id,
+                           IdentityModels.MembershipUpdateCommand command) {
+        validateMembershipUpdate(command); users.updateUser(tenantId, validActor(actor), positiveId(id), command);
     }
-    public long updateUserStatus(long tenantId, long operatorId, long id, int status, long version) {
-        validStatus(status); return users.updateUserStatus(tenantId, operatorId, positiveId(id), status, version);
+    public long updateUserStatus(long tenantId, AdministrationActor actor, long id, int status, long version) {
+        validStatus(status);
+        return users.updateUserStatus(tenantId, validActor(actor), positiveId(id), status, validVersion(version));
     }
-    public void deleteUser(long tenantId, long operatorId, long id) { users.deleteUser(tenantId, operatorId, positiveId(id)); }
-    public long createRole(long tenantId, long operatorId, IdentityModels.RoleCommand command) {
-        validateRole(command); return roles.createRole(tenantId, operatorId, command);
+    public void deleteUser(long tenantId, AdministrationActor actor, long id, long expectedVersion) {
+        users.deleteUser(tenantId, validActor(actor), positiveId(id), validVersion(expectedVersion));
     }
-    public void updateRole(long tenantId, long operatorId, long id, IdentityModels.RoleCommand command) {
-        validateRole(command); roles.updateRole(tenantId, operatorId, positiveId(id), command);
+    public long createRole(long tenantId, AdministrationActor actor, IdentityModels.RoleCommand command) {
+        validateRole(command); return roles.createRole(tenantId, validActor(actor), command);
     }
-    public void updateRoleStatus(long tenantId, long operatorId, long id, int status) {
-        validStatus(status); roles.updateRoleStatus(tenantId, operatorId, positiveId(id), status);
+    public void updateRole(long tenantId, AdministrationActor actor, long id,
+                           IdentityModels.RoleCommand command, long expectedVersion) {
+        validateRole(command);
+        roles.updateRole(tenantId, validActor(actor), positiveId(id), command, validVersion(expectedVersion));
     }
-    public void deleteRole(long tenantId, long operatorId, long id) { roles.deleteRole(tenantId, operatorId, positiveId(id)); }
-    public long createDepartment(long tenantId, long operatorId, IdentityModels.DepartmentCommand command) {
-        validateDepartment(command); return departments.createDepartment(tenantId, operatorId, command);
+    public void updateRoleStatus(long tenantId, AdministrationActor actor, long id,
+                                 int status, long expectedVersion) {
+        validStatus(status);
+        roles.updateRoleStatus(tenantId, validActor(actor), positiveId(id), status, validVersion(expectedVersion));
     }
-    public void updateDepartment(long tenantId, long operatorId, long id, IdentityModels.DepartmentCommand command) {
-        validateDepartment(command); departments.updateDepartment(tenantId, operatorId, positiveId(id), command);
+    public void deleteRole(long tenantId, AdministrationActor actor, long id, long expectedVersion) {
+        roles.deleteRole(tenantId, validActor(actor), positiveId(id), validVersion(expectedVersion));
     }
-    public void deleteDepartment(long tenantId, long operatorId, long id) { departments.deleteDepartment(tenantId, operatorId, positiveId(id)); }
-    public long createMenu(long tenantId, long operatorId, IdentityModels.MenuCommand command) {
-        validateMenu(command); return menus.createMenu(tenantId, operatorId, command);
+    public long createDepartment(long tenantId, AdministrationActor actor,
+                                 IdentityModels.DepartmentCommand command) {
+        validateDepartment(command); return departments.createDepartment(tenantId, validActor(actor), command);
     }
-    public void updateMenu(long tenantId, long operatorId, long id, IdentityModels.MenuCommand command) {
-        validateMenu(command); menus.updateMenu(tenantId, operatorId, positiveId(id), command);
+    public void updateDepartment(long tenantId, AdministrationActor actor, long id,
+                                 IdentityModels.DepartmentCommand command, long expectedVersion) {
+        validateDepartment(command);
+        departments.updateDepartment(tenantId, validActor(actor), positiveId(id), command,
+            validVersion(expectedVersion));
     }
-    public void deleteMenu(long tenantId, long operatorId, long id) { menus.deleteMenu(tenantId, operatorId, positiveId(id)); }
+    public void deleteDepartment(long tenantId, AdministrationActor actor, long id, long expectedVersion) {
+        departments.deleteDepartment(tenantId, validActor(actor), positiveId(id), validVersion(expectedVersion));
+    }
+    public long createMenu(long tenantId, AdministrationActor actor, IdentityModels.MenuCommand command) {
+        validateMenu(command); return menus.createMenu(tenantId, validActor(actor), command);
+    }
+    public void updateMenu(long tenantId, AdministrationActor actor, long id,
+                           IdentityModels.MenuCommand command, long expectedVersion) {
+        validateMenu(command);
+        menus.updateMenu(tenantId, validActor(actor), positiveId(id), command, validVersion(expectedVersion));
+    }
+    public void deleteMenu(long tenantId, AdministrationActor actor, long id, long expectedVersion) {
+        menus.deleteMenu(tenantId, validActor(actor), positiveId(id), validVersion(expectedVersion));
+    }
     public boolean menuNameExists(long tenantId, String name, Long id) {
         return menus.menuNameExists(tenantId, requiredText(name, "Menu name"), id);
     }
@@ -102,17 +139,20 @@ public final class IdentityAdministrationService {
         Objects.requireNonNull(command, "command"); requiredText(command.username(), "Username");
         requiredText(command.name(), "Name"); positiveId(command.departmentId());
         Objects.requireNonNull(command.roleIds(), "roleIds is required");
+        validCollectionSize(command.roleIds(), MAX_ROLES_PER_MEMBERSHIP, "roleIds");
         command.roleIds().forEach(IdentityAdministrationService::positiveId); validStatus(command.status());
     }
     private static void validateMembershipUpdate(IdentityModels.MembershipUpdateCommand command) {
         Objects.requireNonNull(command, "command"); positiveId(command.departmentId());
         Objects.requireNonNull(command.roleIds(), "roleIds is required");
+        validCollectionSize(command.roleIds(), MAX_ROLES_PER_MEMBERSHIP, "roleIds");
         command.roleIds().forEach(IdentityAdministrationService::positiveId); validStatus(command.status());
         if (command.userVersion() < 0) throw new InvalidCommandException("userVersion is invalid");
     }
     private static void validateRole(IdentityModels.RoleCommand command) {
         Objects.requireNonNull(command, "command"); requiredText(command.name(), "Role name");
         Objects.requireNonNull(command.menuIds(), "menuIds is required");
+        validCollectionSize(command.menuIds(), MAX_MENUS_PER_ROLE, "menuIds");
         command.menuIds().forEach(IdentityAdministrationService::positiveId); validStatus(command.status());
     }
     private static void validateDepartment(IdentityModels.DepartmentCommand command) {
@@ -125,14 +165,61 @@ public final class IdentityAdministrationService {
         validStatus(command.status());
     }
     private static int validPage(int page) { return Math.max(page, 1); }
+    private static void validOffset(int page, int pageSize) {
+        long offset = (long) (page - 1) * pageSize;
+        if (offset > Integer.MAX_VALUE) {
+            throw new InvalidCommandException("Page offset exceeds the supported range");
+        }
+    }
+    private static AdministrationActor validActor(AdministrationActor actor) {
+        return Objects.requireNonNull(actor, "actor");
+    }
     private static void validRange(java.time.Instant start, java.time.Instant end) {
         if (start != null && end != null && start.isAfter(end)) throw new InvalidCommandException("Invalid time range");
     }
     private static int validPageSize(int size) {
         if (size < 1 || size > 200) throw new InvalidCommandException("pageSize must be between 1 and 200"); return size;
     }
+    private static void validCollectionSize(List<?> values, int maximum, String label) {
+        if (values.size() > maximum) {
+            throw new InvalidCommandException(label + " must contain at most " + maximum + " entries");
+        }
+    }
+    private static <T> List<T> boundedTree(List<T> rows, Function<T, Long> id,
+                                           Function<T, Long> parentId) {
+        Objects.requireNonNull(rows, "Tree rows are required");
+        if (rows.size() > MAX_TREE_NODES) {
+            throw new TreeLimitExceededException("Tree node limit exceeded");
+        }
+        Map<Long, T> byId = new HashMap<>(rows.size());
+        for (T row : rows) {
+            Long nodeId = Objects.requireNonNull(id.apply(row), "Tree node identifier is required");
+            if (byId.put(nodeId, row) != null) {
+                throw new TreeLimitExceededException("Tree contains duplicate identifiers");
+            }
+        }
+        for (T row : rows) {
+            T current = row;
+            int depth = 0;
+            Set<Long> path = new HashSet<>();
+            while (current != null) {
+                Long nodeId = id.apply(current);
+                if (!path.add(nodeId)) throw new TreeLimitExceededException("Tree contains a cycle");
+                if (++depth > MAX_TREE_DEPTH) {
+                    throw new TreeLimitExceededException("Tree depth limit exceeded");
+                }
+                Long parent = parentId.apply(current);
+                current = parent == null ? null : byId.get(parent);
+            }
+        }
+        return rows;
+    }
     private static long positiveId(long id) {
         if (id <= 0) throw new InvalidCommandException("Identifier must be positive"); return id;
+    }
+    private static long validVersion(long version) {
+        if (version < 0) throw new InvalidCommandException("expectedVersion is invalid");
+        return version;
     }
     private static void validStatus(int status) {
         if (status != 0 && status != 1) throw new InvalidCommandException("Status must be 0 or 1");
@@ -149,5 +236,11 @@ public final class IdentityAdministrationService {
     }
     public static final class OptimisticLockException extends RuntimeException {
         public OptimisticLockException() { super("The record has changed; reload and retry"); }
+    }
+    public static final class DataConflictException extends RuntimeException {
+        public DataConflictException(String message) { super(message); }
+    }
+    public static final class TreeLimitExceededException extends RuntimeException {
+        public TreeLimitExceededException(String message) { super(message); }
     }
 }

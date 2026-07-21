@@ -10,46 +10,84 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 
 public final class RedisLoginAttemptLimiter implements AuthenticationService.LoginAttemptLimiter {
-    private static final DefaultRedisScript<Long> INCREMENT = new DefaultRedisScript<>("""
-        local count = redis.call('INCR', KEYS[1])
-        if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
-        return count
+    private static final DefaultRedisScript<Long> ACQUIRE = new DefaultRedisScript<>("""
+        local clientCount = tonumber(redis.call('GET', KEYS[1]) or '0')
+        local accountCount = tonumber(redis.call('GET', KEYS[2]) or '0')
+        local clientLimit = tonumber(ARGV[1])
+        local accountLimit = tonumber(ARGV[2])
+        if clientCount >= clientLimit or accountCount >= accountLimit then
+            return 0
+        end
+        clientCount = redis.call('INCR', KEYS[1])
+        if clientCount == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[3]) end
+        accountCount = redis.call('INCR', KEYS[2])
+        if accountCount == 1 then redis.call('PEXPIRE', KEYS[2], ARGV[3]) end
+        return 1
+        """, Long.class);
+    private static final DefaultRedisScript<Long> RECORD_SUCCESS = new DefaultRedisScript<>("""
+        redis.call('DEL', KEYS[2])
+        local clientCount = tonumber(redis.call('GET', KEYS[1]) or '0')
+        if clientCount <= 1 then
+            redis.call('DEL', KEYS[1])
+        else
+            redis.call('DECR', KEYS[1])
+        end
+        return 1
         """, Long.class);
 
     private final StringRedisTemplate redis;
-    private final int maximumFailures;
+    private final int maximumClientFailures;
+    private final int maximumClientUsernameFailures;
     private final Duration window;
 
-    public RedisLoginAttemptLimiter(StringRedisTemplate redis, int maximumFailures, Duration window) {
-        this.redis = redis;
-        this.maximumFailures = maximumFailures;
-        this.window = window;
+    public RedisLoginAttemptLimiter(StringRedisTemplate redis, int maximumClientFailures,
+                                    int maximumClientUsernameFailures, Duration window) {
+        this.redis = Objects.requireNonNull(redis, "redis");
+        if (maximumClientFailures < 1 || maximumClientUsernameFailures < 1) {
+            throw new IllegalArgumentException("Login attempt limits must be positive");
+        }
+        this.window = Objects.requireNonNull(window, "window");
+        if (window.isZero() || window.isNegative()) {
+            throw new IllegalArgumentException("Login attempt window must be positive");
+        }
+        this.maximumClientFailures = maximumClientFailures;
+        this.maximumClientUsernameFailures = maximumClientUsernameFailures;
     }
 
     @Override
-    public void requireAllowed(String bucketKey) {
-        String value = redis.opsForValue().get(key(bucketKey));
-        if (value != null && Integer.parseInt(value) >= maximumFailures) {
+    public void acquire(String clientKey, String normalizedUsername) {
+        List<String> keys = keys(clientKey, normalizedUsername);
+        Long allowed = redis.execute(ACQUIRE, keys,
+            Integer.toString(maximumClientFailures),
+            Integer.toString(maximumClientUsernameFailures),
+            Long.toString(window.toMillis()));
+        if (!Long.valueOf(1).equals(allowed)) {
             throw new AuthenticationService.RateLimitExceededException();
         }
     }
 
     @Override
-    public void recordFailure(String bucketKey) {
-        redis.execute(INCREMENT, List.of(key(bucketKey)), Long.toString(window.toSeconds()));
+    public void recordSuccess(String clientKey, String normalizedUsername) {
+        redis.execute(RECORD_SUCCESS, keys(clientKey, normalizedUsername));
     }
 
-    @Override
-    public void clear(String bucketKey) {
-        redis.delete(key(bucketKey));
+    private static List<String> keys(String clientKey, String normalizedUsername) {
+        Objects.requireNonNull(clientKey, "clientKey");
+        Objects.requireNonNull(normalizedUsername, "normalizedUsername");
+        String clientDigest = digest(clientKey);
+        String clusterSlot = "{" + clientDigest + "}";
+        return List.of(
+            "iam:login-attempt:" + clusterSlot + ":client",
+            "iam:login-attempt:" + clusterSlot + ":username:" + digest(normalizedUsername));
     }
 
-    private static String key(String value) {
+    private static String digest(String value) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-            return "iam:login-attempt:" + HexFormat.of().formatHex(digest);
+            return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is unavailable", impossible);
         }

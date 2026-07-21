@@ -23,6 +23,10 @@ public record PermissionDefinition(
         if (riskLevel == RiskLevel.FUND && crossTenantMode != CrossTenantMode.SAME_TENANT_ONLY) {
             throw new IllegalArgumentException("FUND permission definitions must remain tenant-bound");
         }
+        if (crossTenantMode == CrossTenantMode.RELATED_PARTY_READ && !code.action().readOnly()) {
+            throw new IllegalArgumentException(
+                "RELATED_PARTY_READ permission definitions must use a controlled read-only action");
+        }
     }
 
     public PermissionDefinition(PermissionCode code,

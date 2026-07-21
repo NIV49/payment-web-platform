@@ -51,6 +51,21 @@ class AuthorizationPolicyHardeningTest {
     }
 
     @Test
+    void relatedPartyReadCatalogMetadataRejectsMutatingAndUnknownActions() {
+        assertThrows(IllegalArgumentException.class, () ->
+            new PermissionDefinition(PermissionCode.of("order:update"), RiskLevel.NORMAL,
+                CrossTenantMode.RELATED_PARTY_READ, Set.of(), false, false, true));
+        assertThrows(IllegalArgumentException.class, () ->
+            new PermissionDefinition(PermissionCode.of("order:preview"), RiskLevel.NORMAL,
+                CrossTenantMode.RELATED_PARTY_READ, Set.of(), false, false, true));
+
+        assertTrue(PermissionCode.of("order:view").action().readOnly());
+        assertTrue(PermissionCode.of("order:read").action().readOnly());
+        assertFalse(PermissionCode.of("order:update").action().readOnly());
+        assertEquals(PermissionAction.UNKNOWN, PermissionCode.of("order:preview").action());
+    }
+
+    @Test
     void noMatchingGrantCompilesToTenantBoundDenyPredicate() {
         AuthorizationSubject subject = new AuthorizationSubject(10L, 20L, 30L, 40L, 1L, 1L, false);
         DataScopePlan plan = new DataScopePlan(30L, 20L, PermissionCode.of("order:view"), 1L, List.of());

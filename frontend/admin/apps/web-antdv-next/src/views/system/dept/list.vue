@@ -12,6 +12,7 @@ import { Button, message } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { PERMISSION_CODES } from '#/api';
+import { isOptimisticLockConflict } from '#/api/error-contract';
 import { deleteDept, getDeptList } from '#/api/system/dept';
 import { $t } from '#/locales';
 
@@ -56,7 +57,7 @@ function onDelete(row: SystemDeptApi.SystemDept) {
     duration: 0,
     key: 'action_process_msg',
   });
-  deleteDept(row.id)
+  deleteDept(row.id, row.rowVersion)
     .then(() => {
       message.success({
         content: $t('ui.actionMessage.deleteSuccess', [row.name]),
@@ -64,8 +65,9 @@ function onDelete(row: SystemDeptApi.SystemDept) {
       });
       refreshGrid();
     })
-    .catch(() => {
+    .catch((error) => {
       hideLoading();
+      if (isOptimisticLockConflict(error)) refreshGrid();
     });
 }
 

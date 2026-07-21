@@ -13,6 +13,14 @@
     "id": "用户ID",
     "dept": "部门",
     "status": "状态",
+    "identityStatus": "身份状态",
+    "membershipStatus": "工作区状态",
+    "identityState": {
+      "pendingActivation": "待激活",
+      "active": "正常",
+      "disabled": "禁用",
+      "locked": "锁定"
+    },
     "remark": "备注",
     "createTime": "创建时间",
     "operation": "操作",
@@ -85,6 +93,8 @@
     "remark": "备注",
     "createTime": "创建时间",
     "operation": "操作",
-    "visibleMenus": "可见菜单"
+    "visibleMenus": "可见菜单",
+    "navigationOnlyWarningTitle": "这里只配置导航可见性",
+    "navigationOnlyWarningDescription": "选择菜单只控制导航和页面可见性，不会授予 API 权限。RoleGrant 管理闭环完成前，新建角色不能视为生产授权完成态。"
   }
 }

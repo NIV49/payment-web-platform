@@ -13,6 +13,7 @@ import { Button, message } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { PERMISSION_CODES } from '#/api';
+import { isOptimisticLockConflict } from '#/api/error-contract';
 import { deleteMenu, getMenuList, SystemMenuApi } from '#/api/system/menu';
 import { $t } from '#/locales';
 
@@ -98,7 +99,7 @@ function onDelete(row: SystemMenuApi.SystemMenu) {
     duration: 0,
     key: 'action_process_msg',
   });
-  deleteMenu(row.id)
+  deleteMenu(row.id, row.rowVersion)
     .then(() => {
       message.success({
         content: $t('ui.actionMessage.deleteSuccess', [row.name]),
@@ -106,8 +107,9 @@ function onDelete(row: SystemMenuApi.SystemMenu) {
       });
       onRefresh();
     })
-    .catch(() => {
+    .catch((error) => {
       hideLoading();
+      if (isOptimisticLockConflict(error)) onRefresh();
     });
 }
 </script>

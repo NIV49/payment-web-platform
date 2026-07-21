@@ -1,9 +1,16 @@
+import type { SystemDeptApi } from './system/dept';
+import type { SystemMenuApi } from './system/menu';
 import type { SystemRoleApi } from './system/role';
 import type { PageResult } from './system/types';
 import type { SystemUserApi } from './system/user';
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import {
+  isOptimisticLockConflict,
+  OPTIMISTIC_LOCK_CONFLICT,
+  resolveApiErrorMessage,
+} from './error-contract';
 import { PERMISSION_CODES } from './permission-codes';
 import { COOKIE_SESSION_MARKER, formatSessionAuthorization } from './session';
 import {
@@ -19,6 +26,55 @@ describe('admin API contracts', () => {
     expect(formatSessionAuthorization(COOKIE_SESSION_MARKER)).toBeNull();
     expect(formatSessionAuthorization(null)).toBeNull();
     expect(formatSessionAuthorization('legacy-browser-token')).toBeNull();
+  });
+
+  it('treats optimistic lock errors as reload signals and shows readable messages', () => {
+    const error = {
+      response: {
+        data: {
+          code: 40_902,
+          error: OPTIMISTIC_LOCK_CONFLICT,
+          message: 'The record has changed; reload and retry',
+        },
+      },
+    };
+
+    expect(isOptimisticLockConflict(error)).toBe(true);
+    expect(resolveApiErrorMessage(error.response.data, 'fallback')).toBe(
+      'The record has changed; reload and retry',
+    );
+  });
+
+  it.each([
+    {
+      data: {
+        code: 40_901,
+        error: OPTIMISTIC_LOCK_CONFLICT,
+      },
+      scenario: 'a different numeric code',
+    },
+    {
+      data: {
+        error: OPTIMISTIC_LOCK_CONFLICT,
+      },
+      scenario: 'a missing code',
+    },
+    {
+      data: {
+        code: 40_902,
+        error: 'DATA_CONFLICT',
+      },
+      scenario: 'a different machine error',
+    },
+    {
+      data: {
+        code: '40902',
+        error: OPTIMISTIC_LOCK_CONFLICT,
+      },
+      scenario: 'a non-numeric code',
+    },
+  ])('does not treat $scenario as an optimistic lock conflict', ({ data }) => {
+    expect(isOptimisticLockConflict({ response: { data } })).toBe(false);
   });
 
   it('keeps permission codes unique and in lowercase resource:action form', () => {
@@ -45,6 +101,10 @@ describe('admin API contracts', () => {
   });
 
   it('defines user and role list contracts as paginated results', () => {
+    expectTypeOf<SystemUserApi.SystemUser>().toMatchTypeOf<{
+      identityStatus: 'ACTIVE' | 'DISABLED' | 'LOCKED' | 'PENDING_ACTIVATION';
+      status: 0 | 1;
+    }>();
     expectTypeOf<PageResult<SystemUserApi.SystemUser>>().toMatchTypeOf<{
       items: SystemUserApi.SystemUser[];
       total: number;
@@ -52,6 +112,15 @@ describe('admin API contracts', () => {
     expectTypeOf<PageResult<SystemRoleApi.SystemRole>>().toMatchTypeOf<{
       items: SystemRoleApi.SystemRole[];
       total: number;
+    }>();
+    expectTypeOf<SystemRoleApi.SystemRole>().toMatchTypeOf<{
+      rowVersion: number;
+    }>();
+    expectTypeOf<SystemDeptApi.SystemDept>().toMatchTypeOf<{
+      rowVersion: number;
+    }>();
+    expectTypeOf<SystemMenuApi.SystemMenu>().toMatchTypeOf<{
+      rowVersion: number;
     }>();
   });
 
@@ -86,6 +155,21 @@ describe('admin API contracts', () => {
   it('uses menuIds rather than ambiguous permissions on roles', () => {
     expectTypeOf<SystemRoleApi.SystemRole>().toMatchTypeOf<{
       menuIds: string[];
+    }>();
+  });
+
+  it('requires expectedVersion on non-user administration mutations', () => {
+    expectTypeOf<SystemRoleApi.RoleUpdateParams>().toMatchTypeOf<{
+      expectedVersion: number;
+    }>();
+    expectTypeOf<SystemRoleApi.RoleStatusParams>().toMatchTypeOf<{
+      expectedVersion: number;
+    }>();
+    expectTypeOf<SystemDeptApi.DeptUpdateParams>().toMatchTypeOf<{
+      expectedVersion: number;
+    }>();
+    expectTypeOf<SystemMenuApi.MenuUpdateParams>().toMatchTypeOf<{
+      expectedVersion: number;
     }>();
   });
 

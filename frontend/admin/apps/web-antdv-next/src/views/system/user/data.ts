@@ -13,6 +13,8 @@ import { Tag } from 'antdv-next';
 import { getDeptList, getRoleList, PERMISSION_CODES } from '#/api';
 import { $t } from '#/locales';
 
+import { identityStatusPresentation } from './identity-status';
+
 export function useFormSchema(
   canAssignRoles: ComputedRef<boolean>,
   isEditing: ComputedRef<boolean>,
@@ -74,7 +76,7 @@ export function useFormSchema(
       },
       defaultValue: 1,
       fieldName: 'status',
-      label: $t('system.user.status'),
+      label: $t('system.user.membershipStatus'),
     },
     {
       component: 'Textarea',
@@ -115,7 +117,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
         ],
       },
       fieldName: 'status',
-      label: $t('system.user.status'),
+      label: $t('system.user.membershipStatus'),
     },
     {
       component: 'RangePicker',
@@ -129,6 +131,9 @@ export function useDescriptionItems(
   row?: SystemUserApi.SystemUser,
 ): DescriptionsItemType[] {
   const enabled = row?.status === 1;
+  const identity = row
+    ? identityStatusPresentation(row.identityStatus)
+    : undefined;
   return [
     { label: $t('system.user.username'), content: row?.username },
     { label: $t('system.user.name'), content: row?.name },
@@ -142,7 +147,18 @@ export function useDescriptionItems(
       content: row?.roleNames?.join(', ') || row?.roleIds?.join(', '),
     },
     {
-      label: $t('system.user.status'),
+      label: $t('system.user.identityStatus'),
+      content: () =>
+        identity
+          ? h(
+              Tag,
+              { color: identity.color },
+              { default: () => $t(identity.label) },
+            )
+          : undefined,
+    },
+    {
+      label: $t('system.user.membershipStatus'),
       content: () =>
         h(
           Tag,
@@ -178,6 +194,16 @@ export function useColumns<T = SystemUserApi.SystemUser>(
       width: 200,
     },
     {
+      field: 'identityStatus',
+      formatter: ({ cellValue }) =>
+        $t(
+          identityStatusPresentation(cellValue as SystemUserApi.IdentityStatus)
+            .label,
+        ),
+      title: $t('system.user.identityStatus'),
+      width: 120,
+    },
+    {
       cellRender: {
         attrs: {
           auth: PERMISSION_CODES.userDisable,
@@ -186,8 +212,8 @@ export function useColumns<T = SystemUserApi.SystemUser>(
         name: onStatusChange ? 'CellSwitch' : 'CellTag',
       },
       field: 'status',
-      title: $t('system.user.status'),
-      width: 100,
+      title: $t('system.user.membershipStatus'),
+      width: 120,
     },
     {
       field: 'remark',

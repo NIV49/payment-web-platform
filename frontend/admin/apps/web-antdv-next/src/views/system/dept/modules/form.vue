@@ -8,6 +8,7 @@ import { useVbenModal } from '@vben/common-ui';
 import { Button } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
+import { isOptimisticLockConflict } from '#/api/error-contract';
 import { createDept, updateDept } from '#/api/system/dept';
 import { $t } from '#/locales';
 
@@ -40,8 +41,15 @@ const [Modal, modalApi] = useVbenModal({
       const data = await formApi.getValues<SystemDeptApi.DeptSaveParams>();
       try {
         await (formData.value?.id
-          ? updateDept(formData.value.id, data)
+          ? updateDept(formData.value.id, {
+              ...data,
+              expectedVersion: formData.value.rowVersion,
+            })
           : createDept(data));
+        modalApi.close();
+        emit('success');
+      } catch (error) {
+        if (!isOptimisticLockConflict(error)) throw error;
         modalApi.close();
         emit('success');
       } finally {

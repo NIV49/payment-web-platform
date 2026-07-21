@@ -17,6 +17,7 @@ import {
   PERMISSION_CODES,
   updateRoleStatus,
 } from '#/api';
+import { isOptimisticLockConflict } from '#/api/error-contract';
 import { $t } from '#/locales';
 
 import { useColumns, useGridFormSchema } from './data';
@@ -114,9 +115,14 @@ async function onStatusChange(
       $t('system.statusChangeTitle'),
     );
     if (!confirmed) return false;
-    await updateRoleStatus(row.id, { status: newStatus as 0 | 1 });
+    await updateRoleStatus(row.id, {
+      expectedVersion: row.rowVersion,
+      status: newStatus as 0 | 1,
+    });
+    row.rowVersion += 1;
     return true;
-  } catch {
+  } catch (error) {
+    if (isOptimisticLockConflict(error)) onRefresh();
     return false;
   }
 }
@@ -131,7 +137,7 @@ function onDelete(row: SystemRoleApi.SystemRole) {
     duration: 0,
     key: 'action_process_msg',
   });
-  deleteRole(row.id)
+  deleteRole(row.id, row.rowVersion)
     .then(() => {
       message.success({
         content: $t('ui.actionMessage.deleteSuccess', [row.name]),
@@ -139,8 +145,9 @@ function onDelete(row: SystemRoleApi.SystemRole) {
       });
       onRefresh();
     })
-    .catch(() => {
+    .catch((error) => {
       hideLoading();
+      if (isOptimisticLockConflict(error)) onRefresh();
     });
 }
 

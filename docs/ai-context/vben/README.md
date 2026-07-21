@@ -27,7 +27,7 @@
 | 主题 | 官方页面 | 当前项目关注点 |
 | --- | --- | --- |
 | 框架介绍 | [关于 Vben](https://doc.vben.pro/guide/introduction/vben.html) | Vue、Vite、TS、pnpm monorepo、动态菜单、多 UI 库 |
-| 快速开始 | [快速开始](https://doc.vben.pro/guide/introduction/quick-start.html) | Node `22.18+`、pnpm、应用启动方式 |
+| 快速开始 | [快速开始](https://doc.vben.pro/guide/introduction/quick-start.html) | Vben 最低 Node `22.18+`；本项目固定 Node `>=24.11.0 <25` |
 | 精简 | [精简版本](https://doc.vben.pro/guide/introduction/thin.html) | 只保留 web-antdv-next、backend-mock 和 playground |
 | 基础概念 | [基础概念](https://doc.vben.pro/guide/essentials/concept.html) | app/package/subpath imports 边界 |
 | 本地开发 | [本地开发](https://doc.vben.pro/guide/essentials/development.html) | scripts、环境、静态资源、DevTools |
@@ -167,7 +167,9 @@ const layoutMap = { BasicLayout, IFrameView };
 
 `BasicLayout` 是兼容名称。当前 `generateAccessible` 会在顶级节点有 children 时删除其 component，避免嵌套多层 Layout；新菜单树可直接让根路由承载统一 Layout，不要创造新的布局字符串。
 
-路由类型字段不能一刀切：catalog 有 `path` 但无 component；普通 menu 有 `path` 且 component 必须来自页面清单；embedded/link 都必须有稳定的内部 `path`，component 固定为 `IFrameView`，外部地址分别写入 `meta.iframeSrc`/`meta.link`；button 不带 path/component。`backend-mock` 的 link/embedded seed 即采用这套形状。
+路由类型字段不能一刀切：catalog 有 `path` 但无 component；普通 menu 有 `path` 且 component 必须来自页面清单；embedded/link 都必须有稳定的内部 `path`，component 固定为 `IFrameView`，外部地址分别写入 `meta.iframeSrc`/`meta.link`；button 不带 path/component。内部 route path 和 redirect 必须以单 `/` 开头，`//host/path` 是 protocol-relative URL，后端契约会直接拒绝。`backend-mock` 的 link/embedded seed 即采用这套形状。
+
+Vben 依赖稳定且唯一的 route name/path。当前后端在 tenant 内按大小写不敏感方式唯一约束有效 route name，并唯一约束所有非空 route path；V9 数据库索引是最终边界，菜单页面的 `name-exists/path-exists` 只能作为提前提示。
 
 菜单管理表单的 component 候选来自 `MENU_PAGE_COMPONENTS`。应用启动/构建时会逐项核对真实 `views` glob，清单中有不存在的文件会立即失败，不能静默忽略。它是有意维护的路由入口清单，不等于“所有 Vue 文件”。后端用 `payment.menu.allowed-page-components` 执行同一语义的 allowlist；新增路由页必须同步两端并增加契约测试。
 

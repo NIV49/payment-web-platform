@@ -13,24 +13,56 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AuthenticationServiceTest {
+    private static final String SUPPORTED_DUMMY_HASH =
+        "$2a$12$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
+    @Test
+    void limiterFailureStopsBeforeCredentialOrPasswordWork() {
+        AtomicBoolean credentialLookupCalled = new AtomicBoolean();
+        AuthenticationService service = new AuthenticationService(
+            (username, tenantId) -> {
+                credentialLookupCalled.set(true);
+                return Optional.empty();
+            },
+            (raw, encoded) -> {
+                fail("password verification must not run when rate-limit storage fails");
+                return false;
+            },
+            new AuthenticationService.LoginAttemptLimiter() {
+                public void acquire(String client, String username) {
+                    throw new IllegalStateException("Redis unavailable");
+                }
+                public void recordSuccess(String client, String username) { fail("must not run"); }
+            },
+            authenticated -> { throw new AssertionError("session must not be issued"); },
+            SUPPORTED_DUMMY_HASH
+        );
+
+        assertThrows(IllegalStateException.class,
+            () -> service.login(new LoginCommand("admin", "correct", "ip-hash")));
+        assertFalse(credentialLookupCalled.get());
+    }
+
     @Test
     void successfulLoginUsesNormalizedUsernameAndClearsTheFailureBucket() {
         AtomicBoolean cleared = new AtomicBoolean();
-        CredentialAccount account = new CredentialAccount(1, 2, 3, 4L, 5, 6, "$hash");
+        CredentialAccount account = new CredentialAccount(1, 2, 3, 4L, 5, 6, SUPPORTED_DUMMY_HASH);
         AuthenticationService service = new AuthenticationService(
             (username, tenantId) -> {
                 assertEquals("admin", username);
                 assertNull(tenantId);
                 return Optional.of(account);
             },
-            (raw, encoded) -> raw.equals("correct") && encoded.equals("$hash"),
+            (raw, encoded) -> raw.equals("correct") && encoded.equals(SUPPORTED_DUMMY_HASH),
             new AuthenticationService.LoginAttemptLimiter() {
-                public void requireAllowed(String key) { assertTrue(key.endsWith(":admin")); }
-                public void recordFailure(String key) { fail("must not record a successful login"); }
-                public void clear(String key) { cleared.set(true); }
+                public void acquire(String client, String username) {
+                    assertEquals("ip-hash", client);
+                    assertEquals("admin", username);
+                }
+                public void recordSuccess(String client, String username) { cleared.set(true); }
             },
             authenticated -> new LoginSession("opaque-session-token"),
-            "$dummy"
+            SUPPORTED_DUMMY_HASH
         );
 
         LoginSession session = service.login(new LoginCommand(" ADMIN ", "correct", "ip-hash"));
@@ -41,29 +73,30 @@ class AuthenticationServiceTest {
 
     @Test
     void unknownUserAndWrongPasswordHaveTheSamePublicFailure() {
-        AtomicBoolean failureRecorded = new AtomicBoolean();
+        AtomicBoolean attemptReserved = new AtomicBoolean();
         AuthenticationService service = new AuthenticationService(
             (username, tenantId) -> Optional.empty(),
             (raw, encoded) -> false,
             new AuthenticationService.LoginAttemptLimiter() {
-                public void requireAllowed(String key) { }
-                public void recordFailure(String key) { failureRecorded.set(true); }
-                public void clear(String key) { fail("failed login must not clear failures"); }
+                public void acquire(String client, String username) { attemptReserved.set(true); }
+                public void recordSuccess(String client, String username) {
+                    fail("failed login must not release its reservation");
+                }
             },
             authenticated -> { throw new AssertionError("session must not be issued"); },
-            "$dummy"
+            SUPPORTED_DUMMY_HASH
         );
 
         AuthenticationFailedException error = assertThrows(AuthenticationFailedException.class,
             () -> service.login(new LoginCommand("missing", "wrong", "ip-hash")));
 
         assertEquals("Invalid username or password", error.getMessage());
-        assertTrue(failureRecorded.get());
+        assertTrue(attemptReserved.get());
     }
 
     @Test
     void explicitTenantSelectionIsPassedToCredentialLookup() {
-        CredentialAccount account = new CredentialAccount(1, 2, 9, 4L, 5, 6, "$hash");
+        CredentialAccount account = new CredentialAccount(1, 2, 9, 4L, 5, 6, SUPPORTED_DUMMY_HASH);
         AuthenticationService service = new AuthenticationService(
             (username, tenantId) -> {
                 assertEquals("admin", username);
@@ -72,16 +105,42 @@ class AuthenticationServiceTest {
             },
             (raw, encoded) -> true,
             new AuthenticationService.LoginAttemptLimiter() {
-                public void requireAllowed(String key) { }
-                public void recordFailure(String key) { fail("must not fail"); }
-                public void clear(String key) { }
+                public void acquire(String client, String username) { }
+                public void recordSuccess(String client, String username) { }
             },
             authenticated -> new LoginSession("selected-workspace-session"),
-            "$dummy"
+            SUPPORTED_DUMMY_HASH
         );
 
         LoginSession session = service.login(new LoginCommand("admin", "correct", 9L, "ip-hash"));
 
         assertEquals("selected-workspace-session", session.token());
+    }
+
+    @Test
+    void unsupportedStoredHashFailsClosedWithoutReachingTheRealHashVerifier() {
+        CredentialAccount account = new CredentialAccount(1, 2, 3, 4L, 5, 6,
+            "$2a$99$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy");
+        AtomicBoolean sessionIssued = new AtomicBoolean();
+        AuthenticationService service = new AuthenticationService(
+            (username, tenantId) -> Optional.of(account),
+            (raw, encoded) -> {
+                assertEquals(SUPPORTED_DUMMY_HASH, encoded);
+                return false;
+            },
+            new AuthenticationService.LoginAttemptLimiter() {
+                public void acquire(String client, String username) { }
+                public void recordSuccess(String client, String username) { fail("must not run"); }
+            },
+            authenticated -> {
+                sessionIssued.set(true);
+                return new LoginSession("must-not-be-issued");
+            },
+            SUPPORTED_DUMMY_HASH
+        );
+
+        assertThrows(AuthenticationFailedException.class,
+            () -> service.login(new LoginCommand("admin", "correct", "ip-hash")));
+        assertFalse(sessionIssued.get());
     }
 }

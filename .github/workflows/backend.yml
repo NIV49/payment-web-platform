@@ -69,6 +69,6 @@ jobs:
           git diff --exit-code --
           backend/modules/identity/persistence-postgres/src/main/java/com/niv/payment/permission/persistence/jooq/generated
 
-      - name: Verify backend
+      - name: Verify backend, including PostgreSQL 18 schema startup gate
         working-directory: backend
         run: ./mvnw -s maven-settings.xml --batch-mode --no-transfer-progress clean verify

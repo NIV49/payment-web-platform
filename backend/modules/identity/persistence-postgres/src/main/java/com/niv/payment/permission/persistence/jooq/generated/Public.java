@@ -87,7 +87,8 @@ public class Public extends SchemaImpl {
     public final IamMenu IAM_MENU = IamMenu.IAM_MENU;
 
     /**
-     * The table <code>public.iam_permission</code>.
+     * Global permission catalog. Tenant, administrator, role, grant, and menu
+     * fixtures are local-profile data only
      */
     public final IamPermission IAM_PERMISSION = IamPermission.IAM_PERMISSION;
 

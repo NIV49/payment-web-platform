@@ -1,4 +1,4 @@
-FROM node:22-slim AS builder
+FROM node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203 AS builder
 
 # --max-old-space-size
 ENV PNPM_HOME="/pnpm"
@@ -7,7 +7,7 @@ ENV NODE_OPTIONS=--max-old-space-size=8192
 ENV TZ=Asia/Shanghai
 ENV CI=true
 
-RUN npm i -g corepack
+RUN corepack enable
 
 WORKDIR /app
 
@@ -20,7 +20,7 @@ RUN pnpm run build:antdv-next
 
 RUN echo "Builder Success 🎉"
 
-FROM nginx:stable-alpine AS production
+FROM nginx:1.30.4-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46 AS production
 
 # 配置 nginx
 RUN echo "types { application/javascript js mjs; }" > /etc/nginx/conf.d/mjs.conf \

@@ -51,11 +51,19 @@ export namespace SystemMenuApi {
     path?: string;
     pid: string;
     redirect?: string;
+    rowVersion: number;
     status: 0 | 1;
     type: (typeof MenuTypes)[number];
   }
 
-  export type MenuSaveParams = Omit<SystemMenu, 'children' | 'id'>;
+  export type MenuSaveParams = Omit<
+    SystemMenu,
+    'children' | 'id' | 'rowVersion'
+  >;
+
+  export type MenuUpdateParams = MenuSaveParams & {
+    expectedVersion: number;
+  };
 }
 
 async function getMenuList() {
@@ -84,12 +92,14 @@ async function createMenu(data: SystemMenuApi.MenuSaveParams) {
   return requestClient.post('/system/menu', data);
 }
 
-async function updateMenu(id: string, data: SystemMenuApi.MenuSaveParams) {
+async function updateMenu(id: string, data: SystemMenuApi.MenuUpdateParams) {
   return requestClient.put(`/system/menu/${id}`, data);
 }
 
-async function deleteMenu(id: string) {
-  return requestClient.delete(`/system/menu/${id}`);
+async function deleteMenu(id: string, expectedVersion: number) {
+  return requestClient.delete(`/system/menu/${id}`, {
+    params: { expectedVersion },
+  });
 }
 
 export {

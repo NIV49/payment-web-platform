@@ -71,7 +71,8 @@ public class Tables {
     public static final IamMenu IAM_MENU = IamMenu.IAM_MENU;
 
     /**
-     * The table <code>public.iam_permission</code>.
+     * Global permission catalog. Tenant, administrator, role, grant, and menu
+     * fixtures are local-profile data only
      */
     public static final IamPermission IAM_PERMISSION = IamPermission.IAM_PERMISSION;
 

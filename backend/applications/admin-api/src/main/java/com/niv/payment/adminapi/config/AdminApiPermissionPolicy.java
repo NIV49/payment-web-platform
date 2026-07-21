@@ -25,7 +25,9 @@ public final class AdminApiPermissionPolicy {
 
         if ("GET".equals(method) && "/api/system/user/list".equals(path)) return List.of("user:view");
         if ("POST".equals(method) && "/api/system/user".equals(path)) return List.of("user:create");
-        if ("PUT".equals(method) && USER_ITEM.matcher(path).matches()) return List.of("user:update");
+        if ("PUT".equals(method) && USER_ITEM.matcher(path).matches()) {
+            return List.of("user:update", "user:disable", "user:assign-role");
+        }
         if ("PATCH".equals(method) && USER_STATUS.matcher(path).matches()) return List.of("user:disable");
         if ("DELETE".equals(method) && USER_ITEM.matcher(path).matches()) return List.of("user:delete");
 

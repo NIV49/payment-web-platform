@@ -52,6 +52,7 @@ public final class DefaultAuthorizationService {
             if (crossTenant) {
                 if (grant.riskLevel() == RiskLevel.FUND
                     || grant.crossTenantMode() != CrossTenantMode.RELATED_PARTY_READ
+                    || !grant.permission().action().readOnly()
                     || !hasExplicitBusinessPartyScope(grant)
                     || !crossTenantAccess.allows(request.subject(), grant, request.resource())) {
                     continue;

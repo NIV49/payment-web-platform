@@ -2,7 +2,7 @@
 
 > 仓库：`git@github.com:NIV49/payment-web-platform.git`
 > 当前分支基线：`codex/permission-reference-design`
-> 记录日期：2026-07-17
+> 记录日期：2026-07-20
 
 ## 1. 顶层结构
 
@@ -11,7 +11,7 @@ payment-web-platform/
 ├── frontend/
 │   ├── admin/       Vben 5.7.0 pnpm monorepo
 │   └── portal/      Nuxt 4 多应用 monorepo 占位目录
-├── backend/         Java 17 / Spring Boot / Maven 多模块后端
+├── backend/         Java 25 / Spring Boot 4.1 / jOOQ / Maven 多模块后端
 ├── docs/            产品、架构、AI 上下文和接口契约
 ├── infra/           本地与后续部署基础设施
 ├── AGENTS.md        仓库级开发前置规则
@@ -63,7 +63,7 @@ Maven reactor。`applications/admin-api` 是当前唯一启动单元，`modules/
 
 当前只有 `docker-compose.local.yml`：
 
-- PostgreSQL 16：`127.0.0.1:15432`；
+- PostgreSQL 18.4：`127.0.0.1:15432`；
 - Valkey 7.2：`127.0.0.1:16379`（Redis 协议兼容）；
 - 数据使用命名 volume 持久化；
 - 端口只绑定本机回环，不是共享测试或生产配置。
@@ -105,7 +105,7 @@ Vben 上游根目录与本仓库的 `frontend/admin` 存在目录位移。更新
 分析和提交时忽略：
 
 - 前端 `node_modules`、`dist`、`.turbo`、Nitro `.output/.nitro`；
-- 后端任意 `target`；
+- 后端任意 `target`；jOOQ 生成源码位于 `src/main/java`，属于受 CI drift gate 保护的已提交代码，不是可忽略构建产物；
 - 本地 `.env*`、日志和编辑器缓存；
 - Docker named volumes（不在仓库中）。
 

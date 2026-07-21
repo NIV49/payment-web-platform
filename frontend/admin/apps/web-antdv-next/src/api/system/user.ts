@@ -5,11 +5,18 @@ import type { PageResult } from './types';
 import { requestClient } from '#/api/request';
 
 export namespace SystemUserApi {
+  export type IdentityStatus =
+    | 'ACTIVE'
+    | 'DISABLED'
+    | 'LOCKED'
+    | 'PENDING_ACTIVATION';
+
   export interface SystemUser {
     createTime?: string;
     deptId: string;
     deptName?: string;
     id: string;
+    identityStatus: IdentityStatus;
     name: string;
     remark?: string;
     roleIds: string[];
@@ -76,8 +83,10 @@ async function updateUserStatus(
   );
 }
 
-async function deleteUser(id: string) {
-  return requestClient.delete(`/system/user/${id}`);
+async function deleteUser(id: string, expectedVersion: number) {
+  return requestClient.delete(`/system/user/${id}`, {
+    params: { expectedVersion },
+  });
 }
 
 export { createUser, deleteUser, getUserList, updateUser, updateUserStatus };

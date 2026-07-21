@@ -15,6 +15,7 @@ import {
   PERMISSION_CODES,
   updateUser,
 } from '#/api';
+import { isOptimisticLockConflict } from '#/api/error-contract';
 import { $t } from '#/locales';
 
 import { useFormSchema } from '../data';
@@ -52,6 +53,10 @@ const [Drawer, drawerApi] = useVbenDrawer({
       await (id.value
         ? updateUser(id.value, toMembershipUpdateParams(values, roleIds))
         : createUser(toUserCreateParams(values, roleIds)));
+      emits('success');
+      drawerApi.close();
+    } catch (error) {
+      if (!isOptimisticLockConflict(error)) throw error;
       emits('success');
       drawerApi.close();
     } finally {

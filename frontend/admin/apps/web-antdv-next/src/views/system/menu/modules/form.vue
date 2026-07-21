@@ -13,6 +13,7 @@ import { getPopupContainer } from '@vben/utils';
 import { breakpointsTailwind, useBreakpoints } from '@vueuse/core';
 
 import { useVbenForm, z } from '#/adapter/form';
+import { isOptimisticLockConflict } from '#/api/error-contract';
 import {
   createMenu,
   getMenuList,
@@ -509,8 +510,15 @@ async function onSubmit() {
     delete data.linkSrc;
     try {
       await (formData.value?.id
-        ? updateMenu(formData.value.id, data)
+        ? updateMenu(formData.value.id, {
+            ...data,
+            expectedVersion: formData.value.rowVersion,
+          })
         : createMenu(data));
+      drawerApi.close();
+      emit('success');
+    } catch (error) {
+      if (!isOptimisticLockConflict(error)) throw error;
       drawerApi.close();
       emit('success');
     } finally {

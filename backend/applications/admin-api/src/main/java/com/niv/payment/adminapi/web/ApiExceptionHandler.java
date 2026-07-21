@@ -1,6 +1,8 @@
 package com.niv.payment.adminapi.web;
 
 import cn.dev33.satoken.exception.NotLoginException;
+import com.niv.payment.permission.port.InvalidAuthorizationSubjectException;
+import com.niv.payment.permission.port.StalePermissionVersionException;
 import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.RoleAssignmentPolicy;
@@ -17,9 +19,16 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.util.Objects;
+
 @RestControllerAdvice
 public class ApiExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(ApiExceptionHandler.class);
+    private final AuthenticationService authentication;
+
+    public ApiExceptionHandler(AuthenticationService authentication) {
+        this.authentication = Objects.requireNonNull(authentication, "authentication");
+    }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class,
         HttpMessageNotReadableException.class, IdentityAdministrationService.InvalidCommandException.class,
@@ -36,9 +45,19 @@ public class ApiExceptionHandler {
                 ? "Invalid username or password" : "Authentication is required");
     }
 
-    @ExceptionHandler(InvalidSessionException.class)
-    ResponseEntity<ApiResponse<Void>> staleSession(InvalidSessionException exception) {
+    @ExceptionHandler({InvalidSessionException.class, InvalidAuthorizationSubjectException.class})
+    ResponseEntity<ApiResponse<Void>> staleSession(Exception exception) {
+        try {
+            authentication.logout();
+        } catch (RuntimeException cleanupFailure) {
+            LOG.warn("Failed to clear invalid session, traceId={}", RequestTrace.current(), cleanupFailure);
+        }
         return failure(HttpStatus.UNAUTHORIZED, 40102, "SESSION_INVALID", "Session is invalid or expired");
+    }
+
+    @ExceptionHandler(StalePermissionVersionException.class)
+    ResponseEntity<ApiResponse<Void>> stalePermissionVersion(StalePermissionVersionException exception) {
+        return staleSession(exception);
     }
 
     @ExceptionHandler(AuthenticationService.RateLimitExceededException.class)
@@ -73,8 +92,16 @@ public class ApiExceptionHandler {
         return failure(HttpStatus.NOT_FOUND, 40401, "RESOURCE_NOT_FOUND", "Resource not found");
     }
 
-    @ExceptionHandler({IdentityAdministrationService.OptimisticLockException.class, DataIntegrityViolationException.class})
-    ResponseEntity<ApiResponse<Void>> conflict(Exception exception) {
+    @ExceptionHandler(IdentityAdministrationService.OptimisticLockException.class)
+    ResponseEntity<ApiResponse<Void>> optimisticLockConflict(
+        IdentityAdministrationService.OptimisticLockException exception) {
+        return failure(HttpStatus.CONFLICT, 40902, "OPTIMISTIC_LOCK_CONFLICT",
+            "The record has changed; reload and retry");
+    }
+
+    @ExceptionHandler({IdentityAdministrationService.DataConflictException.class,
+        DataIntegrityViolationException.class})
+    ResponseEntity<ApiResponse<Void>> dataConflict(Exception exception) {
         return failure(HttpStatus.CONFLICT, 40901, "DATA_CONFLICT", "The operation conflicts with current data");
     }
 

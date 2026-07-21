@@ -18,18 +18,20 @@ public final class IdentityModels {
 
     public record User(long id, long membershipId, String username, String name, Long departmentId,
                        String departmentName, List<Long> roleIds, List<String> roleNames, int status,
-                       long userVersion, String remark, Instant createdAt) {
+                       String identityStatus, long userVersion, String remark, Instant createdAt) {
         public User { roleIds = List.copyOf(roleIds); roleNames = List.copyOf(roleNames); }
     }
 
-    public record Role(long id, String name, List<Long> menuIds, int status, String remark, Instant createdAt) {
+    public record Role(long id, String name, List<Long> menuIds, int status, String remark,
+                       long rowVersion, Instant createdAt) {
         public Role { menuIds = List.copyOf(menuIds); }
     }
 
-    public record Department(long id, Long parentId, String name, int status, String remark, Instant createdAt) { }
+    public record Department(long id, Long parentId, String name, int status, String remark,
+                             long rowVersion, Instant createdAt) { }
 
     public record Menu(long id, Long parentId, String type, String name, String path, String component,
-                       String redirect, String authCode, String metaJson, int status) { }
+                       String redirect, String authCode, String metaJson, int status, long rowVersion) { }
 
     public record UserCreateCommand(String username, String name, long departmentId, List<Long> roleIds,
                                     int status, String remark) {

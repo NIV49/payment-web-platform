@@ -28,7 +28,7 @@
 - Core 只依赖领域模型和端口；PostgreSQL、Redis、Sa-Token、Spring MVC 留在适配器或启动层。
 - 租户、membership 和操作人来自可信会话，不能信任请求传入的租户上下文。
 - 权限默认拒绝；高风险资金动作还必须经过数据范围、MFA/step-up、审批和审计规则。
-- 授权工作区 tenant 与业务资源归属 tenant 必须分开命名；跨归属租户只读要求 RELATED_PARTY_READ 元数据、显式商户/客户范围和可信关系证据，缺一即拒绝。
+- 授权工作区 tenant 与业务资源归属 tenant 必须分开命名；跨归属租户只读要求受控 READ/VIEW action、RELATED_PARTY_READ 元数据、显式商户/客户范围和可信关系证据，缺一即拒绝。
 - Flyway 文件一旦应用就不可编辑；修正数据或结构必须新增版本迁移。
 - Long ID 对前端返回字符串；分页保持 `{ items, total }`；统一响应保持 `{ code, data, error, message, traceId }`。
 

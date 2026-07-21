@@ -28,7 +28,7 @@ services:
     ports:
       - "127.0.0.1:16379:6379"
     volumes:
-      - payment_redis_data:/data
+      - payment_valkey72_data:/data
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
@@ -39,5 +39,5 @@ services:
 volumes:
   payment_postgres18_data:
     name: payment-web-platform-postgres18-data
-  payment_redis_data:
-    name: payment-web-platform-redis-data
+  payment_valkey72_data:
+    name: payment-web-platform-valkey72-data

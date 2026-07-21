@@ -29,6 +29,10 @@ public record PermissionGrant(
         if (riskLevel == RiskLevel.FUND && crossTenantMode != CrossTenantMode.SAME_TENANT_ONLY) {
             throw new IllegalArgumentException("FUND permissions must remain tenant-bound");
         }
+        if (crossTenantMode == CrossTenantMode.RELATED_PARTY_READ && !permission.action().readOnly()) {
+            throw new IllegalArgumentException(
+                "RELATED_PARTY_READ grants must use a controlled read-only action");
+        }
 
         Set<ScopeDimension> dimensions = new HashSet<>();
         for (DimensionScope scope : scopes) {

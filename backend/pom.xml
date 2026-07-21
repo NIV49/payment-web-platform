@@ -22,8 +22,6 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <flyway.version>12.4.0</flyway.version>
         <jooq.version>3.21.5</jooq.version>
-        <mybatis.version>3.5.19</mybatis.version>
-        <mybatis-spring-boot.version>4.0.0</mybatis-spring-boot.version>
         <postgresql.version>42.7.11</postgresql.version>
         <spring-boot.version>4.1.0</spring-boot.version>
         <sa-token.version>1.45.0</sa-token.version>
@@ -57,16 +55,6 @@
                 <groupId>com.niv.payment</groupId>
                 <artifactId>identity-session-satoken</artifactId>
                 <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.mybatis</groupId>
-                <artifactId>mybatis</artifactId>
-                <version>${mybatis.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.mybatis.spring.boot</groupId>
-                <artifactId>mybatis-spring-boot-starter</artifactId>
-                <version>${mybatis-spring-boot.version}</version>
             </dependency>
             <dependency>
                 <groupId>cn.dev33</groupId>
@@ -106,6 +94,16 @@
                                 <requireJavaVersion>
                                     <version>[25,26)</version>
                                 </requireJavaVersion>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>org.mybatis:*</exclude>
+                                        <exclude>org.mybatis.spring.boot:*</exclude>
+                                        <exclude>com.baomidou:*</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-data-jpa</exclude>
+                                        <exclude>org.hibernate.orm:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                </bannedDependencies>
                                 <dependencyConvergence/>
                             </rules>
                         </configuration>

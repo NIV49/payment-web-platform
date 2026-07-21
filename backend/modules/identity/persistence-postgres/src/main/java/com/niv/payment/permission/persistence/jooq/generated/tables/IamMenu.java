@@ -295,6 +295,7 @@ public class IamMenu extends TableImpl<IamMenuRecord> {
     @Override
     public List<Check<IamMenuRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("ck_iam_menu_external_navigation_safety"), "((((jsonb_typeof(meta_json) = 'object'::text) AND\nCASE menu_type\n    WHEN 'EMBEDDED'::text THEN ((NOT (meta_json ? 'link'::text)) AND (jsonb_typeof((meta_json -> 'iframeSrc'::text)) = 'string'::text) AND ((meta_json ->> 'iframeSrc'::text) ~* '^https?://([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\])(:[0-9]{1,5})?([/?#][^[:cntrl:][:space:]]*)?$'::text))\n    WHEN 'LINK'::text THEN ((NOT (meta_json ? 'iframeSrc'::text)) AND (jsonb_typeof((meta_json -> 'link'::text)) = 'string'::text) AND ((meta_json ->> 'link'::text) ~* '^https?://([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\])(:[0-9]{1,5})?([/?#][^[:cntrl:][:space:]]*)?$'::text))\n    ELSE ((NOT (meta_json ? 'iframeSrc'::text)) AND (NOT (meta_json ? 'link'::text)))\nEND) IS TRUE))", true),
             Internal.createCheck(this, DSL.name("ck_iam_menu_status"), "(((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'DISABLED'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_menu_type"), "(((menu_type)::text = ANY ((ARRAY['DIRECTORY'::character varying, 'PAGE'::character varying, 'EMBEDDED'::character varying, 'LINK'::character varying, 'BUTTON'::character varying])::text[])))", true)
         );

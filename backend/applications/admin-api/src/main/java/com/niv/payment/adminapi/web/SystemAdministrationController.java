@@ -4,6 +4,7 @@ import com.niv.payment.adminapi.config.AdminAuthorizationEnforcer;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
+import com.niv.payment.permission.domain.AdministrationActor;
 import com.niv.payment.permission.domain.AuthorizationSubject;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.IdentityModels;
@@ -76,7 +77,7 @@ public class SystemAdministrationController {
     ApiResponse<IdResponse> createUser(@Valid @RequestBody UserCreateRequest body, HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
         if (!body.roleIds().isEmpty()) requirePermission(subject, "user:assign-role");
-        long id = identities.createUser(subject.tenantId(), subject.membershipId(), body.command());
+        long id = identities.createUser(subject.tenantId(), actor(subject), body.command());
         return ApiResponse.success(new IdResponse(Long.toString(id)));
     }
 
@@ -84,11 +85,7 @@ public class SystemAdministrationController {
     ApiResponse<Void> updateUser(@PathVariable("id") long id, @Valid @RequestBody MembershipUpdateRequest body,
                                  HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        if (identities.userRolesChanged(subject.tenantId(), id,
-            body.roleIds().stream().map(SystemAdministrationController::longId).toList())) {
-            requirePermission(subject, "user:assign-role");
-        }
-        identities.updateUser(subject.tenantId(), subject.membershipId(), id, body.command());
+        identities.updateUser(subject.tenantId(), actor(subject), id, body.command());
         return ApiResponse.success(null);
     }
 
@@ -96,15 +93,18 @@ public class SystemAdministrationController {
     ApiResponse<UserStatusResponse> updateUserStatus(@PathVariable("id") long id,
         @Valid @RequestBody UserStatusRequest body, HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        long version = identities.updateUserStatus(subject.tenantId(), subject.membershipId(), id,
+        long version = identities.updateUserStatus(subject.tenantId(), actor(subject), id,
             body.status(), body.userVersion());
         return ApiResponse.success(new UserStatusResponse(version));
     }
 
     @DeleteMapping("/user/{id}")
-    ApiResponse<Void> deleteUser(@PathVariable("id") long id, HttpServletRequest request) {
+    ApiResponse<Void> deleteUser(@PathVariable("id") long id,
+                                 @RequestParam("expectedVersion") @Min(0) long expectedVersion,
+                                 HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        identities.deleteUser(subject.tenantId(), subject.membershipId(), id); return ApiResponse.success(null);
+        identities.deleteUser(subject.tenantId(), actor(subject), id, expectedVersion);
+        return ApiResponse.success(null);
     }
 
     @GetMapping("/role/list")
@@ -121,28 +121,31 @@ public class SystemAdministrationController {
     ApiResponse<IdResponse> createRole(@Valid @RequestBody RoleRequest body, HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
         return ApiResponse.success(new IdResponse(Long.toString(identities.createRole(subject.tenantId(),
-            subject.membershipId(), body.command()))));
+            actor(subject), body.command()))));
     }
 
     @PutMapping("/role/{id}")
-    ApiResponse<Void> updateRole(@PathVariable("id") long id, @Valid @RequestBody RoleRequest body,
+    ApiResponse<Void> updateRole(@PathVariable("id") long id, @Valid @RequestBody RoleUpdateRequest body,
                                  HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        identities.updateRole(subject.tenantId(), subject.membershipId(), id, body.command());
+        identities.updateRole(subject.tenantId(), actor(subject), id, body.command(), body.expectedVersion());
         return ApiResponse.success(null);
     }
 
     @DeleteMapping("/role/{id}")
-    ApiResponse<Void> deleteRole(@PathVariable("id") long id, HttpServletRequest request) {
+    ApiResponse<Void> deleteRole(@PathVariable("id") long id,
+                                 @RequestParam("expectedVersion") @Min(0) long expectedVersion,
+                                 HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        identities.deleteRole(subject.tenantId(), subject.membershipId(), id); return ApiResponse.success(null);
+        identities.deleteRole(subject.tenantId(), actor(subject), id, expectedVersion);
+        return ApiResponse.success(null);
     }
 
     @PatchMapping("/role/{id}/status")
     ApiResponse<Void> updateRoleStatus(@PathVariable("id") long id, @Valid @RequestBody RoleStatusRequest body,
                                        HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        identities.updateRoleStatus(subject.tenantId(), subject.membershipId(), id, body.status());
+        identities.updateRoleStatus(subject.tenantId(), actor(subject), id, body.status(), body.expectedVersion());
         return ApiResponse.success(null);
     }
 
@@ -156,21 +159,25 @@ public class SystemAdministrationController {
     ApiResponse<IdResponse> createDepartment(@Valid @RequestBody DepartmentRequest body, HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
         return ApiResponse.success(new IdResponse(Long.toString(identities.createDepartment(subject.tenantId(),
-            subject.membershipId(), body.command()))));
+            actor(subject), body.command()))));
     }
 
     @PutMapping("/dept/{id}")
-    ApiResponse<Void> updateDepartment(@PathVariable("id") long id, @Valid @RequestBody DepartmentRequest body,
+    ApiResponse<Void> updateDepartment(@PathVariable("id") long id,
+                                       @Valid @RequestBody DepartmentUpdateRequest body,
                                        HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        identities.updateDepartment(subject.tenantId(), subject.membershipId(), id, body.command());
+        identities.updateDepartment(subject.tenantId(), actor(subject), id, body.command(), body.expectedVersion());
         return ApiResponse.success(null);
     }
 
     @DeleteMapping("/dept/{id}")
-    ApiResponse<Void> deleteDepartment(@PathVariable("id") long id, HttpServletRequest request) {
+    ApiResponse<Void> deleteDepartment(@PathVariable("id") long id,
+                                       @RequestParam("expectedVersion") @Min(0) long expectedVersion,
+                                       HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        identities.deleteDepartment(subject.tenantId(), subject.membershipId(), id); return ApiResponse.success(null);
+        identities.deleteDepartment(subject.tenantId(), actor(subject), id, expectedVersion);
+        return ApiResponse.success(null);
     }
 
     @GetMapping("/menu/list")
@@ -198,37 +205,40 @@ public class SystemAdministrationController {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
         body.validate(menuContract);
         return ApiResponse.success(new IdResponse(Long.toString(identities.createMenu(subject.tenantId(),
-            subject.membershipId(), body.command(json)))));
+            actor(subject), body.command(json)))));
     }
 
     @PutMapping("/menu/{id}")
-    ApiResponse<Void> updateMenu(@PathVariable("id") long id, @Valid @RequestBody MenuRequest body,
+    ApiResponse<Void> updateMenu(@PathVariable("id") long id, @Valid @RequestBody MenuUpdateRequest body,
                                  HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
         body.validate(menuContract);
-        identities.updateMenu(subject.tenantId(), subject.membershipId(), id, body.command(json));
+        identities.updateMenu(subject.tenantId(), actor(subject), id, body.command(json), body.expectedVersion());
         return ApiResponse.success(null);
     }
 
     @DeleteMapping("/menu/{id}")
-    ApiResponse<Void> deleteMenu(@PathVariable("id") long id, HttpServletRequest request) {
+    ApiResponse<Void> deleteMenu(@PathVariable("id") long id,
+                                 @RequestParam("expectedVersion") @Min(0) long expectedVersion,
+                                 HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        identities.deleteMenu(subject.tenantId(), subject.membershipId(), id); return ApiResponse.success(null);
+        identities.deleteMenu(subject.tenantId(), actor(subject), id, expectedVersion);
+        return ApiResponse.success(null);
     }
 
     private UserResponse user(IdentityModels.User u) {
         return new UserResponse(Long.toString(u.id()), u.username(), u.name(), id(u.departmentId()), u.departmentName(),
-            u.roleIds().stream().map(String::valueOf).toList(), u.roleNames(), u.status(), u.userVersion(),
-            u.remark(), u.createdAt().toString());
+            u.roleIds().stream().map(String::valueOf).toList(), u.roleNames(), u.status(), u.identityStatus(),
+            u.userVersion(), u.remark(), u.createdAt().toString());
     }
     private RoleResponse role(IdentityModels.Role r) {
         return new RoleResponse(Long.toString(r.id()), r.name(), r.menuIds().stream().map(String::valueOf).toList(),
-            r.status(), r.remark(), r.createdAt().toString());
+            r.status(), r.remark(), r.rowVersion(), r.createdAt().toString());
     }
     private List<DepartmentResponse> departmentTree(List<IdentityModels.Department> rows) {
         return tree(rows, IdentityModels.Department::id, IdentityModels.Department::parentId,
             (item, children) -> new DepartmentResponse(Long.toString(item.id()), id(item.parentId()), item.name(),
-                item.status(), item.remark(), item.createdAt().toString(), children));
+                item.status(), item.remark(), item.rowVersion(), item.createdAt().toString(), children));
     }
     private List<MenuResponse> menuTree(List<IdentityModels.Menu> rows) {
         return tree(rows, IdentityModels.Menu::id, IdentityModels.Menu::parentId, (item, children) -> {
@@ -236,7 +246,7 @@ public class SystemAdministrationController {
             try { meta=json.readValue(item.metaJson(), new TypeReference<>(){}); }
             catch (JacksonException e) { throw new IllegalStateException("Stored menu metadata is invalid", e); }
             return new MenuResponse(Long.toString(item.id()), id(item.parentId()), item.type(), item.name(), item.path(),
-                item.component(), item.redirect(), item.authCode(), meta, item.status(), children);
+                item.component(), item.redirect(), item.authCode(), meta, item.status(), item.rowVersion(), children);
         });
     }
 
@@ -275,48 +285,88 @@ public class SystemAdministrationController {
     private void requirePermission(AuthorizationSubject subject, String permission) {
         authorization.requireTenantPermission(subject, permission);
     }
+    private static AdministrationActor actor(AuthorizationSubject subject) {
+        return new AdministrationActor(
+            subject.membershipId(), subject.userId(),
+            subject.permissionVersion(), subject.sessionVersion());
+    }
 
     @FunctionalInterface interface TreeFactory<T,R>{ R create(T item,List<R> children); }
     record PageResponse<T>(List<T> items,long total) { }
     record IdResponse(String id) { }
     record UserResponse(String id,String username,String name,String deptId,String deptName,List<String> roleIds,
-                        List<String> roleNames,int status,long userVersion,String remark,String createTime) { }
-    record RoleResponse(String id,String name,List<String> menuIds,int status,String remark,String createTime) { }
-    record DepartmentResponse(String id,String pid,String name,int status,String remark,String createTime,
+                        List<String> roleNames,int status,String identityStatus,long userVersion,String remark,
+                        String createTime) { }
+    record RoleResponse(String id,String name,List<String> menuIds,int status,String remark,long rowVersion,
+                        String createTime) { }
+    record DepartmentResponse(String id,String pid,String name,int status,String remark,long rowVersion,String createTime,
                               List<DepartmentResponse> children) { }
     record MenuResponse(String id,String pid,String type,String name,String path,String component,String redirect,
-                        String authCode,Map<String,Object> meta,int status,List<MenuResponse> children) { }
+                        String authCode,Map<String,Object> meta,int status,long rowVersion,
+                        List<MenuResponse> children) { }
     record UserStatusResponse(long userVersion) { }
 
     record UserCreateRequest(@NotBlank @Size(max=100) String username,@NotBlank @Size(max=128) String name,
         @NotBlank @Pattern(regexp="[1-9][0-9]*") String deptId,
-        @NotNull List<@Pattern(regexp="[1-9][0-9]*") String> roleIds,
+        @NotNull @Size(max=256) List<@Pattern(regexp="[1-9][0-9]{0,18}") String> roleIds,
         @NotNull @Min(0) @Max(1) Integer status,@Size(max=500) String remark) {
         IdentityModels.UserCreateCommand command(){ return new IdentityModels.UserCreateCommand(username,name,
             longId(deptId),roleIds.stream().map(SystemAdministrationController::longId).toList(),status,remark); }
     }
     record MembershipUpdateRequest(@NotBlank @Pattern(regexp="[1-9][0-9]*") String deptId,
-        @NotNull List<@Pattern(regexp="[1-9][0-9]*") String> roleIds,
+        @NotNull @Size(max=256) List<@Pattern(regexp="[1-9][0-9]{0,18}") String> roleIds,
         @NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion) {
         IdentityModels.MembershipUpdateCommand command(){ return new IdentityModels.MembershipUpdateCommand(
             longId(deptId),roleIds.stream().map(SystemAdministrationController::longId).toList(),status,userVersion); }
     }
     record UserStatusRequest(@NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion) { }
-    record RoleRequest(@NotBlank @Size(max=128) String name,@NotNull List<@Pattern(regexp="[1-9][0-9]*") String> menuIds,
+    record RoleRequest(@NotBlank @Size(max=128) String name,@NotNull @Size(max=2048) List<@Pattern(regexp="[1-9][0-9]{0,18}") String> menuIds,
                        @NotNull @Min(0) @Max(1) Integer status,@Size(max=500) String remark) {
         IdentityModels.RoleCommand command(){ return new IdentityModels.RoleCommand(name,
             menuIds.stream().map(SystemAdministrationController::longId).toList(),status,remark); }
     }
-    record RoleStatusRequest(@NotNull @Min(0) @Max(1) Integer status) { }
+    record RoleUpdateRequest(@NotBlank @Size(max=128) String name,
+                             @NotNull @Size(max=2048) List<@Pattern(regexp="[1-9][0-9]{0,18}") String> menuIds,
+                             @NotNull @Min(0) @Max(1) Integer status,@Size(max=500) String remark,
+                             @NotNull @Min(0) Long expectedVersion) {
+        IdentityModels.RoleCommand command(){ return new IdentityModels.RoleCommand(name,
+            menuIds.stream().map(SystemAdministrationController::longId).toList(),status,remark); }
+    }
+    record RoleStatusRequest(@NotNull @Min(0) @Max(1) Integer status,
+                             @NotNull @Min(0) Long expectedVersion) { }
     record DepartmentRequest(@Pattern(regexp="0|[1-9][0-9]*") String pid,@NotBlank @Size(max=128) String name,
                              @NotNull @Min(0) @Max(1) Integer status,@Size(max=500) String remark) {
         IdentityModels.DepartmentCommand command(){ return new IdentityModels.DepartmentCommand(parentId(pid),name,status,remark); }
     }
+    record DepartmentUpdateRequest(@Pattern(regexp="0|[1-9][0-9]*") String pid,
+                                   @NotBlank @Size(max=128) String name,
+                                   @NotNull @Min(0) @Max(1) Integer status,@Size(max=500) String remark,
+                                   @NotNull @Min(0) Long expectedVersion) {
+        IdentityModels.DepartmentCommand command(){
+            return new IdentityModels.DepartmentCommand(parentId(pid),name,status,remark);
+        }
+    }
     record MenuRequest(@Pattern(regexp="0|[1-9][0-9]*") String pid,@NotBlank @Size(max=16) String type,
                        @NotBlank @Size(max=128) String name,@Size(max=255) String path,
                        @Size(max=255) String component,@Size(max=255) String redirect,@Size(max=128) String authCode,
-                       @NotNull Map<String,Object> meta,
+                       @NotNull @Size(max=32) Map<String,Object> meta,
                        @NotNull @Min(0) @Max(1) Integer status) {
+        void validate(VbenMenuContract contract) {
+            contract.validate(type,name,path,component,redirect,authCode,meta);
+        }
+        IdentityModels.MenuCommand command(ObjectMapper json){
+            try{return new IdentityModels.MenuCommand(parentId(pid),type,name,path,component,redirect,authCode,
+                json.writeValueAsString(meta),status);}
+            catch(JacksonException e){throw new IllegalArgumentException("Invalid menu metadata",e);}
+        }
+    }
+    record MenuUpdateRequest(@Pattern(regexp="0|[1-9][0-9]*") String pid,
+                             @NotBlank @Size(max=16) String type,
+                             @NotBlank @Size(max=128) String name,@Size(max=255) String path,
+                             @Size(max=255) String component,@Size(max=255) String redirect,
+                             @Size(max=128) String authCode,@NotNull @Size(max=32) Map<String,Object> meta,
+                             @NotNull @Min(0) @Max(1) Integer status,
+                             @NotNull @Min(0) Long expectedVersion) {
         void validate(VbenMenuContract contract) {
             contract.validate(type,name,path,component,redirect,authCode,meta);
         }

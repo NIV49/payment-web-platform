@@ -68,6 +68,7 @@ AND ((A.merchant AND A.market) OR (B.merchant AND B.market))
 
 ```text
 permission.cross_tenant_mode = RELATED_PARTY_READ
+AND permission.action IN (READ, VIEW)
 AND trusted_relationship(resource_owner_tenant, merchant)
 AND ((A.merchant AND A.market) OR (B.merchant AND B.market))
 ```
@@ -91,7 +92,7 @@ Page<OrderRow> selectOrderPage(...);
 
 列名必须来自编译期注解或服务端白名单，不接受请求参数。
 
-第一版参考实现提供应用层 `PermissionDataScopeInterceptor`，输出结构化 Plan；真正 MyBatis/JSqlParser 适配器必须在订单表和查询形态确定后单独实现并做真实 PostgreSQL 测试。
+第一版参考实现提供应用层 `PermissionDataScopeInterceptor`，输出结构化 Plan；真实订单查询使用 jOOQ 生成字段和类型化 `Condition` 显式组合 owner tenant、Grant tuple 与关系条件。不要引入“拦截所有 SQL 并猜别名”的通用 JSqlParser 插件；订单表和查询形态确定后必须用真实 PostgreSQL 18 覆盖 JOIN、CTE、UNION、分页和详情查询。
 
 这是有意的边界：一个“看起来通用”的 SQL 插件如果无法证明 UNION、子查询、CTE、别名、UPDATE/DELETE 和分页行为，不能进入支付系统。
 
@@ -108,6 +109,8 @@ Page<OrderRow> selectOrderPage(...);
 | MERCHANT | 指定 ID 或 AgentMerchantRelation | 当前与历史关系语义分开 |
 | MARKET | market_code | 市场代码由服务端资源提供 |
 | CHANNEL | channel_id/account_id | 资金接口通常必须匹配具体渠道维度 |
+
+维度只允许使用已批准的 ScopeMode：TENANT=`TENANT_ALL`；OWNER=`SELF`；DEPARTMENT=`SELF/DEPARTMENT/DEPARTMENT_AND_CHILDREN/SPECIFIED`；CUSTOMER=`ASSIGNED/SPECIFIED`；MERCHANT=`ASSIGNED/SPECIFIED/RELATION_CURRENT/RELATION_AT_EVENT`；MARKET 与 CHANNEL 都仅允许 `SPECIFIED`。Core 与 V10 数据库 CHECK 双层拒绝其他组合，历史非法行必须使迁移失败，不能自动改权。
 
 ## 6. 历史订单
 
@@ -153,7 +156,9 @@ tenantId + membershipId + permissionCode + permissionVersion
 
 短期缓存。关系型范围必须额外包含 relationshipVersion，或由关系变更同时递增 permissionVersion。
 
-时间型 Grant 的下一 `valid_from/valid_until` 边界必须进入快照；边界到达即强制回源，不能让固定 TTL 延长或延迟授权。
+时间型 Grant 的下一 `valid_from/valid_until` 边界必须进入快照；只要边界存在就不缓存，每次授权都以数据库 `statement_timestamp()` 回源判断，不能让固定 TTL 或应用节点时钟延长、提前截断授权。
+
+`requiresApproval=true` 且没有可信服务端审批证据的 Grant 不得进入 `DataScopePlan`。列表查询不能因为“只读范围规划”而绕过与详情授权相同的审批、step-up 或职责分离约束。
 
 资金操作不缓存最终 Allow 结果；只缓存可验证的 Grant 数据。
 
@@ -164,7 +169,7 @@ tenantId + membershipId + permissionCode + permissionVersion
 1. tenant 不一致且无显式 metadata 时拒绝；
 2. 只有关系证据、没有 RELATED_PARTY_READ metadata 时拒绝；
 3. 只有 metadata、没有可信关系证据时拒绝；
-4. RELATED_PARTY_READ + 显式商户/客户范围 + 关系证据同时满足才允许普通只读；
+4. RELATED_PARTY_READ + 受控 READ/VIEW action + 显式商户/客户范围 + 关系证据同时满足才允许普通只读；
 5. FUND 即使关系匹配也拒绝跨资源归属租户；
 6. 空 Grant 拒绝；
 7. 空 SPECIFIED 拒绝；
@@ -180,4 +185,4 @@ tenantId + membershipId + permissionCode + permissionVersion
 
 ## 10. Verdict
 
-**有条件通过。** Core 已实现 `SAME_TENANT_ONLY` 默认值、`RELATED_PARTY_READ` 显式 permission metadata 和关系证据端口，数据库也以约束禁止 FUND 跨租户。但 Admin API 尚未接入 Party/Relationship 适配器，`DataScopePlan` 也未生成真实跨租户订单 SQL，因此当前运行时仍默认拒绝。真实订单 Mapper、关系版本和 PostgreSQL 查询测试完成前，不得声称跨租户数据权限已投产。
+**有条件通过。** Core 已实现 `SAME_TENANT_ONLY` 默认值、`RELATED_PARTY_READ` 显式 metadata、受控 READ/VIEW action 和关系证据端口；数据库同时禁止 FUND 跨租户及非只读 action 使用 RELATED_PARTY_READ。但 Admin API 尚未接入 Party/Relationship 适配器，`DataScopePlan` 也未生成真实跨租户订单 SQL，因此当前运行时仍默认拒绝。真实订单 Mapper、关系版本和 PostgreSQL 查询测试完成前，不得声称跨租户数据权限已投产。

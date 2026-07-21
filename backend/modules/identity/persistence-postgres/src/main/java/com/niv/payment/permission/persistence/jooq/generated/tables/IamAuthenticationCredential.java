@@ -202,6 +202,7 @@ public class IamAuthenticationCredential extends TableImpl<IamAuthenticationCred
     @Override
     public List<Check<IamAuthenticationCredentialRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("ck_iam_authentication_bcrypt_hash"), "(((password_hash IS NULL) OR ((password_hash)::text ~ '^[$]2[aby][$](1[0-4])[$][./A-Za-z0-9]{53}$'::text)))", true),
             Internal.createCheck(this, DSL.name("ck_iam_authentication_status"), "(((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'DISABLED'::character varying, 'LOCKED'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_authentication_username"), "(((username)::text = lower((username)::text)))", true)
         );

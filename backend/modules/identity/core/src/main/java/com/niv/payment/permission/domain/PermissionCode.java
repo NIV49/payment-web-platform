@@ -17,6 +17,14 @@ public record PermissionCode(String value) {
         return new PermissionCode(value);
     }
 
+    /**
+     * Returns an exact, controlled action classification. Unknown action codes stay UNKNOWN so
+     * policy that requires read-only semantics fails closed instead of guessing from a suffix.
+     */
+    public PermissionAction action() {
+        return PermissionAction.fromCode(value.substring(value.indexOf(':') + 1));
+    }
+
     @Override
     public String toString() {
         return value;

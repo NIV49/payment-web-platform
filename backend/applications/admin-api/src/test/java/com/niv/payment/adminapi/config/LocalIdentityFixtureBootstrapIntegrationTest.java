@@ -1,0 +1,473 @@
+package com.niv.payment.adminapi.config;
+
+import com.niv.payment.permission.persistence.repository.JooqCredentialRepository;
+import org.flywaydb.core.Flyway;
+import org.jooq.SQLDialect;
+import org.jooq.impl.DSL;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.DefaultApplicationArguments;
+import org.springframework.context.annotation.Profile;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+import javax.sql.DataSource;
+import java.time.OffsetDateTime;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+@Testcontainers
+class LocalIdentityFixtureBootstrapIntegrationTest {
+    private static final String PASSWORD = "local-test-password";
+
+    @Container
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(DockerImageName.parse(
+        "postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15")
+        .asCompatibleSubstituteFor("postgres"))
+        .withDatabaseName("payment_platform")
+        .withUsername("payment_dev")
+        .withPassword("payment_dev");
+
+    private DataSource dataSource;
+    private JdbcTemplate jdbc;
+
+    @BeforeEach
+    void migrateProductionSchema() {
+        Flyway flyway = Flyway.configure()
+            .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+            .locations("classpath:db/migration")
+            .cleanDisabled(false)
+            .load();
+        flyway.clean();
+        flyway.migrate();
+
+        DriverManagerDataSource configuredDataSource = new DriverManagerDataSource();
+        configuredDataSource.setDriverClassName("org.postgresql.Driver");
+        configuredDataSource.setUrl(POSTGRES.getJdbcUrl());
+        configuredDataSource.setUsername(POSTGRES.getUsername());
+        configuredDataSource.setPassword(POSTGRES.getPassword());
+        dataSource = configuredDataSource;
+        jdbc = new JdbcTemplate(dataSource);
+    }
+
+    @Test
+    void emptyDatabaseCreatesAndValidatesTheCompleteLocalFixture() throws Exception {
+        runBootstrap(PASSWORD);
+
+        assertCompleteFixture();
+        String hash = jdbc.queryForObject(
+            "SELECT password_hash FROM iam_authentication_credential WHERE user_id = 100",
+            String.class);
+        assertThat(new BCryptPasswordEncoder(10).matches(PASSWORD, hash)).isTrue();
+    }
+
+    @Test
+    void repeatedBootstrapIsStrictlyIdempotent() throws Exception {
+        runBootstrap(PASSWORD);
+        String firstCredentialState = credentialState();
+        String firstFixtureState = fixtureVersionState();
+
+        runBootstrap(PASSWORD);
+
+        assertCompleteFixture();
+        assertThat(credentialState()).isEqualTo(firstCredentialState);
+        assertThat(fixtureVersionState()).isEqualTo(firstFixtureState);
+    }
+
+    @Test
+    void successfulLoginMetadataRemainsValidAcrossLocalRestart() throws Exception {
+        runBootstrap(PASSWORD);
+        new JooqCredentialRepository(DSL.using(dataSource, SQLDialect.POSTGRES))
+            .markLoginSucceeded(100L);
+        OffsetDateTime lastLoginAt = jdbc.queryForObject("""
+            SELECT last_login_at FROM iam_authentication_credential WHERE user_id = 100
+            """, OffsetDateTime.class);
+        Long rowVersion = jdbc.queryForObject("""
+            SELECT row_version FROM iam_authentication_credential WHERE user_id = 100
+            """, Long.class);
+
+        runBootstrap(PASSWORD);
+
+        assertCompleteFixture();
+        assertThat(jdbc.queryForObject("""
+            SELECT last_login_at FROM iam_authentication_credential WHERE user_id = 100
+            """, OffsetDateTime.class)).isEqualTo(lastLoginAt);
+        assertThat(jdbc.queryForObject("""
+            SELECT row_version FROM iam_authentication_credential WHERE user_id = 100
+            """, Long.class)).isEqualTo(rowVersion).isEqualTo(2L);
+    }
+
+    @Test
+    void reservedIdentifierCollisionFailsWithoutAttachingFixtureRowsToTheWrongTenant() {
+        jdbc.update("""
+            INSERT INTO iam_tenant(id, tenant_code, tenant_name, tenant_type, status)
+            VALUES (1, 'real-platform', 'Real Platform', 'PLATFORM', 'ACTIVE')
+            """);
+
+        assertThatThrownBy(() -> runBootstrap(PASSWORD))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+
+        assertThat(count("iam_tenant")).isOne();
+        assertThat(count("iam_department")).isZero();
+        assertThat(count("iam_membership")).isZero();
+        assertThat(count("iam_role_grant")).isZero();
+    }
+
+    @Test
+    void reservedNaturalKeyCollisionFailsWithoutPartialFixtureWrites() {
+        jdbc.update("""
+            INSERT INTO iam_tenant(id, tenant_code, tenant_name, tenant_type, status)
+            VALUES (2, 'platform', 'Real Platform', 'PLATFORM', 'ACTIVE')
+            """);
+
+        assertThatThrownBy(() -> runBootstrap(PASSWORD))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+
+        assertThat(count("iam_tenant")).isOne();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM iam_tenant WHERE id = 1", Long.class)).isZero();
+        assertThat(count("iam_department")).isZero();
+    }
+
+    @Test
+    void partialFixtureFailsInsteadOfBeingSilentlyRepaired() throws Exception {
+        runBootstrap(PASSWORD);
+        jdbc.update("DELETE FROM iam_role_menu WHERE tenant_id = 1 AND role_id = 2000 AND menu_id = 6012");
+
+        assertThatThrownBy(() -> runBootstrap(PASSWORD))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+
+        assertThat(count("iam_role_menu")).isEqualTo(7);
+    }
+
+    @Test
+    void modifiedFixtureIdentityFailsInsteadOfGrantingTheWrongSubject() throws Exception {
+        runBootstrap(PASSWORD);
+        jdbc.update("UPDATE iam_user SET idp_subject = 'different-subject' WHERE id = 100");
+
+        assertThatThrownBy(() -> runBootstrap(PASSWORD))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+
+        assertThat(jdbc.queryForObject("SELECT idp_subject FROM iam_user WHERE id = 100", String.class))
+            .isEqualTo("different-subject");
+        assertThat(count("iam_role_grant")).isEqualTo(14);
+    }
+
+    @Test
+    void changedConfiguredPasswordFailsInsteadOfSilentlyKeepingUnknownCredentials() throws Exception {
+        runBootstrap(PASSWORD);
+        String originalCredentialState = credentialState();
+
+        assertThatThrownBy(() -> runBootstrap("a-different-password"))
+            .hasStackTraceContaining("does not match payment.bootstrap-password");
+
+        assertThat(credentialState()).isEqualTo(originalCredentialState);
+    }
+
+    @Test
+    void productPermissionExtensionsRemainUntouched() throws Exception {
+        insertPermissionExtension();
+
+        runBootstrap(PASSWORD);
+
+        assertCompleteFixture();
+        assertThat(count("iam_permission")).isEqualTo(15);
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_permission WHERE id = 9001 AND permission_code = 'payout:view'",
+            Long.class)).isOne();
+    }
+
+    @Test
+    void missingRequiredPermissionFailsWithoutAnyFixtureWrites() {
+        jdbc.update("DELETE FROM iam_permission WHERE id = 3001");
+
+        assertThatThrownBy(() -> runBootstrap(PASSWORD))
+            .hasStackTraceContaining("required permission catalog is incomplete or modified");
+
+        assertThat(count("iam_permission")).isEqualTo(13);
+        assertThat(count("iam_tenant")).isZero();
+        assertThat(count("iam_user")).isZero();
+        assertThat(count("iam_role_grant")).isZero();
+    }
+
+    @Test
+    void unrelatedProductionRowsDoNotBlockTheLocalFixture() throws Exception {
+        jdbc.update("""
+            INSERT INTO iam_tenant(id, tenant_code, tenant_name, tenant_type, status)
+            VALUES (2, 'merchant-two', 'Merchant Two', 'DIRECT_MERCHANT', 'ACTIVE')
+            """);
+        jdbc.update("""
+            INSERT INTO iam_user(id, idp_issuer, idp_subject, display_name, status)
+            VALUES (200, 'production-idp', 'real-user', 'Real User', 'ACTIVE')
+            """);
+        jdbc.update("""
+            INSERT INTO iam_audit_event(
+                id, tenant_id, target_type, target_ref, action_code,
+                decision, reason_code, trace_id
+            ) VALUES (nextval('iam_id_seq'), 2, 'TENANT', '2', 'CREATED',
+                      'NOT_APPLICABLE', 'TEST', 'real-audit')
+            """);
+        jdbc.update("""
+            INSERT INTO iam_permission_change_outbox(
+                id, tenant_id, aggregate_type, aggregate_ref, event_type, payload,
+                aggregate_version, schema_version, partition_key, trace_id
+            ) VALUES (nextval('iam_id_seq'), 2, 'TENANT', '2', 'TenantChanged',
+                      '{}'::jsonb, 1, 1, '2', 'real-outbox')
+            """);
+
+        runBootstrap(PASSWORD);
+
+        assertCompleteFixture();
+        assertThat(count("iam_tenant")).isEqualTo(2);
+        assertThat(count("iam_user")).isEqualTo(2);
+        assertThat(count("iam_audit_event")).isOne();
+        assertThat(count("iam_permission_change_outbox")).isOne();
+    }
+
+    @Test
+    void additionalLocalUsersRolesMenusAndTheirOwnRelationshipsSurviveRestart() throws Exception {
+        runBootstrap(PASSWORD);
+        jdbc.update("""
+            INSERT INTO iam_user(id, idp_issuer, idp_subject, display_name, status)
+            VALUES (700, 'local', 'developer', 'Local Developer', 'ACTIVE')
+            """);
+        jdbc.update("""
+            INSERT INTO iam_membership(id, tenant_id, user_id, department_id, status)
+            VALUES (7000, 1, 700, 10, 'ACTIVE')
+            """);
+        jdbc.update("""
+            INSERT INTO iam_authentication_credential(user_id, username, password_hash, status)
+            VALUES (700, 'developer', NULL, 'ACTIVE')
+            """);
+        jdbc.update("""
+            INSERT INTO iam_role(
+                id, tenant_id, role_code, role_name, applicable_tenant_type,
+                assignable, system_role, status
+            ) VALUES (7100, 1, 'local-developer', 'Local Developer', 'PLATFORM', true, false, 'ACTIVE')
+            """);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id, membership_id, role_id, assigned_by)
+            VALUES (1, 7000, 7100, 7000)
+            """);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(
+                id, tenant_id, role_id, permission_id, grant_key, status, created_by, updated_by
+            ) VALUES (7300, 1, 7100, 3001, 'local-developer-view', 'ACTIVE', 7000, 7000)
+            """);
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id, grant_id, dimension_code, scope_mode)
+            VALUES (7400, 7300, 'TENANT', 'TENANT_ALL')
+            """);
+        jdbc.update("""
+            INSERT INTO iam_menu(
+                id, tenant_id, parent_id, menu_type, menu_name, route_name, route_path,
+                component_path, sort_order, status, meta_json
+            ) VALUES (
+                7200, 1, NULL, 'PAGE', 'Local Developer', 'LocalDeveloper',
+                '/local-developer', '/dashboard/workspace/index', 500, 'ACTIVE',
+                '{"title":"local.developer"}'::jsonb
+            )
+            """);
+        jdbc.update("""
+            INSERT INTO iam_role_menu(tenant_id, role_id, menu_id)
+            VALUES (1, 7100, 7200)
+            """);
+
+        runBootstrap(PASSWORD);
+
+        assertCompleteFixture();
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_user WHERE id = 700 AND idp_subject = 'developer'", Long.class))
+            .isOne();
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_membership_role WHERE membership_id = 7000 AND role_id = 7100",
+            Long.class)).isOne();
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_role_grant WHERE id = 7300 AND role_id = 7100", Long.class))
+            .isOne();
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_menu WHERE id = 7200 AND route_name = 'LocalDeveloper'", Long.class))
+            .isOne();
+        assertThat(count("iam_user")).isEqualTo(2);
+        assertThat(count("iam_role")).isEqualTo(2);
+        assertThat(count("iam_menu")).isEqualTo(9);
+    }
+
+    @Test
+    void relationshipAttachedToTheFixtureMembershipStillFailsWithoutMutation() throws Exception {
+        runBootstrap(PASSWORD);
+        jdbc.update("""
+            INSERT INTO iam_role(
+                id, tenant_id, role_code, role_name, applicable_tenant_type,
+                assignable, system_role, status
+            ) VALUES (7100, 1, 'attached-role', 'Attached Role', 'PLATFORM', true, false, 'ACTIVE')
+            """);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id, membership_id, role_id, assigned_by)
+            VALUES (1, 1000, 7100, 1000)
+            """);
+
+        assertThatThrownBy(() -> runBootstrap(PASSWORD))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+
+        assertThat(count("iam_membership_role")).isEqualTo(2);
+        assertThat(credentialState()).isNotBlank();
+    }
+
+    @Test
+    void failureAfterEarlierInsertsRollsBackEveryFixtureTable() {
+        jdbc.execute("""
+            CREATE FUNCTION fail_local_fixture_role_insert()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.id = 2000 THEN
+                    RAISE EXCEPTION 'forced local fixture failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+            """);
+        jdbc.execute("""
+            CREATE TRIGGER trg_fail_local_fixture_role_insert
+            BEFORE INSERT ON iam_role
+            FOR EACH ROW EXECUTE FUNCTION fail_local_fixture_role_insert()
+            """);
+
+        assertThatThrownBy(() -> runBootstrap(PASSWORD))
+            .hasStackTraceContaining("forced local fixture failure");
+
+        assertThat(count("iam_tenant")).isZero();
+        assertThat(count("iam_department")).isZero();
+        assertThat(count("iam_user")).isZero();
+        assertThat(count("iam_membership")).isZero();
+        assertThat(count("iam_authentication_credential")).isZero();
+        assertThat(count("iam_role")).isZero();
+        assertThat(count("iam_membership_role")).isZero();
+        assertThat(count("iam_role_grant")).isZero();
+        assertThat(count("iam_grant_dimension")).isZero();
+        assertThat(count("iam_menu")).isZero();
+        assertThat(count("iam_role_menu")).isZero();
+        assertThat(count("iam_permission")).isEqualTo(14);
+    }
+
+    @Test
+    void bootstrapComponentIsRegisteredOnlyForTheLocalProfile() {
+        Profile profile = LocalIdentityFixtureBootstrap.class.getAnnotation(Profile.class);
+
+        assertThat(profile).isNotNull();
+        assertThat(profile.value()).containsExactly("local");
+    }
+
+    private void runBootstrap(String password) throws Exception {
+        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(10);
+        LocalIdentityFixtureBootstrap bootstrap = new LocalIdentityFixtureBootstrap(
+            dataSource,
+            jdbc,
+            new DataSourceTransactionManager(dataSource),
+            encoder,
+            password);
+        bootstrap.run(new DefaultApplicationArguments(new String[0]));
+    }
+
+    private void assertCompleteFixture() {
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*)
+              FROM iam_tenant tenant
+              JOIN iam_department department ON department.tenant_id = tenant.id
+              JOIN iam_membership membership
+                ON membership.tenant_id = tenant.id AND membership.department_id = department.id
+              JOIN iam_user user_account ON user_account.id = membership.user_id
+              JOIN iam_authentication_credential credential ON credential.user_id = user_account.id
+              JOIN iam_role role ON role.tenant_id = tenant.id
+              JOIN iam_membership_role membership_role
+                ON membership_role.tenant_id = tenant.id
+               AND membership_role.membership_id = membership.id
+               AND membership_role.role_id = role.id
+             WHERE tenant.id = 1 AND tenant.tenant_code = 'platform'
+               AND department.id = 10 AND department.department_code = 'head-office'
+               AND membership.id = 1000 AND membership.status = 'ACTIVE'
+               AND user_account.id = 100 AND user_account.idp_issuer = 'local'
+               AND user_account.idp_subject = 'admin' AND user_account.status = 'ACTIVE'
+               AND credential.username = 'admin' AND credential.password_hash IS NOT NULL
+               AND credential.status = 'ACTIVE'
+               AND role.id = 2000 AND role.role_code = 'platform-admin'
+               AND role.system_role AND NOT role.assignable AND role.status = 'ACTIVE'
+            """, Long.class)).isOne();
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_role_grant WHERE tenant_id = 1 AND role_id = 2000",
+            Long.class)).isEqualTo(14);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*)
+              FROM iam_grant_dimension dimension_row
+              JOIN iam_role_grant grant_row ON grant_row.id = dimension_row.grant_id
+             WHERE grant_row.tenant_id = 1 AND grant_row.role_id = 2000
+            """, Long.class)).isEqualTo(14);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*)
+              FROM iam_grant_target target
+              JOIN iam_grant_dimension dimension_row ON dimension_row.id = target.dimension_id
+              JOIN iam_role_grant grant_row ON grant_row.id = dimension_row.grant_id
+             WHERE grant_row.tenant_id = 1 AND grant_row.role_id = 2000
+            """, Long.class)).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_menu
+             WHERE tenant_id = 1
+               AND id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
+            """, Long.class)).isEqualTo(8);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_menu
+             WHERE tenant_id = 1 AND role_id = 2000
+               AND menu_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
+            """, Long.class)).isEqualTo(8);
+    }
+
+    private String credentialState() {
+        return jdbc.queryForObject("""
+            SELECT password_hash || '|' || row_version || '|' || updated_at::text
+              FROM iam_authentication_credential
+             WHERE user_id = 100
+            """, String.class);
+    }
+
+    private String fixtureVersionState() {
+        return jdbc.queryForObject("""
+            SELECT string_agg(state, ',' ORDER BY state)
+              FROM (
+                    SELECT 'tenant:' || row_version AS state FROM iam_tenant WHERE id = 1
+                    UNION ALL SELECT 'department:' || row_version FROM iam_department WHERE id = 10
+                    UNION ALL SELECT 'user:' || row_version FROM iam_user WHERE id = 100
+                    UNION ALL SELECT 'membership:' || row_version FROM iam_membership WHERE id = 1000
+                    UNION ALL SELECT 'role:' || row_version FROM iam_role WHERE id = 2000
+                    UNION ALL SELECT 'grant:' || id || ':' || row_version
+                              FROM iam_role_grant WHERE role_id = 2000
+                    UNION ALL SELECT 'menu:' || id || ':' || row_version
+                              FROM iam_menu WHERE tenant_id = 1
+                   ) fixture_versions
+            """, String.class);
+    }
+
+    private long count(String table) {
+        Long count = jdbc.queryForObject("SELECT count(*) FROM " + table, Long.class);
+        return count == null ? 0 : count;
+    }
+
+    private void insertPermissionExtension() {
+        jdbc.update("""
+            INSERT INTO iam_permission(
+                id, permission_code, resource_code, action_code, risk_level,
+                required_dimensions, requires_step_up, requires_approval, status,
+                description, cross_tenant_mode
+            ) VALUES (9001, 'payout:view', 'payout', 'view', 'NORMAL',
+                      ARRAY['TENANT']::varchar(32)[], false, false, 'ACTIVE',
+                      'Product extension', 'SAME_TENANT_ONLY')
+            """);
+    }
+}

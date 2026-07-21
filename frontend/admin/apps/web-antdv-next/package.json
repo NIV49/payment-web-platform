@@ -1,12 +1,12 @@
 {
   "name": "@vben/web-antdv-next",
   "version": "5.7.0",
-  "homepage": "https://vben.pro",
-  "bugs": "https://github.com/vbenjs/vue-vben-admin/issues",
+  "homepage": "https://github.com/NIV49/payment-web-platform",
+  "bugs": "https://github.com/NIV49/payment-web-platform/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vbenjs/vue-vben-admin.git",
-    "directory": "apps/web-antdv-next"
+    "url": "git+https://github.com/NIV49/payment-web-platform.git",
+    "directory": "frontend/admin/apps/web-antdv-next"
   },
   "license": "MIT",
   "author": {

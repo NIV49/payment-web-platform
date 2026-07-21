@@ -1,7 +1,9 @@
 # Admin 前端工程上下文
 
 > 适用目录：`frontend/admin/**`
-> 当前基线：Vben 5.7.0 / Vue 3.5.38 / Vite 8.0.16 / pnpm 11.7.0 / Antdv Next 1.3.5
+> 当前基线：Node.js 24.16.0 / Vben 5.7.0 / Vue 3.5.38 / Vite 8.0.16 / pnpm 11.7.0 / Antdv Next 1.3.6
+
+版本事实来源：`.node-version` 与产品 Docker builder 固定 Node.js 24.16.0，`engines.node` 允许同一 major 内的 `>=24.11.0 <25`；`packageManager` 与 `engines.pnpm` 固定 pnpm 11.7.0；工作区 package version 为 Vben 5.7.0，当前锁文件解析 Vue 3.5.38 和 `antdv-next` 1.3.6。不能再用本机偶然安装的 Node 版本或上游最新版本描述本项目。
 
 ## 1. 工程定位
 
@@ -38,7 +40,6 @@ apps/web-antdv-next
 | `scripts/vsh` | 循环依赖、依赖、lint、发布检查 CLI | 工程质量门禁 |
 | `scripts/deploy` | 产品 Admin 容器/Nginx 构建与生产安全回归测试 | 只构建、复制 `web-antdv-next`，禁止部署 Playground |
 | `.changeset` | 上游包版本变更 | 当前业务仓库暂不发布 Vben 包 |
-| `.github` | 上游 Issue/Actions 配置 | 与业务仓库 CI 需分开判断 |
 | `.vscode` | 推荐开发配置 | 编辑器辅助 |
 | `pnpm-workspace.yaml` | workspace 范围和依赖 catalog | 增删 package 必须同步 |
 | `turbo.json` | task 依赖、缓存和输出 | 新任务需声明缓存语义 |
@@ -147,6 +148,8 @@ views/system/*/list.vue
 - 普通接口经 `defaultResponseInterceptor` 解包：成功码 `0`，数据字段 `data`。
 - 页面列表返回 `{ items, total }`，对应 VxeTable adapter 的响应映射。
 - Long ID 使用字符串，避免 JavaScript 精度丢失。
+- Role、Department、Menu 列表项必须保留后端 `rowVersion`；更新/状态切换用 body `expectedVersion`，删除用 query `expectedVersion`。User 删除把 `userVersion` 作为 expectedVersion。
+- 40902 `OPTIMISTIC_LOCK_CONFLICT` 表示当前表单快照已过期：错误拦截器展示后端可读 message，页面关闭旧编辑态并刷新列表。40901 `DATA_CONFLICT` 是唯一键、树依赖等业务冲突，不能自动按 stale reload 处理。
 - 登录返回 `{ accessToken: 'cookie-session' }`；这只是前端状态协议。
 - `/menu/all` 返回 `RouteRecordStringComponent[]`；title 和 component 规则见 [Vben 基线](../vben/README.md)。
 - 业务接口类型放在 API 模块，跨模块稳定类型才进入 `@vben/types`。
@@ -160,6 +163,7 @@ views/system/*/list.vue
 ```bash
 pnpm install
 pnpm dev:antdv-next
+pnpm run lint
 pnpm -F @vben/web-antdv-next run typecheck
 pnpm run test:production-safety
 pnpm build:antdv-next
@@ -171,7 +175,8 @@ pnpm test:unit
 - `apps/web-antdv-next/.env.production` 固定使用同源 `/api`；生产入口网关必须把 `/api` 转发到后端，产品构建不得连接 Vben 公网 Mock。
 - 产品入口默认不加载第三方统计脚本。确需接入分析服务时必须单独完成数据合规、安全评审和显式配置，不能在 HTML 中硬编码。
 - `scripts/deploy/Dockerfile` 只执行 `build:antdv-next`，且只复制 `apps/web-antdv-next/dist`。Playground 仅用于本地示例，禁止进入产品镜像。
-- `scripts/deploy/production-safety.test.ts` 守护上述边界；根目录 `.github/workflows/frontend.yml` 在前端变更时执行 typecheck、单测和产品构建。
+- 依赖安装 lifecycle 不使用 `npx`/`pnpm dlx`；原 `preinstall: npx only-allow pnpm` 已删除，`production-safety.test.ts` 会扫描 lifecycle 脚本防止回归。手动 `update:deps`/`catalog` 命令不是安装 lifecycle，不得在未评审情况下自动触发。
+- `scripts/deploy/production-safety.test.ts` 守护上述边界；业务 CI 只由仓库根目录 `.github/workflows/frontend.yml` 定义，并在前端变更时执行 frozen install、全量 lint、产品 app typecheck、单测、production-safety 和产品构建。`frontend/admin` 内不保留嵌套 `.github`，避免出现 GitHub 不会加载的失效工作流和仓库元数据。
 
 Playground：
 
@@ -192,6 +197,7 @@ pnpm -F @vben/playground run test:e2e
 - [ ] component 可映射到真实 `views/**/*.vue`。
 - [ ] 权限码与后端一致，后端仍执行鉴权。
 - [ ] API envelope、分页和 ID 类型符合契约。
+- [ ] 修改管理资源时保留 rowVersion/userVersion 并回传 expectedVersion；专用乐观锁错误触发重新加载，普通 DATA_CONFLICT 不误判。
 - [ ] 运行 typecheck、相关测试；路由/交互变化做浏览器验证。
 - [ ] 新约定或结构同步到本文件。
 
@@ -204,5 +210,5 @@ pnpm -F @vben/playground run test:e2e
 - component 转换：`packages/utils/src/helpers/generate-routes-backend.ts`。
 - i18n：`src/locales/index.ts`、`src/locales/langs/**`。
 - 组件适配：`src/adapter/component/index.ts`、`form.ts`、`vxe-table.ts`。
-- 请求与登录：`src/api/request.ts`、`src/store/auth.ts`。
+- 请求与登录：`src/api/request.ts`、`src/api/error-contract.ts`、`src/store/auth.ts`。
 - 示例：`frontend/admin/playground`、`docs/ai-context/playground`。

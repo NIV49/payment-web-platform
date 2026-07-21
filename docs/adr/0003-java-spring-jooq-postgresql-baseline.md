@@ -8,4 +8,4 @@ Flyway migrations are the only schema truth. jOOQ tables, records, keys and sequ
 
 The baseline is upgraded as one tested unit. Modules cannot select a lower Java release, override jOOQ independently, or introduce another ORM. Explicit SQL remains reviewable through jOOQ conditions and generated fields; raw string SQL requires a documented reason and database integration coverage.
 
-The existing Java 17/MyBatis/PostgreSQL 16 implementation is an architecture deviation to remove incrementally behind the existing Core ports. A migration slice is complete only when its MyBatis mapper and dead projections are deleted, PostgreSQL contract tests pass, and no behavior is silently weakened.
+The former Java 17/MyBatis/PostgreSQL 16 implementation was removed behind the existing Core ports on 2026-07-20. Runtime persistence now uses only jOOQ generated from the PostgreSQL 18 migration chain. Any future ORM introduction or Java/database downgrade requires a new ADR; a passing build alone is not authority to change this baseline.

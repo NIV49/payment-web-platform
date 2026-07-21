@@ -1,5 +1,5 @@
 {
-  "name": "vben-admin-monorepo",
+  "name": "payment-web-platform-admin",
   "version": "5.7.0",
   "private": true,
   "keywords": [
@@ -14,9 +14,13 @@
     "vue vben admin pro",
     "vue3"
   ],
-  "homepage": "https://github.com/vbenjs/vue-vben-admin",
-  "bugs": "https://github.com/vbenjs/vue-vben-admin/issues",
-  "repository": "vbenjs/vue-vben-admin.git",
+  "homepage": "https://github.com/NIV49/payment-web-platform",
+  "bugs": "https://github.com/NIV49/payment-web-platform/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NIV49/payment-web-platform.git",
+    "directory": "frontend/admin"
+  },
   "license": "MIT",
   "author": {
     "name": "vben",
@@ -45,7 +49,6 @@
     "format": "vsh lint --format",
     "lint": "vsh lint",
     "postinstall": "pnpm -r run --if-present stub",
-    "preinstall": "npx only-allow pnpm",
     "prepare": "is-ci || pnpm exec lefthook install",
     "preview": "turbo-run preview",
     "publint": "vsh publint",
@@ -95,8 +98,8 @@
     "vue-tsc": "catalog:"
   },
   "engines": {
-    "node": "^22.18.0 || ^24.0.0",
-    "pnpm": ">=11.0.0"
+    "node": ">=24.11.0 <25",
+    "pnpm": "11.7.0"
   },
   "packageManager": "pnpm@11.7.0"
 }
