@@ -79,6 +79,8 @@ Password: payment_dev
 
 Judge 与 skill 不覆盖产品决策。全局 User 是否允许关联多个 TenantMembership、工作空间选择和 session realm/Token audience 方案仍为待确认项，只有产品基线或 accepted ADR 可以使其生效。
 
+如果你需要一段很长的注释来证明这种变通方法是可行的，那么代码就有问题——请修改代码。
+
 ## Git 远端
 
 - `origin`：业务仓库 `NIV49/payment-web-platform`
