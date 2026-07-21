@@ -7,10 +7,21 @@ description: "Govern payment-platform modernization with Judge-first gates, capa
 
 Modernize the payment platform without treating legacy behavior as truth. Keep business decisions in project docs, deterministic verdicts in Judge tests and CI, and orchestration state in event loops.
 
+## Repository Pair
+
+Use these fixed repositories unless a human explicitly changes the project baseline:
+
+- Legacy evidence source: `/Users/mac/Documents/work/backend`
+- Target implementation repository: `/Users/mac/Documents/demo/payment-web-platform`
+
+Treat the legacy repository as read-only evidence. Never edit, format, commit, reset, or generate artifacts inside it. Write specifications, Rulebook entries, Judge assets, implementation, queues, and traceability only in the target repository or its dedicated Git worktrees.
+
+Before starting a slice, record an immutable legacy source commit for every source repository involved and an immutable target base commit. Do not silently replace either path with the current working directory.
+
 ## Start Here
 
-1. Read repository `AGENTS.md` and its mandatory context routes.
-2. Read the relevant approved requirements, ADRs, contracts, known deviations, and domain context under `docs/`.
+1. Read `/Users/mac/Documents/demo/payment-web-platform/AGENTS.md` and its mandatory context routes.
+2. Read the relevant approved requirements, ADRs, contracts, known deviations, and domain context under `/Users/mac/Documents/demo/payment-web-platform/docs/`.
 3. Identify the immutable source commit, target commit, Rulebook version, and capability slice.
 4. Choose exactly one path:
    - **Reimagine**: rebuild a capability from approved intent when the target model or architecture deliberately differs from legacy.
