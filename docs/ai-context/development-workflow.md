@@ -56,9 +56,10 @@
 | 后端适配器/API | `./mvnw -s maven-settings.xml clean verify`，必要时 Testcontainers 集成测试 |
 | Flyway | 新库迁移、已有本地库升级、回滚/兼容性检查 |
 | 跨端契约 | 前端契约测试、后端集成测试、真实浏览器联调 |
-| 文档/规则 | `git diff --check`，检查相对链接与源码路径；涉及权限决策时运行 `python3 scripts/check-doc-decisions.py` |
+| 文档/规则 | `git diff --check`，检查相对链接与源码路径，运行 `python3 scripts/check_sensitive_artifacts.py`；默认根目录之外的证据派生产物需显式传入路径，涉及权限决策时运行 `python3 scripts/check-doc-decisions.py` |
+| 项目级 Agent skill | `python3 -m unittest discover -s scripts/tests -p 'test_*.py'`、`python3 scripts/check_project_skills.py`，并运行其关联的文档/规则门禁 |
 
-权限跨文档决策使用 `<!-- decision-status id=<ID> status=<pending|accepted|superseded> ref=<none|repo-relative-path> -->` 标记。`pending` 必须使用 `ref=none`；`accepted` 必须引用仓库内状态为 accepted 的 ADR。修改任一决策状态时，必须同步全部登记文档并运行一致性检查。
+权限跨文档决策使用 `<!-- decision-status id=<ID> status=<pending|accepted|superseded> ref=<none|repo-relative-path> -->` 标记。属性必须且只能各出现一次。`pending` 必须使用 `ref=none`；`accepted` 或 `superseded` 必须引用 `docs/adr/NNNN-slug.md`，该 ADR 必须且只能声明一次 `Status: accepted.` 和匹配的 `Decision-ID: <ID>`。修改任一决策状态时，必须同步全部登记文档并运行一致性检查。
 
 ## 4. 完成定义
 

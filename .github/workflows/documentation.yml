@@ -4,14 +4,26 @@ on:
   pull_request:
     paths:
       - "docs/**"
+      - ".agents/skills/**"
+      - "AGENTS.md"
+      - "README.md"
       - "scripts/check-doc-decisions.py"
+      - "scripts/check_project_skills.py"
+      - "scripts/check_sensitive_artifacts.py"
+      - "scripts/tests/**"
       - ".github/workflows/documentation.yml"
   push:
     branches:
       - main
     paths:
       - "docs/**"
+      - ".agents/skills/**"
+      - "AGENTS.md"
+      - "README.md"
       - "scripts/check-doc-decisions.py"
+      - "scripts/check_project_skills.py"
+      - "scripts/check_sensitive_artifacts.py"
+      - "scripts/tests/**"
       - ".github/workflows/documentation.yml"
 
 permissions:
@@ -35,3 +47,12 @@ jobs:
 
       - name: Verify AI context decision states
         run: python3 scripts/check-doc-decisions.py
+
+      - name: Test documentation governance
+        run: python3 -m unittest discover -s scripts/tests -p "test_*.py"
+
+      - name: Verify project skills
+        run: python3 scripts/check_project_skills.py
+
+      - name: Scan sensitive documentation artifacts
+        run: python3 scripts/check_sensitive_artifacts.py

@@ -1,5 +1,9 @@
 .DS_Store
 
+# Python tooling caches
+__pycache__/
+*.py[cod]
+
 # Local upstream projects used only for design/reference analysis
 /sourceRepository/
 /resultRepository/

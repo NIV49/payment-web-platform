@@ -14,6 +14,7 @@
 4. 修改前后端接口、字段、登录、菜单或权限码时，还必须读 `docs/ai-contract/identity-admin-api-contract.md`。
 5. 跨端任务同时阅读前端、后端和契约文档。
 6. `frontend/portal` 初始化前先建立 Nuxt 4 专属上下文；Vben 规则不能直接套用到 Portal。
+7. 规划迁移、重构、Judge 或多 Agent 能力切片前，必须读 `docs/judge-charter.md`；需要执行现代化工作流时再加载 `.agents/skills/payment-modernization/SKILL.md` 及其任务相关 reference。
 
 完整流程见 `docs/ai-context/development-workflow.md`。
 
@@ -24,6 +25,7 @@
 - 当前 Admin 基线是 Node.js `24.16.0`、Vben `5.7.0`、Vue `3.5.38`、`antdv-next` `1.3.6`。
 - Playground 只用于提取模式。复制前必须确认依赖、接口、权限和 UI 组件与 `web-antdv-next` 一致。
 - 不确定的内容明确标为“待确认”，不允许编造框架行为。
+- Judge Charter 和项目 skill 只定义治理流程，不能把待确认业务规则提升为已批准 Rulebook；规则状态仍以产品基线或 accepted ADR 为准。
 
 ## 前端硬规则
 

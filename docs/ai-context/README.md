@@ -1,7 +1,7 @@
 # AI 开发上下文入口
 
 > 状态：当前仓库事实基线
-> 基线日期：2026-07-17
+> 基线日期：2026-07-21
 > 适用对象：开发人员、代码审查者和 AI 编码代理
 
 这个目录不是背景资料归档，而是每次改代码前的必读入口。目标是让实现建立在当前源码、版本匹配的官方文档和明确的项目决策上，避免凭印象复制示例。
@@ -30,6 +30,7 @@
 | 权限、租户、数据范围 | [权限设计目录](./permission/)、产品需求基线 |
 | 数据库或 Flyway | 后端文档、[数据库设计](./permission/06-database-design.md)、[迁移计划](./permission/09-migration-plan.md) |
 | `frontend/portal/**` | 当前只有占位目录；初始化前先新增 Nuxt 4 monorepo 专属上下文，不套用 Vben 约定 |
+| 迁移、重构、Judge、多 Agent 能力切片 | [Judge Charter](../judge-charter.md)；需要执行现代化流程时加载 [payment-modernization skill](../../.agents/skills/payment-modernization/SKILL.md) 及任务相关 reference |
 
 完整的开发前置与完成标准见 [开发工作流](./development-workflow.md)。
 
@@ -43,6 +44,8 @@
 - [后端工程上下文](./backend/README.md)：Maven 模块、认证授权、持久化、缓存、接口和运行方式。
 - [当前偏差与待治理项](./known-deviations.md)：已经发现但本次未改业务代码的问题。
 - [开发工作流](./development-workflow.md)：每次开发的阅读、实现、验证和文档更新门禁。
+- [Judge Charter](../judge-charter.md)：不可变快照、独立复审、Rulebook、机器队列和退出门禁。
+- [payment-modernization skill](../../.agents/skills/payment-modernization/SKILL.md)：Reimagine/Transform 路由及 Judge 治理工作流；不能覆盖待确认产品决策。
 
 ### 业务与契约
 

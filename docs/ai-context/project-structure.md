@@ -2,7 +2,7 @@
 
 > 仓库：`git@github.com:NIV49/payment-web-platform.git`
 > 当前分支基线：`codex/permission-reference-design`
-> 记录日期：2026-07-20
+> 记录日期：2026-07-21
 
 ## 1. 顶层结构
 
@@ -14,6 +14,7 @@ payment-web-platform/
 ├── backend/         Java 25 / Spring Boot 4.1 / jOOQ / Maven 多模块后端
 ├── docs/            产品、架构、AI 上下文和接口契约
 ├── infra/           本地与后续部署基础设施
+├── .agents/         项目级 AI 工作流技能源码
 ├── AGENTS.md        仓库级开发前置规则
 ├── README.md        人工开发入口
 └── .gitignore       整仓忽略规则
@@ -44,12 +45,17 @@ Maven reactor。`applications/admin-api` 是当前唯一启动单元，`modules/
 
 详细内容见 [后端工程上下文](./backend/README.md)。
 
+### `.agents`
+
+项目级 AI 工作流技能源码。当前 `skills/payment-modernization` 负责在 Reimagine 与 Transform 路线间选择、定义能力切片、Judge 门禁和结构化产物。它是执行流程，不是产品事实源；涉及未决业务规则时必须回到产品基线或 accepted ADR，不能由 skill 自行定版。
+
 ### `docs`
 
 | 目录/文件 | 作用 |
 | --- | --- |
 | `new-payment-system-target-architecture.md` | 新支付系统目标架构基线 |
 | `permission-refactor-product-requirements.md` | 权限、租户、代理商产品规则 |
+| `judge-charter.md` | Judge 治理、Rulebook、复审与退出门禁 |
 | `ai-context/permission` | 开源参考提炼后的自有权限设计 |
 | `ai-context/playground` | Vben Playground 分析 |
 | `ai-context/vben` | 当前 Vben 版本框架约定 |
@@ -125,5 +131,6 @@ Vben 上游根目录与本仓库的 `frontend/admin` 存在目录位移。更新
 | 本地/部署基础设施 | `infra` |
 | 跨端契约 | `docs/ai-contract` |
 | 领域与架构决策 | `docs/ai-context` 或独立 ADR 目录 |
+| 项目级 AI 工作流技能 | `.agents/skills/<skill-name>`；不得承载未经批准的业务结论 |
 
 应用数量由部署边界决定，模块数量由业务边界决定；两者不能互相替代。
