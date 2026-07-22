@@ -59,7 +59,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.write_artifact(
                 repository,
-                "Local fixture: `ad" + "min / Admin@123456`.\n",
+                "Local fixture: `ad" + "min " + "/ Admin@123456`.\n",
             )
             copied_pair_errors = scan_repository(repository, ("docs",))
             self.assertTrue(
@@ -138,7 +138,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             repository = Path(directory)
             sentinel_value = "do-not-print-this-secret"
             self.write_artifact(
-                repository, "client_" + f'secret: "{sentinel_value}"\n'
+                repository, "client_sec" + f'ret: "{sentinel_value}"\n'
             )
 
             errors = scan_repository(repository, ("docs",))
