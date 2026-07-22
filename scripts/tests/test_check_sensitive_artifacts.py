@@ -11,7 +11,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 REPOSITORY = SCRIPTS_DIR.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from check_sensitive_artifacts import scan_repository  # noqa: E402
+from check_sensitive_artifacts import scan_git_diff, scan_repository  # noqa: E402
 
 
 class SensitiveArtifactValidationTest(unittest.TestCase):
@@ -434,6 +434,85 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.assertTrue(any("SYMLINK" in error for error in errors), errors)
             self.assertNotIn("SECRET_SENTINEL", "\n".join(errors))
+
+    def test_immutable_diff_scans_every_changed_text_path_without_name_heuristics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(("git", "init", "--quiet"), cwd=repository, check=True)
+            subprocess.run(("git", "config", "user.name", "CI"), cwd=repository, check=True)
+            subprocess.run(("git", "config", "user.email", "ci@example.invalid"), cwd=repository, check=True)
+            self.write_artifact(repository, "safe\n", "README.md")
+            subprocess.run(("git", "add", "."), cwd=repository, check=True)
+            subprocess.run(("git", "commit", "--quiet", "-m", "base"), cwd=repository, check=True)
+            base = subprocess.run(("git", "rev-parse", "HEAD"), cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
+            secret_assignment = "DATABASE_" + "PASSWORD=changed-secret\n"
+            self.write_artifact(repository, secret_assignment, "backend/src/main/resources/application-prod.conf")
+            subprocess.run(("git", "add", "."), cwd=repository, check=True)
+            subprocess.run(("git", "commit", "--quiet", "-m", "changed config"), cwd=repository, check=True)
+            commit = subprocess.run(("git", "rev-parse", "HEAD"), cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
+
+            errors = scan_git_diff(repository, base, commit)
+
+            self.assertTrue(any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors), errors)
+            self.assertNotIn("changed-secret", "\n".join(errors))
+
+    def test_immutable_diff_scans_full_blob_when_gitattributes_disables_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(("git", "init", "--quiet"), cwd=repository, check=True)
+            subprocess.run(("git", "config", "user.name", "CI"), cwd=repository, check=True)
+            subprocess.run(("git", "config", "user.email", "ci@example.invalid"), cwd=repository, check=True)
+            self.write_artifact(repository, "safe=true\n", "config/application-prod.conf")
+            subprocess.run(("git", "add", "."), cwd=repository, check=True)
+            subprocess.run(("git", "commit", "--quiet", "-m", "base"), cwd=repository, check=True)
+            base = subprocess.run(("git", "rev-parse", "HEAD"), cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
+
+            self.write_artifact(repository, "*.conf -diff\n", ".gitattributes")
+            hidden_assignment = "DATABASE_" + "PASSWORD=hidden-by-gitattributes\n"
+            self.write_artifact(repository, hidden_assignment, "config/application-prod.conf")
+            subprocess.run(("git", "add", "."), cwd=repository, check=True)
+            subprocess.run(("git", "commit", "--quiet", "-m", "disable config diff"), cwd=repository, check=True)
+            commit = subprocess.run(("git", "rev-parse", "HEAD"), cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
+
+            errors = scan_git_diff(repository, base, commit)
+
+            self.assertTrue(any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors), errors)
+            self.assertNotIn("hidden-by-gitattributes", "\n".join(errors))
+
+    def test_yaml_multiline_secret_and_uncommon_account_weak_password_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            yaml_content = "pass" + "word:\n  weak-multiline-value\n"
+            account_content = "settlement-bot / " + "123456\nmerchant.ops@example.invalid / qwerty123\n"
+            self.write_artifact(repository, yaml_content, "docs/config.yml")
+            self.write_artifact(repository, account_content, "docs/accounts.md")
+
+            errors = scan_repository(repository, ("docs",))
+            rendered = "\n".join(errors)
+
+            self.assertIn("YAML_SECRET_SCALAR", rendered)
+            self.assertEqual(2, rendered.count("INLINE_CREDENTIAL_PAIR"), errors)
+            self.assertNotIn("weak-multiline-value", rendered)
+            self.assertNotIn("qwerty123", rendered)
+
+    def test_yaml_bare_secret_and_lowercase_weak_password_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            yaml_content = (
+                "sec" + "ret:\n  weak-multiline-value\n"
+                "auth_" + "token:\n  weak-token-value\n"
+            )
+            account_content = "settlement-bot / " + "weakpassword\n"
+            self.write_artifact(repository, yaml_content, "docs/config.yml")
+            self.write_artifact(repository, account_content, "docs/accounts.md")
+
+            errors = scan_repository(repository, ("docs",))
+            rendered = "\n".join(errors)
+
+            self.assertEqual(2, rendered.count("YAML_SECRET_SCALAR"), errors)
+            self.assertEqual(1, rendered.count("INLINE_CREDENTIAL_PAIR"), errors)
+            self.assertNotIn("weak-multiline-value", rendered)
+            self.assertNotIn("weakpassword", rendered)
 
 
 if __name__ == "__main__":

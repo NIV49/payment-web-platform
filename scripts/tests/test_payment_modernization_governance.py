@@ -27,23 +27,23 @@ class PaymentModernizationGovernanceTest(unittest.TestCase):
         )
         self.assertIn("`${ENV_VAR}`", content)
         self.assertIn("secret scan", content)
-        self.assertIn("python3 scripts/check_sensitive_artifacts.py", content)
+        self.assertIn("python3 -I scripts/check_sensitive_artifacts.py", content)
 
     def test_reimagine_sanitizes_evidence_before_writing_specs(self) -> None:
         content = REIMAGINE.read_text(encoding="utf-8")
 
         self.assertIn("Sanitize Before Recording Evidence", content)
         self.assertIn("`${ENV_VAR}`", content)
-        self.assertIn("secret scan", content)
-        self.assertIn("python3 scripts/check_sensitive_artifacts.py", content)
+        self.assertIn("immutable-diff scan", content)
+        self.assertIn("python3 -I scripts/check_sensitive_artifacts.py", content)
 
     def test_transform_sanitizes_traces_and_fixtures(self) -> None:
         content = TRANSFORM.read_text(encoding="utf-8")
 
         self.assertIn("Sanitize Before Recording Evidence", content)
         self.assertIn("`${ENV_VAR}`", content)
-        self.assertIn("secret scan", content)
-        self.assertIn("python3 scripts/check_sensitive_artifacts.py", content)
+        self.assertIn("immutable-diff scan", content)
+        self.assertIn("python3 -I scripts/check_sensitive_artifacts.py", content)
 
     def test_legacy_evidence_is_bound_to_immutable_repository_snapshots(self) -> None:
         skill = SKILL.read_text(encoding="utf-8")

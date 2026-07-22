@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sys
+import unicodedata
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -22,6 +23,9 @@ UNRESOLVED_REFERENCE_LINK_PATTERN = re.compile(r"\[[^\]\n]+\]\[[^\]\n]*\]")
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
 MARKDOWN = MarkdownIt("commonmark")
+RAW_HTML_LINK_ATTRIBUTE_PATTERN = re.compile(
+    r"\b(?:href|src)\s*=", re.IGNORECASE
+)
 
 
 class UniqueKeySafeLoader(yaml.SafeLoader):
@@ -278,7 +282,7 @@ def validate_link_target(
     raw_target: str,
 ) -> str | None:
     target_text = raw_target.strip()
-    if not target_text or target_text.startswith("#"):
+    if not target_text:
         return None
     if "\\" in target_text or "\x00" in target_text:
         return f"{document}: invalid local link target: {raw_target}"
@@ -291,16 +295,47 @@ def validate_link_target(
         return f"{document}: unsupported link scheme or authority: {raw_target}"
 
     relative_target = unquote(parsed.path)
-    if not relative_target:
-        return None
-    target = (document.parent / relative_target).resolve()
+    target = document.resolve() if not relative_target else (
+        document.parent / relative_target
+    ).resolve()
     try:
         target.relative_to(repository)
     except ValueError:
         return f"{document}: local link escapes the repository: {raw_target}"
     if not target.exists():
         return f"{document}: missing local link target: {raw_target}"
+    fragment = unquote(parsed.fragment)
+    if fragment:
+        if not target.is_file() or target.suffix.casefold() != ".md":
+            return f"{document}: Markdown heading fragment targets a non-Markdown file: {raw_target}"
+        if fragment not in markdown_heading_fragments(target):
+            return f"{document}: missing Markdown heading fragment: {raw_target}"
     return None
+
+
+def github_heading_slug(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).strip().casefold()
+    normalized = "".join(
+        character
+        for character in normalized
+        if character in {" ", "-", "_"}
+        or not unicodedata.category(character).startswith(("P", "S"))
+    )
+    return re.sub(r"\s+", "-", normalized)
+
+
+def markdown_heading_fragments(document: Path) -> set[str]:
+    tokens = MARKDOWN.parse(document.read_text(encoding="utf-8"))
+    fragments: set[str] = set()
+    occurrences: dict[str, int] = {}
+    for index, token in enumerate(tokens[:-1]):
+        if token.type != "heading_open" or tokens[index + 1].type != "inline":
+            continue
+        base = github_heading_slug(tokens[index + 1].content)
+        occurrence = occurrences.get(base, 0)
+        occurrences[base] = occurrence + 1
+        fragments.add(base if occurrence == 0 else f"{base}-{occurrence}")
+    return fragments
 
 
 def validate_links(skill_directory: Path, repository: Path) -> list[str]:
@@ -323,6 +358,13 @@ def validate_links(skill_directory: Path, repository: Path) -> list[str]:
                 )
 
         for token in iter_tokens(tokens):
+            if token.type in {"html_inline", "html_block"} and (
+                RAW_HTML_LINK_ATTRIBUTE_PATTERN.search(token.content) is not None
+            ):
+                errors.append(
+                    f"{document}: raw HTML href/src attributes are not allowed; use Markdown links"
+                )
+                continue
             raw_target: str | None = None
             if token.type == "link_open":
                 raw_target = token.attrGet("href")

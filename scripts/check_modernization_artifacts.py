@@ -6,7 +6,9 @@ import argparse
 import base64
 import binascii
 import hashlib
+import importlib.util
 import json
+import math
 import os
 import re
 import stat
@@ -20,27 +22,37 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
-if str(SCRIPT_DIRECTORY) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIRECTORY))
-
-from check_modernization_evidence import (  # noqa: E402
-    DEFAULT_MAX_EVIDENCE_BYTES,
-    EvidenceError,
-    canonical_repository_path,
-    commit_parents,
-    commits_touching_paths,
-    git_path_exists,
-    list_git_files,
-    read_git_evidence,
-    resolve_head_commit,
-    validate_git_ancestor,
+EVIDENCE_MODULE_PATH = SCRIPT_DIRECTORY / "check_modernization_evidence.py"
+_evidence_spec = importlib.util.spec_from_file_location(
+    "_payment_modernization_evidence", EVIDENCE_MODULE_PATH
 )
+if _evidence_spec is None or _evidence_spec.loader is None:
+    raise RuntimeError("immutable evidence helper cannot be loaded")
+_evidence = importlib.util.module_from_spec(_evidence_spec)
+_evidence_spec.loader.exec_module(_evidence)
+
+DEFAULT_MAX_EVIDENCE_BYTES = _evidence.DEFAULT_MAX_EVIDENCE_BYTES
+EvidenceError = _evidence.EvidenceError
+canonical_repository_path = _evidence.canonical_repository_path
+changed_paths_for_commit = _evidence.changed_paths_for_commit
+commit_parents = _evidence.commit_parents
+commits_touching_paths = _evidence.commits_touching_paths
+git_path_exists = _evidence.git_path_exists
+list_git_files = _evidence.list_git_files
+read_git_evidence = _evidence.read_git_evidence
+resolve_head_commit = _evidence.resolve_head_commit
+validate_git_ancestor = _evidence.validate_git_ancestor
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = PurePosixPath(".agents/payment-modernization-policy.json")
+JUDGE_REGISTRY_PATH = PurePosixPath(
+    ".agents/payment-modernization-judge-registry.json"
+)
 DEFAULT_ARTIFACT_ROOT = PurePosixPath(".agents/payment-modernization/artifacts")
 ARTIFACT_README_PATH = DEFAULT_ARTIFACT_ROOT / "README.md"
+CODEOWNERS_PATH = PurePosixPath(".github/CODEOWNERS")
+CODEOWNERS_BOOTSTRAP_PATH = "docs/governance/codeowners-bootstrap.md"
 DEFAULT_LEGACY_WORKSPACE = Path("/Users/mac/Documents/work/backend")
 
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -118,6 +130,7 @@ REVIEW_FIELDS = {
     "targetCommitSha",
     "rulebookDigest",
     "judgeDigest",
+    "queueDigest",
     "startCommitSha",
     "endCommitSha",
     "snapshotValid",
@@ -131,6 +144,33 @@ REVIEW_FIELDS = {
     "reviewPurpose",
     "approvalSubjects",
 }
+REVIEW_FINDING_FIELDS = {
+    "findingId",
+    "severity",
+    "status",
+    "repositoryRelativePath",
+    "line",
+    "symbol",
+    "controlFlow",
+    "trigger",
+    "impact",
+    "evidence",
+    "verification",
+    "targetCommitSha",
+    "evaluatedVersionKey",
+    "rulebookDigest",
+    "judgeDigest",
+    "resolution",
+}
+COMMAND_EXECUTION_FIELDS = {
+    "checkId",
+    "command",
+    "targetCommitSha",
+    "exitCode",
+    "resultDigest",
+}
+JUDGE_REGISTRY_FIELDS = {"schemaVersion", "checks"}
+JUDGE_CHECK_FIELDS = {"checkId", "path", "command", "ruleIds"}
 APPROVAL_SUBJECT_FIELDS = {"rulePath", "ruleId", "rulePayloadDigest"}
 RULE_PAYLOAD_FIELDS = {
     "ruleId",
@@ -163,13 +203,56 @@ class ContractError(ValueError):
     """Raised when an artifact cannot satisfy the immutable contract."""
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ContractError(f"duplicate JSON object member: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ContractError(f"non-finite JSON number is forbidden: {value}")
+
+
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ContractError("non-finite JSON number is forbidden")
+    return parsed
+
+
+def _strict_json_loads(raw: str) -> Any:
+    try:
+        return json.loads(
+            raw,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+            parse_float=_finite_json_float,
+        )
+    except ContractError:
+        raise
+    except (json.JSONDecodeError, OverflowError, TypeError, ValueError) as error:
+        raise ContractError("content is not strict JSON") from error
+
+
+def _canonical_json_bytes(payload: Any) -> bytes:
+    try:
+        rendered = json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError) as error:
+        raise ContractError("canonical JSON payload is invalid") from error
+    return rendered.encode("utf-8")
+
+
 def _canonical_digest(namespace: str, payload: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        {"namespace": namespace, **payload},
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
+    encoded = _canonical_json_bytes({"namespace": namespace, **payload})
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
@@ -659,8 +742,8 @@ def validate_policy(policy: Any) -> list[str]:
 def load_policy(repository: Path | str, commit_sha: str) -> dict[str, Any]:
     try:
         raw_policy = read_git_evidence(repository, commit_sha, POLICY_PATH.as_posix())
-        policy = json.loads(raw_policy.decode("utf-8"))
-    except (EvidenceError, UnicodeError, json.JSONDecodeError) as error:
+        policy = _strict_json_loads(raw_policy.decode("utf-8"))
+    except (EvidenceError, UnicodeError, ContractError) as error:
         raise ContractError(
             "immutable payment modernization policy cannot be resolved"
         ) from error
@@ -668,6 +751,66 @@ def load_policy(repository: Path | str, commit_sha: str) -> dict[str, Any]:
     if errors:
         raise ContractError("; ".join(errors))
     return dict(policy)
+
+
+def load_judge_registry(
+    repository: Path, commit_sha: str, policy: Mapping[str, Any]
+) -> tuple[dict[str, Mapping[str, Any]], list[str]]:
+    registry_path = JUDGE_REGISTRY_PATH.as_posix()
+    if registry_path not in policy.get("judgePaths", []):
+        return {}, ["evaluated policy must register the immutable Judge registry"]
+    try:
+        raw = read_git_evidence(repository, commit_sha, registry_path)
+        payload = _strict_json_loads(raw.decode("utf-8"))
+    except (EvidenceError, UnicodeError, ContractError):
+        return {}, ["immutable Judge registry cannot be resolved"]
+    if not isinstance(payload, Mapping) or set(payload) != JUDGE_REGISTRY_FIELDS:
+        return {}, ["Judge registry must use the exact schema"]
+    if payload.get("schemaVersion") != 1 or not isinstance(payload.get("checks"), list):
+        return {}, ["Judge registry schemaVersion/checks are invalid"]
+    errors: list[str] = []
+    checks: dict[str, Mapping[str, Any]] = {}
+    for index, check in enumerate(payload["checks"]):
+        prefix = f"Judge registry checks[{index}]"
+        if not isinstance(check, Mapping) or set(check) != JUDGE_CHECK_FIELDS:
+            errors.append(f"{prefix} must use the exact schema")
+            continue
+        check_id = check["checkId"]
+        if not isinstance(check_id, str) or not check_id.strip():
+            errors.append(f"{prefix}.checkId must not be empty")
+            continue
+        if check_id in checks:
+            errors.append("Judge registry checkIds must be unique")
+        checks[check_id] = check
+        try:
+            judge_path = _canonical_repository_relative_path(
+                check["path"], f"{prefix}.path"
+            )
+        except ContractError as error:
+            errors.append(str(error))
+            continue
+        if judge_path == registry_path or judge_path not in policy["judgePaths"]:
+            errors.append(f"{prefix}.path must resolve through policy judgePaths")
+        else:
+            try:
+                read_git_evidence(repository, commit_sha, judge_path)
+            except EvidenceError:
+                errors.append(f"{prefix}.path cannot be resolved from the evaluated commit")
+        if not isinstance(check["command"], str) or not check["command"].strip():
+            errors.append(f"{prefix}.command must not be empty")
+        rule_ids = check["ruleIds"]
+        if (
+            not isinstance(rule_ids, list)
+            or not rule_ids
+            or len(set(rule_ids)) != len(rule_ids)
+            or not all(
+                isinstance(rule_id, str)
+                and RULE_ID_PATTERN.fullmatch(rule_id) is not None
+                for rule_id in rule_ids
+            )
+        ):
+            errors.append(f"{prefix}.ruleIds must contain unique valid Rule IDs")
+    return checks, errors
 
 
 def _resolve_content_manifest(
@@ -709,12 +852,104 @@ def _resolve_content_manifest(
 
 def canonical_review_payload(review: Mapping[str, Any]) -> bytes:
     payload = {key: value for key, value in review.items() if key != "signature"}
-    return json.dumps(
-        payload,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
+    return _canonical_json_bytes(payload)
+
+
+def queue_items_digest(queue_items: Any) -> str:
+    if not isinstance(queue_items, list):
+        raise ContractError("queueItems must be a list before digesting")
+    return _canonical_digest(
+        "payment-modernization-queue-v2", {"queueItems": queue_items}
+    )
+
+
+def validate_review_finding(
+    finding: Any, review: Mapping[str, Any]
+) -> list[str]:
+    if not isinstance(finding, Mapping) or set(finding) != REVIEW_FINDING_FIELDS:
+        return ["Review Result finding must use the exact schema"]
+    errors: list[str] = []
+    for field in (
+        "findingId",
+        "symbol",
+        "trigger",
+        "impact",
+        "verification",
+    ):
+        if not isinstance(finding[field], str) or not finding[field].strip():
+            errors.append(f"Review Result finding {field} must not be empty")
+    try:
+        _canonical_repository_relative_path(
+            finding["repositoryRelativePath"],
+            "Review Result finding repositoryRelativePath",
+        )
+    except ContractError as error:
+        errors.append(str(error))
+    if type(finding["line"]) is not int or finding["line"] <= 0:
+        errors.append("Review Result finding line must be a positive integer")
+    for field in ("controlFlow", "evidence"):
+        values = finding[field]
+        if (
+            not isinstance(values, list)
+            or not values
+            or not all(isinstance(value, str) and value.strip() for value in values)
+        ):
+            errors.append(
+                f"Review Result finding {field} must contain non-empty strings"
+            )
+    severity = finding["severity"]
+    status = finding["status"]
+    resolution = finding["resolution"]
+    if severity not in {"BLOCKER", "SHOULD_FIX"}:
+        errors.append("Review Result finding severity is invalid")
+    if status not in {
+        "open",
+        "implementing",
+        "reviewing",
+        "closed",
+        "human-decision",
+    }:
+        errors.append("Review Result finding status is invalid")
+    if resolution not in {"unresolved", "fixed", "rejected", "deferred"}:
+        errors.append("Review Result finding resolution is invalid")
+    expected_resolutions = {
+        "open": {"unresolved"},
+        "implementing": {"unresolved"},
+        "reviewing": {"unresolved"},
+        "closed": {"fixed", "rejected"},
+        "human-decision": {"deferred"},
+    }
+    if status in expected_resolutions and resolution not in expected_resolutions[status]:
+        errors.append("Review Result finding status and resolution conflict")
+    for field in (
+        "targetCommitSha",
+        "evaluatedVersionKey",
+        "rulebookDigest",
+        "judgeDigest",
+    ):
+        if finding[field] != review.get(field):
+            errors.append(f"Review Result finding {field} does not bind its review")
+    return errors
+
+
+def validate_command_execution(
+    execution: Any, review: Mapping[str, Any]
+) -> list[str]:
+    if not isinstance(execution, Mapping) or set(execution) != COMMAND_EXECUTION_FIELDS:
+        return ["Review Result commandsRun entry must use the exact execution schema"]
+    errors: list[str] = []
+    for field in ("checkId", "command"):
+        if not isinstance(execution[field], str) or not execution[field].strip():
+            errors.append(f"Review Result commandsRun {field} must not be empty")
+    if execution["targetCommitSha"] != review.get("targetCommitSha"):
+        errors.append("Review Result commandsRun targetCommitSha does not bind its review")
+    if type(execution["exitCode"]) is not int:
+        errors.append("Review Result commandsRun exitCode must be an integer")
+    try:
+        _require_digest(execution["resultDigest"], "commandsRun.resultDigest")
+    except ContractError as error:
+        errors.append(str(error))
+    return errors
 
 
 def verify_review_signature(
@@ -733,7 +968,7 @@ def verify_review_signature(
         signature = base64.b64decode(review.get("signature"), validate=True)
         public_key = Ed25519PublicKey.from_public_bytes(public_key_bytes)
         public_key.verify(signature, canonical_review_payload(review))
-    except (TypeError, ValueError, binascii.Error, InvalidSignature):
+    except (TypeError, ValueError, binascii.Error, InvalidSignature, ContractError):
         errors.append("Review Result signature verification failed")
     return errors
 
@@ -744,6 +979,8 @@ def validate_review_result(
     trusted_reviewers: Mapping[str, Mapping[str, Any]] | None = None,
     expected_task_identity_key: str | None = None,
     expected_snapshot: Mapping[str, Any] | None = None,
+    expected_queue_digest: str | None = None,
+    expected_judge_registry: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[str]:
     if set(review) != REVIEW_FIELDS:
         return ["Review Result must use the exact signed v2 schema"]
@@ -757,6 +994,7 @@ def validate_review_result(
         "reviewIdempotencyKey",
         "rulebookDigest",
         "judgeDigest",
+        "queueDigest",
     ):
         if (
             not isinstance(review[field], str)
@@ -776,18 +1014,46 @@ def validate_review_result(
         errors.append("Review Result snapshotValid must be true")
     if review["verdict"] not in {"PASS", "FAIL"}:
         errors.append("Review Result verdict must be PASS or FAIL")
-    if review["verdict"] == "PASS" and isinstance(review["findings"], list):
-        for finding in review["findings"]:
-            if not isinstance(finding, Mapping):
-                errors.append("Review Result findings must contain mappings")
-                continue
-            if finding.get("severity") == "BLOCKER" and (
-                finding.get("status") not in {"closed", "resolved"}
-                and finding.get("resolution") not in {"fixed", "rejected"}
+    if isinstance(review["findings"], list):
+        for index, finding in enumerate(review["findings"]):
+            finding_errors = validate_review_finding(finding, review)
+            errors.extend(
+                f"Review Result findings[{index}]: {error}"
+                for error in finding_errors
+            )
+            if (
+                review["verdict"] == "PASS"
+                and isinstance(finding, Mapping)
+                and finding.get("severity") == "BLOCKER"
+                and finding.get("status") != "closed"
             ):
-                errors.append(
-                    "PASS Review Result contains an unresolved BLOCKER finding"
+                errors.append("PASS Review Result contains an unresolved BLOCKER finding")
+    seen_check_ids: set[str] = set()
+    if isinstance(review["commandsRun"], list):
+        for index, execution in enumerate(review["commandsRun"]):
+            execution_errors = validate_command_execution(execution, review)
+            errors.extend(
+                f"Review Result commandsRun[{index}]: {error}"
+                for error in execution_errors
+            )
+            if not isinstance(execution, Mapping):
+                continue
+            check_id = execution.get("checkId")
+            if isinstance(check_id, str):
+                if check_id in seen_check_ids:
+                    errors.append("Review Result commandsRun checkIds must be unique")
+                seen_check_ids.add(check_id)
+                registered = (
+                    expected_judge_registry.get(check_id)
+                    if expected_judge_registry is not None
+                    else None
                 )
+                if expected_judge_registry is not None and registered is None:
+                    errors.append("Review Result commandsRun checkId is not in the Judge registry")
+                elif registered is not None and execution.get("command") != registered.get("command"):
+                    errors.append("Review Result commandsRun command does not match the Judge registry")
+            if review["verdict"] == "PASS" and execution.get("exitCode") != 0:
+                errors.append("PASS Review Result contains an unsuccessful command execution")
     if review["signatureAlgorithm"] != "Ed25519":
         errors.append("Review Result signatureAlgorithm must be Ed25519")
     if review["reviewPurpose"] not in {"implementation", "rule-approval"}:
@@ -894,6 +1160,8 @@ def validate_review_result(
                 errors.append(
                     f"Review Result {review_field} does not bind evaluatedSnapshot"
                 )
+    if expected_queue_digest is not None and review.get("queueDigest") != expected_queue_digest:
+        errors.append("Review Result queueDigest does not bind queueItems")
 
     trusted_reviewer = None
     if trusted_reviewers is not None and isinstance(review.get("keyId"), str):
@@ -1038,6 +1306,7 @@ def validate_rule_card(
     review_errors: Mapping[str, Sequence[str]] | None = None,
     capability: Mapping[str, Any] | None = None,
     baseline_policy: Mapping[str, Any] | None = None,
+    judge_registry: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[str]:
     payload = rule.get("rulePayload")
     requested_status = payload.get("status") if isinstance(payload, Mapping) else None
@@ -1077,8 +1346,8 @@ def validate_rule_card(
     if rule_path and isinstance(target_commit, str):
         try:
             raw_payload = read_git_evidence(repository, target_commit, rule_path)
-            resolved_payload = json.loads(raw_payload.decode("utf-8"))
-        except (EvidenceError, UnicodeError, json.JSONDecodeError):
+            resolved_payload = _strict_json_loads(raw_payload.decode("utf-8"))
+        except (EvidenceError, UnicodeError, ContractError):
             errors.append(
                 "Rule Card rulePayload cannot be resolved from targetCommitSha"
             )
@@ -1146,6 +1415,37 @@ def validate_rule_card(
                 "Approved Rule Card approval subject is not signed by the review"
             )
         resolved_reviews.append(review)
+    if isinstance(payload, Mapping):
+        required_checks = payload.get("judgeTests", [])
+        rule_id = payload.get("ruleId")
+        if judge_registry is None:
+            errors.append("Approved Rule Card requires an immutable Judge registry")
+        elif isinstance(required_checks, list):
+            for check_id in required_checks:
+                registered = judge_registry.get(check_id)
+                if registered is None:
+                    errors.append(
+                        f"Approved Rule Card Judge registry does not define {check_id}"
+                    )
+                    continue
+                if rule_id not in registered.get("ruleIds", []):
+                    errors.append(
+                        f"Approved Rule Card Judge registry check {check_id} does not cover its Rule ID"
+                    )
+                for review in resolved_reviews:
+                    executions = review.get("commandsRun", [])
+                    matching = [
+                        execution
+                        for execution in executions
+                        if isinstance(execution, Mapping)
+                        and execution.get("checkId") == check_id
+                        and execution.get("command") == registered.get("command")
+                        and execution.get("exitCode") == 0
+                    ]
+                    if len(matching) != 1:
+                        errors.append(
+                            f"Approved Rule Card Judge check {check_id} lacks a signed successful execution"
+                        )
     if len(resolved_reviews) == 2:
         reviewer_ids = {review.get("reviewerId") for review in resolved_reviews}
         key_ids = {review.get("keyId") for review in resolved_reviews}
@@ -1180,6 +1480,7 @@ def validate_queue_item(item: Mapping[str, Any]) -> list[str]:
         "controlFlow",
         "evidence",
         "dependencies",
+        "failedReviewRounds",
     }
     if set(item) - allowed_fields:
         errors.append("Queue Item contains unsupported fields")
@@ -1201,6 +1502,11 @@ def validate_queue_item(item: Mapping[str, Any]) -> list[str]:
         "human-decision",
     }:
         errors.append("Queue Item status is invalid")
+    if (
+        type(item.get("failedReviewRounds")) is not int
+        or not 0 <= item["failedReviewRounds"] <= 3
+    ):
+        errors.append("Queue Item failedReviewRounds must be an integer from 0 to 3")
     for field in ("controlFlow", "evidence"):
         if not isinstance(item.get(field), list) or not item[field]:
             errors.append(f"Queue Item {field} must be a non-empty list")
@@ -1248,6 +1554,12 @@ def validate_bundle(
         errors.append("artifact bundle lifecycleStatus must be draft or closed")
     if require_closed and lifecycle_status != "closed":
         errors.append("canonical artifact bundle must be closed")
+    raw_queue = bundle.get("queueItems")
+    try:
+        declared_queue_digest = queue_items_digest(raw_queue)
+    except ContractError as error:
+        errors.append(str(error))
+        declared_queue_digest = None
     capability = bundle.get("capabilitySlice")
     if not isinstance(capability, Mapping):
         return ["capabilitySlice must be a mapping"]
@@ -1449,6 +1761,37 @@ def validate_bundle(
         digest_field="judgeDigest",
     )
     errors.extend(evaluated_judge_errors)
+    raw_rules = bundle.get("ruleCards")
+    judge_registry: dict[str, Mapping[str, Any]] = {}
+    raw_judge_commands = capability.get("judgeCommands")
+    if lifecycle_status == "closed":
+        if (
+            not isinstance(raw_judge_commands, list)
+            or not raw_judge_commands
+            or not all(
+                isinstance(check_id, str) and check_id.strip()
+                for check_id in raw_judge_commands
+            )
+            or len(set(raw_judge_commands)) != len(raw_judge_commands)
+        ):
+            errors.append(
+                "closed Capability Slice judgeCommands must be a unique non-empty checkId list"
+            )
+    if (
+        lifecycle_status == "closed"
+        or (isinstance(raw_rules, list) and bool(raw_rules))
+        or (isinstance(raw_judge_commands, list) and bool(raw_judge_commands))
+    ):
+        judge_registry, judge_registry_errors = load_judge_registry(
+            repository, target_commit, evaluated_policy
+        )
+        errors.extend(judge_registry_errors)
+    if isinstance(raw_judge_commands, list):
+        for check_id in raw_judge_commands:
+            if isinstance(check_id, str) and check_id not in judge_registry:
+                errors.append(
+                    f"Capability Slice judgeCommands checkId {check_id} is not in the Judge registry"
+                )
     declared_evaluated_key = evaluated["evaluatedVersionKey"]
     if (
         not isinstance(declared_evaluated_key, str)
@@ -1504,6 +1847,8 @@ def validate_bundle(
             if isinstance(declared_task_key, str)
             else None,
             expected_snapshot=evaluated,
+            expected_queue_digest=declared_queue_digest,
+            expected_judge_registry=judge_registry,
         )
         if isinstance(review_id, str):
             per_review_errors[review_id] = review_validation_errors
@@ -1526,8 +1871,27 @@ def validate_bundle(
             errors.append(
                 "closed artifact bundle requires exactly two independent valid signed PASS reviews"
             )
+        if isinstance(raw_judge_commands, list):
+            for check_id in raw_judge_commands:
+                if not isinstance(check_id, str):
+                    continue
+                registered = judge_registry.get(check_id)
+                for review in valid_pass_reviews:
+                    executions = review.get("commandsRun", [])
+                    matches = [
+                        execution
+                        for execution in executions
+                        if isinstance(execution, Mapping)
+                        and execution.get("checkId") == check_id
+                        and execution.get("exitCode") == 0
+                        and registered is not None
+                        and execution.get("command") == registered.get("command")
+                    ]
+                    if len(matches) != 1:
+                        errors.append(
+                            f"closed Capability Slice checkId {check_id} requires one signed successful Judge execution from each PASS reviewer"
+                        )
 
-    raw_rules = bundle.get("ruleCards")
     if not isinstance(raw_rules, list):
         errors.append("ruleCards must be a list")
     else:
@@ -1554,6 +1918,7 @@ def validate_bundle(
                 review_errors=per_review_errors,
                 capability=capability,
                 baseline_policy=baseline_policy,
+                judge_registry=judge_registry,
             )
             errors.extend(f"ruleCards[{index}]: {error}" for error in rule_errors)
         unregistered_paths = set(declared_rule_paths) - set(
@@ -1570,7 +1935,6 @@ def validate_bundle(
                 "Capability Slice ruleIds must exactly match bundled Rule Cards"
             )
 
-    raw_queue = bundle.get("queueItems")
     if not isinstance(raw_queue, list):
         errors.append("queueItems must be a list")
     else:
@@ -1661,10 +2025,10 @@ def load_bundle_file(path: Path | str) -> Mapping[str, Any]:
                 break
             chunks.append(chunk)
         raw = b"".join(chunks)
-        bundle = json.loads(raw.decode("utf-8"))
+        bundle = _strict_json_loads(raw.decode("utf-8"))
     except ContractError:
         raise
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeError, ContractError) as error:
         raise ContractError("artifact bundle cannot be parsed as UTF-8 JSON") from error
     finally:
         if descriptor is not None:
@@ -1681,8 +2045,8 @@ def load_bundle_git(
 
     try:
         raw = read_git_evidence(repository, commit_sha, bundle_path)
-        bundle = json.loads(raw.decode("utf-8"))
-    except (EvidenceError, UnicodeError, json.JSONDecodeError) as error:
+        bundle = _strict_json_loads(raw.decode("utf-8"))
+    except (EvidenceError, UnicodeError, ContractError) as error:
         raise ContractError("immutable artifact bundle cannot be parsed") from error
     if not isinstance(bundle, Mapping):
         raise ContractError("immutable artifact bundle must be a JSON object")
@@ -1697,8 +2061,8 @@ def _load_registered_rule_payloads(
     for rule_path in policy["ruleCardPaths"]:
         try:
             raw_payload = read_git_evidence(repository, commit_sha, rule_path)
-            payload = json.loads(raw_payload.decode("utf-8"))
-        except (EvidenceError, UnicodeError, json.JSONDecodeError):
+            payload = _strict_json_loads(raw_payload.decode("utf-8"))
+        except (EvidenceError, UnicodeError, ContractError):
             errors.append("registered Rule Card payload cannot be resolved")
             continue
         payload_errors = _validate_rule_payload(payload)
@@ -1711,6 +2075,186 @@ def _load_registered_rule_payloads(
 
 
 ApprovalIdentity = tuple[str, str, str, tuple[str, ...], tuple[str, ...]]
+QUEUE_MUTABLE_FIELDS = {"status", "evaluatedVersionKey", "failedReviewRounds"}
+QUEUE_TRANSITIONS = {
+    "open": {"open", "implementing", "human-decision"},
+    "implementing": {"implementing", "reviewing", "human-decision"},
+    "reviewing": {"reviewing", "implementing", "closed", "human-decision"},
+    "closed": {"closed"},
+    "human-decision": {"human-decision", "implementing"},
+}
+
+
+def validate_queue_history_step(
+    previous_states: Mapping[str, Mapping[str, Any]],
+    current_states: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    for fingerprint in set(previous_states) - set(current_states):
+        errors.append(f"Queue Item {fingerprint} was deleted; queue history is append-only")
+    for fingerprint, item in current_states.items():
+        previous = previous_states.get(fingerprint)
+        if previous is None:
+            if item.get("status") != "open":
+                errors.append(
+                    f"Queue Item {fingerprint} must enter the append-only history as open"
+                )
+            if item.get("failedReviewRounds") != 0:
+                errors.append(
+                    f"Queue Item {fingerprint} must enter history with zero failed review rounds"
+                )
+            continue
+        immutable_previous = {
+            key: value for key, value in previous.items() if key not in QUEUE_MUTABLE_FIELDS
+        }
+        immutable_current = {
+            key: value for key, value in item.items() if key not in QUEUE_MUTABLE_FIELDS
+        }
+        if immutable_previous != immutable_current:
+            errors.append(f"Queue Item {fingerprint} immutable root was rewritten")
+        previous_status = previous.get("status")
+        current_status = item.get("status")
+        if (
+            previous_status not in QUEUE_TRANSITIONS
+            or current_status not in QUEUE_TRANSITIONS[previous_status]
+        ):
+            errors.append(f"Queue Item {fingerprint} has an invalid status transition")
+        if (
+            previous_status != current_status
+            and previous.get("evaluatedVersionKey") == item.get("evaluatedVersionKey")
+        ):
+            errors.append(
+                f"Queue Item {fingerprint} status changes require a new evaluatedVersionKey"
+            )
+        previous_rounds = previous.get("failedReviewRounds")
+        current_rounds = item.get("failedReviewRounds")
+        if type(previous_rounds) is not int or type(current_rounds) is not int:
+            errors.append(
+                f"Queue Item {fingerprint} failed review round state is invalid"
+            )
+            continue
+        if previous_status == "reviewing" and current_status == "implementing":
+            if previous_rounds >= 2:
+                errors.append(
+                    f"Queue Item {fingerprint} third unsuccessful review requires human-decision"
+                )
+            if current_rounds != min(previous_rounds + 1, 3):
+                errors.append(
+                    f"Queue Item {fingerprint} failedReviewRounds must increment after an unsuccessful review"
+                )
+        elif previous_status == "reviewing" and current_status == "human-decision":
+            if current_rounds not in {previous_rounds, min(previous_rounds + 1, 3)}:
+                errors.append(
+                    f"Queue Item {fingerprint} human-decision has an invalid failedReviewRounds value"
+                )
+        elif previous_status == "human-decision" and current_status == "implementing":
+            if current_rounds != 0:
+                errors.append(
+                    f"Queue Item {fingerprint} authorized continuation must reset failedReviewRounds"
+                )
+        elif current_rounds != previous_rounds:
+            errors.append(
+                f"Queue Item {fingerprint} failedReviewRounds changed outside review failure handling"
+            )
+    return errors
+
+
+def queue_parent_conflicts(
+    parent_states: Sequence[Mapping[str, Mapping[str, Any]]],
+) -> dict[str, tuple[Mapping[str, Any], ...]]:
+    """Return Queue fingerprints whose direct merge-parent states disagree."""
+
+    return {
+        fingerprint: tuple(
+            state[fingerprint] for state in parent_states if fingerprint in state
+        )
+        for fingerprint in {
+            candidate
+            for state in parent_states
+            for candidate in state
+            if any(other.get(candidate) != state.get(candidate) for other in parent_states)
+        }
+    }
+
+
+def validate_queue_merge_step(
+    parent_states: Sequence[Mapping[str, Mapping[str, Any]]],
+    current_state: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, tuple[Mapping[str, Any], ...]], list[str]]:
+    """Validate the non-conflicting portion of a merge and return conflicts."""
+
+    conflicts = queue_parent_conflicts(parent_states)
+    conflict_fingerprints = set(conflicts)
+    filtered_parents = [
+        {
+            fingerprint: item
+            for fingerprint, item in state.items()
+            if fingerprint not in conflict_fingerprints
+        }
+        for state in parent_states
+    ]
+    filtered_current = {
+        fingerprint: item
+        for fingerprint, item in current_state.items()
+        if fingerprint not in conflict_fingerprints
+    }
+    if not filtered_parents:
+        return conflicts, []
+    if any(state != filtered_parents[0] for state in filtered_parents[1:]):
+        return conflicts, ["Queue merge conflict classification is inconsistent"]
+    return conflicts, validate_queue_history_step(
+        filtered_parents[0], filtered_current
+    )
+
+
+def validate_queue_reconciliation(
+    fingerprint: str,
+    parent_items: Sequence[Mapping[str, Any]],
+    current_item: Mapping[str, Any] | None,
+    direct_parent_item: Mapping[str, Any] | None,
+) -> list[str]:
+    """Validate a signed single-parent state that reconciles divergent merge parents."""
+
+    if current_item is None:
+        return [f"Queue Item {fingerprint} is missing from merge reconciliation"]
+    if current_item == direct_parent_item:
+        return [
+            f"Queue Item {fingerprint} reconciliation must change the signed direct-parent state"
+        ]
+    immutable_roots = [
+        {
+            key: value
+            for key, value in item.items()
+            if key not in QUEUE_MUTABLE_FIELDS
+        }
+        for item in parent_items
+    ]
+    current_root = {
+        key: value
+        for key, value in current_item.items()
+        if key not in QUEUE_MUTABLE_FIELDS
+    }
+    errors: list[str] = []
+    if not immutable_roots or any(
+        root != immutable_roots[0] for root in immutable_roots
+    ):
+        errors.append(f"Queue Item {fingerprint} merge parents rewrote its immutable root")
+        return errors
+    if current_root != immutable_roots[0]:
+        errors.append(f"Queue Item {fingerprint} reconciliation rewrote its immutable root")
+    if current_item.get("evaluatedVersionKey") in {
+        item.get("evaluatedVersionKey") for item in parent_items
+    }:
+        errors.append(
+            f"Queue Item {fingerprint} reconciliation requires a new evaluatedVersionKey"
+        )
+    for parent_item in parent_items:
+        errors.extend(
+            validate_queue_history_step(
+                {fingerprint: parent_item}, {fingerprint: current_item}
+            )
+        )
+    return errors
 
 
 def _collect_approval_state(
@@ -1723,12 +2267,15 @@ def _collect_approval_state(
     list[str],
     dict[str, set[ApprovalIdentity]],
     dict[str, set[str]],
+    dict[str, Mapping[str, Any]],
+    dict[str, str],
 ]:
     """Collect only cryptographically valid approvals visible at one commit."""
 
     errors: list[str] = []
     identities: dict[str, set[ApprovalIdentity]] = {}
     payload_digests: dict[str, set[str]] = {}
+    queue_states: dict[str, Mapping[str, Any]] = {}
     review_payloads_by_id: dict[str, str] = {}
     review_payloads_by_key: dict[str, str] = {}
     try:
@@ -1736,7 +2283,7 @@ def _collect_approval_state(
             repository, commit_sha, DEFAULT_ARTIFACT_ROOT.as_posix()
         )
     except EvidenceError as error:
-        return [str(error)], identities, payload_digests
+        return [str(error)], identities, payload_digests, queue_states, {}
     if ARTIFACT_README_PATH.as_posix() not in tracked_paths:
         errors.append("canonical artifact root must contain README.md")
     for tracked_path in tracked_paths:
@@ -1822,7 +2369,22 @@ def _collect_approval_state(
                 )
             )
             payload_digests.setdefault(rule_path, set()).add(payload_digest)
-    return errors, identities, payload_digests
+        for item in bundle.get("queueItems", []):
+            if not isinstance(item, Mapping) or not isinstance(
+                item.get("fingerprint"), str
+            ):
+                continue
+            fingerprint = item["fingerprint"]
+            previous = queue_states.setdefault(fingerprint, item)
+            if previous != item:
+                errors.append(
+                    f"Queue Item {fingerprint} has conflicting current states across bundles"
+                )
+    signed_review_payloads = {
+        **{f"reviewResultId:{key}": value for key, value in review_payloads_by_id.items()},
+        **{f"reviewIdempotencyKey:{key}": value for key, value in review_payloads_by_key.items()},
+    }
+    return errors, identities, payload_digests, queue_states, signed_review_payloads
 
 
 def _load_optional_policy(
@@ -1831,6 +2393,76 @@ def _load_optional_policy(
     if not git_path_exists(repository, commit_sha, POLICY_PATH.as_posix()):
         return None
     return load_policy(repository, commit_sha)
+
+
+def _codeowners_pattern_matches(pattern: str, path: str) -> bool:
+    normalized = pattern.lstrip("/")
+    if normalized.endswith("/**"):
+        return path.startswith(normalized[:-2])
+    if normalized.endswith("/"):
+        return path.startswith(normalized)
+    if any(character in normalized for character in "*?["):
+        return PurePosixPath(path).match(normalized)
+    return path == normalized
+
+
+def validate_governance_coverage(
+    repository: Path, commit_sha: str, policy: Mapping[str, Any]
+) -> list[str]:
+    errors: list[str] = []
+    try:
+        tracked_scripts = list_git_files(repository, commit_sha, "scripts")
+    except EvidenceError:
+        return ["tracked scripts cannot be resolved for the closed module registry"]
+    unregistered_modules = sorted(
+        path
+        for path in tracked_scripts
+        if path.endswith(".py") and path not in policy["judgePaths"]
+    )
+    if unregistered_modules:
+        errors.append(
+            "policy judgePaths must enumerate every tracked Python gate/test module: "
+            + ", ".join(unregistered_modules)
+        )
+
+    codeowners_path = CODEOWNERS_PATH.as_posix()
+    if codeowners_path not in policy["judgePaths"]:
+        return errors
+    try:
+        raw_codeowners = read_git_evidence(repository, commit_sha, codeowners_path)
+        workflow_paths = list_git_files(
+            repository, commit_sha, ".github/workflows"
+        )
+        lines = raw_codeowners.decode("utf-8").splitlines()
+    except (EvidenceError, UnicodeError):
+        return errors + ["immutable CODEOWNERS coverage cannot be resolved"]
+    rules: list[tuple[str, tuple[str, ...]]] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        fields = stripped.split()
+        if len(fields) < 2:
+            errors.append("CODEOWNERS contains a rule without an owner")
+            continue
+        rules.append((fields[0], tuple(fields[1:])))
+    protected_paths = dict.fromkeys(
+        [
+            *policy["rulebookPaths"],
+            *policy["judgePaths"],
+            *workflow_paths,
+            codeowners_path,
+            CODEOWNERS_BOOTSTRAP_PATH,
+        ]
+    )
+    for path in protected_paths:
+        owners: tuple[str, ...] = ()
+        for pattern, candidate_owners in rules:
+            if _codeowners_pattern_matches(pattern, path):
+                owners = candidate_owners
+        if "@NIV49" not in owners:
+            errors.append(f"CODEOWNERS does not protect governance path {path}")
+    return errors
 
 
 def validate_repository_artifacts(
@@ -1842,12 +2474,15 @@ def validate_repository_artifacts(
 ) -> list[str]:
     """Validate current artifacts plus append-only trust and activation history."""
 
+    if trusted_policy_commit is None:
+        return [
+            "repository artifact validation requires an explicit trusted policy anchor"
+        ]
     try:
         canonical_repository = canonical_repository_path(repository)
         _require_full_sha(commit_sha, "commitSha")
         parents = commit_parents(canonical_repository, commit_sha)
-        explicit_anchor = trusted_policy_commit is not None
-        anchor_commit = trusted_policy_commit or (parents[0] if parents else commit_sha)
+        anchor_commit = trusted_policy_commit
         _require_full_sha(anchor_commit, "trustedPolicyCommit")
         validate_git_ancestor(canonical_repository, anchor_commit, commit_sha)
         policy = load_policy(canonical_repository, commit_sha)
@@ -1862,12 +2497,9 @@ def validate_repository_artifacts(
             errors.append(
                 "current policy contains an unresolved or unsafe registered path"
             )
+    errors.extend(validate_governance_coverage(canonical_repository, commit_sha, policy))
     try:
-        anchor_policy = (
-            _load_optional_policy(canonical_repository, anchor_commit)
-            if explicit_anchor or parents
-            else None
-        )
+        anchor_policy = _load_optional_policy(canonical_repository, anchor_commit)
     except (EvidenceError, ContractError) as error:
         return [f"trusted policy anchor is present but invalid: {error}"]
     trusted_reviewers: Sequence[Mapping[str, Any]] = []
@@ -1942,7 +2574,13 @@ def validate_repository_artifacts(
         canonical_repository, commit_sha, policy
     )
     errors.extend(payload_errors)
-    current_errors, current_identities, current_digests = _collect_approval_state(
+    (
+        current_errors,
+        current_identities,
+        current_digests,
+        _current_queue_states,
+        _current_review_payloads,
+    ) = _collect_approval_state(
         canonical_repository,
         commit_sha,
         trusted_legacy_workspace=trusted_legacy_workspace,
@@ -1952,23 +2590,193 @@ def validate_repository_artifacts(
 
     historical_identities: dict[str, set[ApprovalIdentity]] = {}
     historical_digests: dict[str, set[str]] = {}
-    for history_commit in dict.fromkeys([*artifact_history, commit_sha]):
+    historical_review_payloads: dict[str, str] = {}
+    state_cache: dict[
+        str,
+        tuple[
+            dict[str, set[ApprovalIdentity]],
+            dict[str, set[str]],
+            dict[str, Mapping[str, Any]],
+            dict[str, str],
+        ],
+    ] = {}
+    invalid_history_commits: set[str] = set()
+    pending_queue_conflicts: dict[
+        str, dict[str, tuple[Mapping[str, Any], ...]]
+    ] = {}
+
+    def collect_history_state(
+        history_sha: str,
+    ) -> tuple[
+        dict[str, set[ApprovalIdentity]],
+        dict[str, set[str]],
+        dict[str, Mapping[str, Any]],
+        dict[str, str],
+    ]:
+        cached = state_cache.get(history_sha)
+        if cached is not None:
+            return cached
+        if history_sha == anchor_commit and anchor_policy is None:
+            empty_state: tuple[
+                dict[str, set[ApprovalIdentity]],
+                dict[str, set[str]],
+                dict[str, Mapping[str, Any]],
+                dict[str, str],
+            ] = ({}, {}, {}, {})
+            state_cache[history_sha] = empty_state
+            return empty_state
         try:
-            history_policy = _load_optional_policy(canonical_repository, history_commit)
-        except (EvidenceError, ContractError):
-            continue
+            history_policy = _load_optional_policy(canonical_repository, history_sha)
+        except (EvidenceError, ContractError) as error:
+            errors.append(
+                f"historical artifact commit {history_sha} has an invalid policy: {error}"
+            )
+            invalid_history_commits.add(history_sha)
+            empty_state = ({}, {}, {}, {})
+            state_cache[history_sha] = empty_state
+            return empty_state
         if history_policy is None:
-            continue
-        _, identities, digests = _collect_approval_state(
+            errors.append(
+                f"historical artifact commit {history_sha} has no resolvable policy"
+            )
+            invalid_history_commits.add(history_sha)
+            empty_state = ({}, {}, {}, {})
+            state_cache[history_sha] = empty_state
+            return empty_state
+        (
+            history_errors,
+            identities,
+            digests,
+            queue_states,
+            signed_review_payloads,
+        ) = _collect_approval_state(
             canonical_repository,
-            history_commit,
+            history_sha,
             trusted_legacy_workspace=trusted_legacy_workspace,
             trusted_reviewer_registry=trusted_reviewers,
         )
+        errors.extend(
+            f"historical artifact commit {history_sha}: {error}"
+            for error in history_errors
+        )
+        state = (identities, digests, queue_states, signed_review_payloads)
+        state_cache[history_sha] = state
+        return state
+
+    for history_commit in dict.fromkeys([*artifact_history, commit_sha]):
+        identities, digests, queue_states, signed_review_payloads = (
+            collect_history_state(history_commit)
+        )
+        if history_commit in invalid_history_commits:
+            continue
+        for identity, payload_digest in signed_review_payloads.items():
+            prior_digest = historical_review_payloads.setdefault(
+                identity, payload_digest
+            )
+            if prior_digest != payload_digest:
+                errors.append(
+                    f"historical signed Review Result identity {identity} was reused with different content"
+                )
+        flattened_identities = {
+            identity for values in identities.values() for identity in values
+        }
+        activation_parents = (
+            []
+            if history_commit == anchor_commit
+            else commit_parents(canonical_repository, history_commit)
+        )
+        parent_states: list[
+            tuple[
+                dict[str, set[ApprovalIdentity]],
+                dict[str, set[str]],
+                dict[str, Mapping[str, Any]],
+                dict[str, str],
+            ]
+        ] = []
+        for parent in activation_parents:
+            try:
+                validate_git_ancestor(canonical_repository, anchor_commit, parent)
+            except EvidenceError:
+                errors.append(
+                    f"historical merge parent {parent} is outside the trusted policy anchor"
+                )
+                continue
+            parent_states.append(collect_history_state(parent))
+        parent_identities = {
+            identity
+            for parent_identities_by_path, _, _, _ in parent_states
+            for values in parent_identities_by_path.values()
+            for identity in values
+        }
+        new_identities = flattened_identities - parent_identities
+        if history_commit != anchor_commit and new_identities:
+            if len(activation_parents) != 1:
+                errors.append(
+                    f"approval activation commit {history_commit} must have exactly one parent"
+                )
+            changed_paths = changed_paths_for_commit(
+                canonical_repository, history_commit
+            )
+            allowed_prefix = DEFAULT_ARTIFACT_ROOT.as_posix() + "/"
+            if any(
+                not path.startswith(allowed_prefix) or not path.endswith(".json")
+                for path in changed_paths
+            ):
+                errors.append(
+                    f"approval activation commit {history_commit} contains changes outside canonical JSON envelopes"
+                )
+
+        parent_queue_states = [state[2] for state in parent_states]
+        if history_commit != anchor_commit:
+            if len(parent_queue_states) == 1:
+                errors.extend(
+                    validate_queue_history_step(parent_queue_states[0], queue_states)
+                )
+            elif len(parent_queue_states) > 1:
+                first_parent_state = parent_queue_states[0]
+                if all(state == first_parent_state for state in parent_queue_states[1:]):
+                    errors.extend(
+                        validate_queue_history_step(first_parent_state, queue_states)
+                    )
+                else:
+                    merge_conflicts, merge_errors = validate_queue_merge_step(
+                        parent_queue_states, queue_states
+                    )
+                    pending_queue_conflicts[history_commit] = merge_conflicts
+                    errors.extend(merge_errors)
+
+        if len(activation_parents) == 1 and pending_queue_conflicts:
+            for merge_sha, conflicts in list(pending_queue_conflicts.items()):
+                try:
+                    validate_git_ancestor(
+                        canonical_repository, merge_sha, history_commit
+                    )
+                except EvidenceError:
+                    continue
+                unresolved: dict[str, tuple[Mapping[str, Any], ...]] = {}
+                for fingerprint, parent_items in conflicts.items():
+                    current_item = queue_states.get(fingerprint)
+                    if validate_queue_reconciliation(
+                        fingerprint,
+                        parent_items,
+                        current_item,
+                        parent_queue_states[0].get(fingerprint),
+                    ):
+                        unresolved[fingerprint] = parent_items
+                if unresolved:
+                    pending_queue_conflicts[merge_sha] = unresolved
+                else:
+                    del pending_queue_conflicts[merge_sha]
+
         for rule_path, values in identities.items():
             historical_identities.setdefault(rule_path, set()).update(values)
         for rule_path, values in digests.items():
             historical_digests.setdefault(rule_path, set()).update(values)
+
+    for merge_sha, conflicts in pending_queue_conflicts.items():
+        errors.append(
+            f"Queue history merge {merge_sha} has conflicting parent states for {sorted(conflicts)} and requires a subsequent single-parent reconciliation"
+        )
 
     for activated_path in set(historical_identities) - set(registered_payloads):
         errors.append(
@@ -2050,9 +2858,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     )
                 )
         else:
-            if options.commit and not options.trusted_policy_commit:
+            if not options.trusted_policy_commit:
                 raise ContractError(
-                    "--commit requires an external --trusted-policy-commit anchor"
+                    "repository scan requires an external --trusted-policy-commit anchor"
                 )
             commit_sha = options.commit or resolve_head_commit(options.repository_root)
             _require_full_sha(commit_sha, "--commit")

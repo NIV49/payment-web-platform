@@ -36,7 +36,7 @@ Do not classify uncertain claims as findings. Send genuine ambiguity to the deci
 
 Each finding must include:
 
-- absolute path and exact line;
+- repository-relative path and exact positive line;
 - symbol and reachable control flow;
 - trigger and observable impact;
 - code, test, data, or configuration evidence;
@@ -65,5 +65,7 @@ An implementation agent's report is evidence, never the verdict.
 - Reject a duplicate `reviewIdempotencyKey`. The same evaluated version must still receive the required independent reviews from distinct `reviewerId` values; different `reviewerRole` values are recorded, not inferred.
 - Require `startCommitSha == endCommitSha == targetCommitSha`; invalidate the result on any checkout, Rulebook, or Judge digest drift.
 - Verify every Review Result's Ed25519 signature against the reviewer ID, role, and key anchored in the protected baseline policy. A bundle-selected trust registry is not authoritative.
+- Require every approved Rule `judgeTests` ID to resolve through the evaluated `.agents/payment-modernization-judge-registry.json`; each approval review must sign one matching command, target SHA, zero exit code, and result digest.
+- Validate every finding with the exact schema and strict severity/status/resolution enums, including SHOULD_FIX and FAIL results; unknown fields or enum values fail closed.
 - A fix requires a new commit and independent re-review.
 - After three unsuccessful valid review rounds, stop and request human decision.

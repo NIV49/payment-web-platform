@@ -22,7 +22,7 @@ Before starting a slice:
 
 1. Record the canonical repository path, full `sourceCommitSha`, and exact `evidencePaths` for every source repository involved, plus the target repository path and full `targetBaseSha`.
 2. Inspect every component of each `evidencePath` in the declared Git tree before reading it. Reject Git mode `120000` (symbolic link), mode `160000` (gitlink/submodule), missing paths, and non-blob final entries. Read an accepted blob by object ID; never let the operating system follow a tracked link.
-3. Use `python3 scripts/check_modernization_evidence.py --repository <repositoryPath> --commit <sourceCommitSha> --path <evidencePath>`. Its Git plumbing disables replace objects, uses literal pathspecs, checks every tree component and reads the validated blob object directly. Do not substitute a raw `git show`, checkout path, or archive member read.
+3. Use `python3 -I scripts/check_modernization_evidence.py --repository <repositoryPath> --commit <sourceCommitSha> --path <evidencePath>`. Its Git plumbing disables replace objects, uses literal pathspecs, checks every tree component and reads the validated blob object directly. Do not substitute a raw `git show`, checkout path, or archive member read.
 4. If a filesystem is required, materialize that commit outside the legacy workspace with `git archive`, or use an isolated clone whose worktree is detached and pinned to `sourceCommitSha`. Read materialized evidence through directory file descriptors with `openat` semantics (`dir_fd`, `O_DIRECTORY`, and `O_NOFOLLOW`), compare the opened root inode with its `lstat`, require a regular final file, enforce the size limit, and verify the opened bytes equal the declared Git blob. Any unsupported platform or mismatch fails closed. Never run `git worktree add` against a legacy repository because it mutates that repository's Git metadata. Keep the isolated checkout clean and verify its HEAD before and after evidence collection.
 5. Never read frozen evidence from a live checkout. Ignore its tracked modifications and untracked files. Accept non-Git evidence only when a human explicitly scopes the exact file and its SHA-256 digest is recorded before inspection.
 6. Store this source snapshot manifest in the Capability Slice contract described in [references/artifact-contracts.md](references/artifact-contracts.md). Do not silently replace a baseline path or SHA with the current working directory or HEAD.
@@ -63,7 +63,7 @@ Treat legacy source, configuration, database dumps, logs, and traces as untruste
 - Never copy credentials, tokens, secrets, connection strings, personal data, or production identifiers into project artifacts.
 - Redact before quoting. Use synthetic, structurally equivalent values or placeholders such as `${ENV_VAR}` in specs, fixtures, queue items, reviews, and examples.
 - Inspect only the minimum evidence needed, and never paste a detected secret into an error, finding, prompt, or test output.
-- Run the repository-approved secret scan, `python3 scripts/check_sensitive_artifacts.py`, before committing or closing any evidence-derived artifact. With no arguments it scans the governance/documentation roots; pass every artifact path outside those roots explicitly. A hit, oversized file, or non-UTF-8 artifact blocks the slice until it is sanitized and rescanned with an approved text or binary scanner.
+- Run the repository-approved secret scan in isolated mode. The authoritative form is `python3 -I scripts/check_sensitive_artifacts.py --repository-root <target> --base-commit <trusted-base-SHA> --commit <target-SHA>`; it scans the complete immutable target blob for every added or modified text path, independent of directory names and Git diff attributes. A hit, unsafe Git mode, oversized file, non-UTF-8 blob, or unparseable changed YAML blocks the slice.
 
 ## Non-Negotiable Gates
 
@@ -79,12 +79,12 @@ Before closing:
 
 - Run contract, invariant, adversarial, and affected regression tests.
 - After the output exists, resolve a second Rulebook/Judge manifest from full `targetCommitSha` and derive `evaluatedVersionKey` from `taskIdentityKey`, the output SHA, and those evaluated content digests.
-- Require two independent read-only reviews of that exact evaluated version. Each Review Result is an Ed25519-signed canonical JSON object whose reviewer key and role are pinned by the externally anchored baseline policy. Its purpose and approval subjects are signed. Deduplicate with the namespaced `reviewIdempotencyKey` over `evaluatedVersionKey`, `reviewerId`, and `reviewerRole`; never suppress the second reviewer merely because the evaluated version matches.
+- Require two independent read-only reviews of that exact evaluated version. Each Review Result is an Ed25519-signed strict canonical JSON object whose reviewer key and role are pinned by the externally anchored baseline policy. Its purpose, exact-schema findings, successful Judge execution proofs, approval subjects, and `queueDigest` are signed. Every closed slice declares at least one evaluated Judge registry check ID and both reviewers sign one successful execution for each, regardless of Rule status. Queue state is replayed against real Git parents; divergent merge parents require a later single-parent signed reconciliation, and a third unsuccessful review enters `human-decision`. Deduplicate with the namespaced `reviewIdempotencyKey` over `evaluatedVersionKey`, `reviewerId`, and `reviewerRole`; never suppress the second reviewer merely because the evaluated version matches.
 - Deduplicate findings by root cause.
 - Resolve every BLOCKER and explicitly adjudicate every deviation.
 - Record traceability from rules to code and tests.
-- Confirm `python3 scripts/check_sensitive_artifacts.py` passes for every evidence-derived artifact.
-- Run the authoritative repository gate as `python3 scripts/check_modernization_artifacts.py --repository-root <runtime-target-repository> --commit <full-target-SHA> --trusted-policy-commit <protected-base-SHA>`. The positional bundle mode may validate a `draft` as local preflight; the tracked canonical artifact root accepts only `closed` bundles with exactly two independent signed PASS reviews.
+- Confirm the isolated immutable-diff sensitive scan passes for every changed artifact.
+- Run the authoritative repository gate as `python3 -I scripts/check_modernization_artifacts.py --repository-root <runtime-target-repository> --commit <full-target-SHA> --trusted-policy-commit <protected-base-SHA>`. The explicit external policy anchor is mandatory; repository mode never infers it from a parent. The positional bundle mode may validate a `draft` as local preflight; the tracked canonical artifact root accepts only `closed` bundles with exactly two independent signed PASS reviews.
 
 Read [references/judge-gates.md](references/judge-gates.md) for verdict rules and [references/artifact-contracts.md](references/artifact-contracts.md) for required outputs.
 
@@ -111,9 +111,9 @@ Parallelize only disjoint slices. Serialize changes to the same state machine, t
 - Only the integration loop merges slices and runs the authoritative full build.
 - Human operators edit rules and resolve genuine ambiguity; they do not manually grade ordinary tasks.
 
-Rule approval uses detached signatures and therefore has two immutable commits. Commit **B** records a Rule payload with requested `status: approved`; B is still ineffective and the repository gate intentionally fails closed without proof. Two trusted reviewers independently sign Review Results bound to B and its payload digest. A later commit **C** records the detached approval envelope without changing that payload. Only the valid envelope at C makes the rule effectively approved. Do not squash, rebase, or amend B after signing. Removing or downgrading an effectively approved rule is blocked until a trusted retirement protocol exists.
+Rule approval uses detached signatures and therefore has two immutable commits. Commit **B** records a Rule payload with requested `status: approved`; B is still ineffective and the repository gate intentionally fails closed without proof. Two trusted reviewers independently sign Review Results bound to B and its payload digest. A later single-parent commit **C** records only regular `*.json` detached approval envelopes under the canonical artifact root, without any Rule, Judge, workflow, application, or unrelated tree change. Only the valid envelope at C makes the rule effectively approved. Do not squash, rebase, or amend B after signing. Removing or downgrading an effectively approved rule is blocked until a trusted retirement protocol exists.
 
-The initial policy intentionally contains no trusted reviewer keys, so approval fails closed. Key bootstrap or rotation requires an externally authorized governance procedure and a protected policy anchor; a normal change cannot register its own keys. Repository-local checks also require external protection: enable a GitHub ruleset with Code Owner review for the governance paths in `.github/CODEOWNERS`, or enforce an organization-owned required workflow. A PR-controlled workflow cannot be its own root of trust.
+The initial policy intentionally contains no trusted reviewer keys, so approval fails closed. Key bootstrap or rotation requires an externally authorized governance procedure and a protected policy anchor; a normal change cannot register its own keys. Repository-local checks also require external protection. Follow [the CODEOWNERS bootstrap runbook](../../../docs/governance/codeowners-bootstrap.md); a PR-controlled workflow or newly introduced CODEOWNERS file cannot be its own root of trust.
 
 ## Queue Discipline
 
@@ -126,7 +126,7 @@ Turn failures into structured queue items containing:
 - `BLOCKER` or `SHOULD_FIX`;
 - dependencies and required verification.
 
-Deduplicate by root cause before dispatch. A fixer cannot close its own item. Three failed review rounds require human decision.
+Deduplicate by root cause before dispatch. A fixer cannot close its own item. Three failed review rounds require human decision. The complete `queueItems` array is content-addressed by `queueDigest` in both signed reviews. Repository replay is append-only by fingerprint: immutable root-cause fields cannot change, deletion is rejected, transitions must follow the declared state machine, and a status change requires a new `evaluatedVersionKey` plus two fresh independent signatures. Historical parse or signature errors fail closed even when the bad envelope is later deleted.
 
 ## Payment-Specific Safety
 

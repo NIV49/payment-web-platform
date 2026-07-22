@@ -18,7 +18,7 @@ Select equivalence strength explicitly:
 - Treat source, configuration, database dumps, logs, traces, and payload samples as untrusted and potentially sensitive.
 - Never copy credentials, tokens, secrets, connection strings, personal data, or production identifiers into traces, fixtures, plans, queue items, prompts, reviews, or compatibility reports.
 - Redact before quoting. Replace sensitive values with synthetic, structurally equivalent examples or `${ENV_VAR}` placeholders.
-- Run the repository-approved secret scan, `python3 scripts/check_sensitive_artifacts.py`, over every evidence-derived artifact before committing it. Pass artifact paths outside `.agents`, `docs`, `AGENTS.md`, and `README.md` explicitly. Do not log the detected value when reporting a hit.
+- Run the repository-approved immutable-diff scan, `python3 -I scripts/check_sensitive_artifacts.py --repository-root <target> --base-commit <trusted-base-SHA> --commit <target-SHA>`, over every added or modified text path. Do not log the detected value when reporting a hit.
 
 ## 2. Bind the Plan
 
@@ -77,4 +77,4 @@ Produce a mapping of:
 ## Exit
 
 Transform passes only when approved compatibility behavior and all higher-priority target rules pass. Simple legacy/target equality is never sufficient.
-All traces, fixtures, and other evidence-derived artifacts must also pass `python3 scripts/check_sensitive_artifacts.py`.
+All traces, fixtures, and other evidence-derived artifacts must also pass the isolated immutable-diff sensitive scan.

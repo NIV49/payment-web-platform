@@ -34,12 +34,14 @@
     "docs/ai-context/permission/09-migration-plan.md",
     "docs/ai-context/vben/README.md",
     "docs/ai-contract/identity-admin-api-contract.md",
+    "docs/governance/codeowners-bootstrap.md",
     "docs/judge-charter.md",
     "docs/new-payment-system-target-architecture.md",
     "docs/permission-refactor-product-requirements.md"
   ],
   "ruleCardPaths": [],
   "judgePaths": [
+    ".agents/payment-modernization-judge-registry.json",
     ".agents/payment-modernization/artifacts/README.md",
     ".github/CODEOWNERS",
     ".github/workflows/documentation.yml",

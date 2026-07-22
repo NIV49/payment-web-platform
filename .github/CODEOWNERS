@@ -2,15 +2,9 @@
 # "Require review from Code Owners" for the protected default branch/ruleset;
 # this file alone does not enforce approval.
 /.github/CODEOWNERS @NIV49
-/.github/workflows/documentation.yml @NIV49
-/.agents/payment-modernization-policy.json @NIV49
-/.agents/payment-modernization/ @NIV49
-/.agents/skills/payment-modernization/ @NIV49
+/.github/workflows/ @NIV49
+/.agents/ @NIV49
 /AGENTS.md @NIV49
-/docs/judge-charter.md @NIV49
-/scripts/check-doc-decisions.py @NIV49
-/scripts/check_modernization_artifacts.py @NIV49
-/scripts/check_modernization_evidence.py @NIV49
-/scripts/check_project_skills.py @NIV49
-/scripts/check_sensitive_artifacts.py @NIV49
-/scripts/requirements-documentation.txt @NIV49
+/README.md @NIV49
+/docs/ @NIV49
+/scripts/ @NIV49

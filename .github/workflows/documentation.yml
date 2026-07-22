@@ -19,7 +19,10 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    container:
+      image: python:3.13.14-bookworm@sha256:b4d62b6602fd5b284f82cb9b733cc550f237f847c065b84cbb54dfe28ce837a2
+      options: --platform linux/amd64
     timeout-minutes: 10
 
     steps:
@@ -28,48 +31,37 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.13.14"
-
       - name: Show Python version
-        run: python3 --version
+        run: python3 -I --version
 
       - name: Install pinned documentation dependencies
         run: >-
-          python3 -m pip install --disable-pip-version-check
+          python3 -I -m pip install --disable-pip-version-check
+          --require-hashes --no-deps
           --only-binary=:all:
           -r scripts/requirements-documentation.txt
 
       - name: Verify AI context decision states before tests
-        run: python3 scripts/check-doc-decisions.py
+        run: python3 -I scripts/check-doc-decisions.py
 
       - name: Verify project skills before tests
-        run: python3 scripts/check_project_skills.py
+        run: python3 -I scripts/check_project_skills.py
 
       - name: Scan sensitive documentation artifacts before tests
-        run: python3 scripts/check_sensitive_artifacts.py
+        run: >-
+          python3 -I scripts/check_sensitive_artifacts.py
+          --repository-root "$GITHUB_WORKSPACE"
+          --base-commit "$TRUSTED_POLICY_COMMIT"
+          --commit "$GITHUB_SHA"
 
       - name: Verify modernization artifact contracts before tests
         run: >-
-          python3 scripts/check_modernization_artifacts.py
+          python3 -I scripts/check_modernization_artifacts.py
           --repository-root "$GITHUB_WORKSPACE"
           --commit "$GITHUB_SHA"
           --trusted-policy-commit "$TRUSTED_POLICY_COMMIT"
 
-      - name: Test documentation governance without snapshot drift
-        shell: bash
-        run: |
-          set -euo pipefail
-          checked_out_sha="$(git rev-parse --verify HEAD)"
-          test "$checked_out_sha" = "$GITHUB_SHA"
-          python3 -m unittest discover -s scripts/tests -p "test_*.py"
-          test "$(git rev-parse --verify HEAD)" = "$checked_out_sha"
-          git diff --exit-code "$checked_out_sha" --
-          test -z "$(git status --porcelain=v1 --untracked-files=all)"
-
-      - name: Re-run security gates against the immutable commit
+      - name: Verify immutable commit before running PR-controlled tests
         shell: bash
         run: |
           set -euo pipefail
@@ -82,14 +74,28 @@ jobs:
           git -C "$snapshot" add -f -A
           (
             cd "$snapshot"
-            python3 scripts/check-doc-decisions.py
-            python3 scripts/check_project_skills.py
-            python3 scripts/check_sensitive_artifacts.py
+            python3 -I scripts/check-doc-decisions.py
+            python3 -I scripts/check_project_skills.py
           )
-          python3 "$snapshot/scripts/check_modernization_artifacts.py" \
+          python3 -I "$snapshot/scripts/check_sensitive_artifacts.py" \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --base-commit "$TRUSTED_POLICY_COMMIT" \
+            --commit "$checked_out_sha"
+          python3 -I "$snapshot/scripts/check_modernization_artifacts.py" \
             --repository-root "$GITHUB_WORKSPACE" \
             --commit "$checked_out_sha" \
             --trusted-policy-commit "$TRUSTED_POLICY_COMMIT"
+          test "$(git rev-parse --verify HEAD)" = "$checked_out_sha"
+          git diff --exit-code "$checked_out_sha" --
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Test documentation governance without snapshot drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse --verify HEAD)"
+          test "$checked_out_sha" = "$GITHUB_SHA"
+          python3 -I -m unittest discover -s scripts/tests -p "test_*.py"
           test "$(git rev-parse --verify HEAD)" = "$checked_out_sha"
           git diff --exit-code "$checked_out_sha" --
           test -z "$(git status --porcelain=v1 --untracked-files=all)"

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+import yaml
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 
 DEFAULT_TARGETS = (".agents", "docs", "AGENTS.md", "README.md")
@@ -135,7 +140,7 @@ PLACEHOLDER_PATTERN = re.compile(
 MASK_PATTERN = re.compile(r"(?:\*{3,}|x{3,}|•{3,})", re.IGNORECASE)
 SENSITIVE_KEY_PATTERN = (
     r"(?:[A-Za-z][A-Za-z0-9]*[_.-])*"
-    r"(?:api[_-]?key|client[_-]?secret|password|passwd|"
+    r"(?:api[_-]?key|client[_-]?secret|secret|password|passwd|token|"
     r"access[_-]?token|refresh[_-]?token|auth[_-]?token|"
     r"aws[_-]?secret[_-]?access[_-]?key)"
 )
@@ -152,7 +157,7 @@ UNQUOTED_SECRET_ASSIGNMENT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 INLINE_CREDENTIAL_PAIR_PATTERN = re.compile(
-    r"\b(?P<user>[A-Za-z0-9._-]{3,})\s+/\s+"
+    r"(?<![A-Za-z0-9_.@-])(?P<user>[A-Za-z0-9_.@-]{3,128})\s+/\s+"
     r"(?P<value>[^\s`,;，。]{4,})"
 )
 USER_PASSWORD_PAIR_PATTERN = re.compile(
@@ -202,6 +207,20 @@ COMMON_ACCOUNT_NAMES = {
     "user",
     "username",
 }
+COMMON_WEAK_PASSWORDS = {
+    "123456",
+    "12345678",
+    "admin123",
+    "changeme",
+    "letmein",
+    "password",
+    "password1",
+    "password123",
+    "qwerty",
+    "qwerty123",
+    "welcome",
+}
+FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 def is_safe_placeholder(value: str) -> bool:
@@ -243,11 +262,15 @@ def looks_like_password(value: str) -> bool:
 
 
 def looks_like_inline_credential(user: str, value: str) -> bool:
+    lowered = value.casefold()
     return (
         user.casefold() in COMMON_ACCOUNT_NAMES
         or looks_like_password(value)
-        or value.casefold()
-        in {"admin123", "changeme", "password", "password1", "password123"}
+        or lowered in COMMON_WEAK_PASSWORDS
+        or "password" in lowered
+        or "secret" in lowered
+        or (value.isdigit() and len(value) >= 4)
+        or len(set(lowered)) <= 2
     )
 
 
@@ -384,18 +407,54 @@ def discover_tracked_artifact_targets(
     return targets, []
 
 
-def scan_file(path: Path, repository: Path) -> list[str]:
-    label = display_path(path, repository)
-    if path.stat().st_size > MAX_TEXT_FILE_BYTES:
+def scan_yaml_sensitive_scalars(
+    label: str,
+    content: str,
+    selected_lines: set[int] | None,
+) -> list[str]:
+    if Path(label).suffix.casefold() not in {".yaml", ".yml"}:
+        return []
+    try:
+        documents = list(yaml.compose_all(content))
+    except yaml.YAMLError:
+        return [f"{label}: INVALID_YAML: changed YAML cannot be parsed safely"]
+    errors: list[str] = []
+
+    def visit(node: Node | None) -> None:
+        if isinstance(node, MappingNode):
+            for key_node, value_node in node.value:
+                if isinstance(key_node, ScalarNode) and re.fullmatch(
+                    SENSITIVE_KEY_PATTERN, key_node.value, re.IGNORECASE
+                ):
+                    covered = set(
+                        range(key_node.start_mark.line + 1, value_node.end_mark.line + 2)
+                    )
+                    if selected_lines is None or covered & selected_lines:
+                        value = value_node.value if isinstance(value_node, ScalarNode) else ""
+                        if not value or not is_safe_placeholder(value):
+                            errors.append(
+                                f"{label}:{key_node.start_mark.line + 1}: YAML_SECRET_SCALAR"
+                            )
+                visit(value_node)
+        elif isinstance(node, SequenceNode):
+            for child in node.value:
+                visit(child)
+
+    for document in documents:
+        visit(document)
+    return errors
+
+
+def scan_text_content(
+    label: str,
+    content: str,
+    *,
+    selected_lines: set[int] | None = None,
+) -> list[str]:
+    if len(content.encode("utf-8")) > MAX_TEXT_FILE_BYTES:
         return [
             f"{label}: OVERSIZE: file exceeds {MAX_TEXT_FILE_BYTES} bytes and was not scanned"
         ]
-
-    try:
-        content = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return [f"{label}: NON_UTF8: artifact requires an approved binary scanner"]
-
     if any(
         character == "\x00"
         or (ord(character) < 32 and character not in {"\n", "\r", "\t"})
@@ -409,6 +468,8 @@ def scan_file(path: Path, repository: Path) -> list[str]:
     errors: list[str] = []
     lines = content.splitlines()
     for line_number, line in enumerate(lines, start=1):
+        if selected_lines is not None and line_number not in selected_lines:
+            continue
         for rule_id, pattern in HIGH_CONFIDENCE_PATTERNS:
             if pattern.search(line):
                 errors.append(f"{label}:{line_number}: {rule_id}")
@@ -484,6 +545,79 @@ def scan_file(path: Path, repository: Path) -> list[str]:
         for match in PAYMENT_CARD_CANDIDATE_PATTERN.finditer(line):
             if passes_luhn(match.group(0)):
                 errors.append(f"{label}:{line_number}: PAYMENT_CARD_NUMBER")
+    errors.extend(scan_yaml_sensitive_scalars(label, content, selected_lines))
+    return errors
+
+
+def scan_file(path: Path, repository: Path) -> list[str]:
+    label = display_path(path, repository)
+    if path.stat().st_size > MAX_TEXT_FILE_BYTES:
+        return [
+            f"{label}: OVERSIZE: file exceeds {MAX_TEXT_FILE_BYTES} bytes and was not scanned"
+        ]
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return [f"{label}: NON_UTF8: artifact requires an approved binary scanner"]
+    return scan_text_content(label, content)
+
+
+def _run_immutable_git(repository: Path, arguments: tuple[str, ...]) -> bytes:
+    environment = os.environ.copy()
+    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    environment["GIT_LITERAL_PATHSPECS"] = "1"
+    result = subprocess.run(
+        ("git", "--no-replace-objects", "--literal-pathspecs", *arguments),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise ValueError("immutable Git diff cannot be resolved")
+    return result.stdout
+
+
+def scan_git_diff(repository: Path, base_commit: str, commit: str) -> list[str]:
+    repository = repository.resolve()
+    if not FULL_SHA_PATTERN.fullmatch(base_commit) or not FULL_SHA_PATTERN.fullmatch(commit):
+        return ["repository: INVALID_COMMIT: immutable diff requires full lowercase SHAs"]
+    try:
+        _run_immutable_git(repository, ("merge-base", "--is-ancestor", base_commit, commit))
+        raw_paths = _run_immutable_git(
+            repository,
+            ("diff", "--name-only", "-z", "--diff-filter=AMCR", "--no-renames", base_commit, commit),
+        )
+    except ValueError as error:
+        return [f"repository: IMMUTABLE_DIFF: {error}"]
+    errors: list[str] = []
+    for raw_path in (value for value in raw_paths.split(b"\x00") if value):
+        path = os.fsdecode(raw_path)
+        try:
+            tree = _run_immutable_git(repository, ("ls-tree", "-z", commit, "--", path))
+            metadata = tree.split(b"\t", 1)[0].split()
+            if len(metadata) != 3 or metadata[0] not in {b"100644", b"100755"} or metadata[1] != b"blob":
+                errors.append(f"{path}: UNSAFE_GIT_MODE: changed path is not a regular blob")
+                continue
+            object_id = os.fsdecode(metadata[2])
+            if FULL_SHA_PATTERN.fullmatch(object_id) is None:
+                errors.append(f"{path}: INVALID_GIT_OBJECT: changed blob ID is invalid")
+                continue
+            raw = _run_immutable_git(repository, ("cat-file", "blob", object_id))
+            if len(raw) > MAX_TEXT_FILE_BYTES:
+                errors.append(f"{path}: OVERSIZE: changed blob exceeds the scan limit")
+                continue
+            content = raw.decode("utf-8")
+        except UnicodeError:
+            errors.append(f"{path}: NON_UTF8: changed blob requires an approved binary scanner")
+            continue
+        except ValueError as error:
+            errors.append(f"{path}: IMMUTABLE_DIFF: {error}")
+            continue
+        # Scan the complete immutable target blob. Git patches are affected by
+        # .gitattributes (for example `-diff`) and therefore are not a trusted
+        # source of coverage for a security gate.
+        errors.extend(scan_text_content(path, content))
     return errors
 
 
@@ -505,10 +639,28 @@ def scan_repository(
     return errors
 
 
-def main() -> int:
-    repository = Path(__file__).resolve().parent.parent
-    targets = tuple(sys.argv[1:]) or None
-    errors = scan_repository(repository, targets)
+def parse_args(arguments: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Scan repository artifacts for sensitive data.")
+    parser.add_argument("targets", nargs="*")
+    parser.add_argument("--repository-root", type=Path)
+    parser.add_argument("--base-commit")
+    parser.add_argument("--commit")
+    return parser.parse_args(arguments)
+
+
+def main(arguments: list[str] | None = None) -> int:
+    options = parse_args(sys.argv[1:] if arguments is None else arguments)
+    repository = options.repository_root or Path(__file__).resolve().parent.parent
+    diff_values = (options.base_commit, options.commit)
+    if any(diff_values) and not all(diff_values):
+        print("FAIL: immutable diff mode requires --base-commit and --commit", file=sys.stderr)
+        return 1
+    targets = tuple(options.targets) or None
+    errors = (
+        scan_git_diff(repository, options.base_commit, options.commit)
+        if all(diff_values)
+        else scan_repository(repository, targets)
+    )
     if errors:
         for error in errors:
             print(f"FAIL: {error}", file=sys.stderr)

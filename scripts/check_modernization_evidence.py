@@ -148,6 +148,8 @@ def commits_touching_paths(
         canonical_repository,
         [
             "rev-list",
+            "--full-history",
+            "--topo-order",
             "--reverse",
             descendant,
             f"^{ancestor}",
@@ -157,6 +159,34 @@ def commits_touching_paths(
     )
     commits = [line for line in os.fsdecode(output).splitlines() if line]
     return [_resolve_commit(canonical_repository, commit) for commit in commits]
+
+
+def changed_paths_for_commit(
+    repository: Path | str, commit_sha: str
+) -> list[str]:
+    """Return the complete immutable tree delta for a commit, across all parents."""
+
+    canonical_repository = _canonical_repository(repository)
+    commit = _resolve_commit(canonical_repository, commit_sha)
+    output = _run_git(
+        canonical_repository,
+        [
+            "diff-tree",
+            "--root",
+            "-m",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "-z",
+            commit,
+        ],
+    )
+    paths = {
+        _normalize_evidence_path(os.fsdecode(raw_path)).as_posix()
+        for raw_path in output.split(b"\x00")
+        if raw_path
+    }
+    return sorted(paths)
 
 
 def list_git_files(repository: Path | str, commit_sha: str, prefix: str) -> list[str]:

@@ -443,6 +443,73 @@ class ProjectSkillValidationTest(unittest.TestCase):
 
             self.assertEqual([], validate_repository(repository))
 
+    def test_validates_local_and_cross_document_heading_fragments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            skill = self.create_skill(repository)
+            skill_file = skill / "SKILL.md"
+            original = skill_file.read_text(encoding="utf-8")
+
+            skill_file.write_text(
+                original.replace(
+                    "Read [the rules](references/rules.md).",
+                    "Read [missing](#does-not-exist).",
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "missing Markdown heading fragment" in error
+                    for error in validate_repository(repository)
+                )
+            )
+
+            skill_file.write_text(
+                original.replace(
+                    "Read [the rules](references/rules.md).",
+                    "Read [missing](references/rules.md#does-not-exist).",
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "missing Markdown heading fragment" in error
+                    for error in validate_repository(repository)
+                )
+            )
+
+            skill_file.write_text(
+                original.replace(
+                    "Read [the rules](references/rules.md).",
+                    "Read [the rules](references/rules.md#rules).",
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual([], validate_repository(repository))
+
+    def test_rejects_raw_html_links_and_images(self) -> None:
+        for raw_html in (
+            '<a href="../../../../outside.md">outside</a>',
+            '<img src="../../../../outside.png">',
+        ):
+            with (
+                self.subTest(raw_html=raw_html),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                repository = Path(directory)
+                skill = self.create_skill(repository)
+                skill_file = skill / "SKILL.md"
+                skill_file.write_text(
+                    skill_file.read_text(encoding="utf-8") + "\n" + raw_html + "\n",
+                    encoding="utf-8",
+                )
+
+                errors = validate_repository(repository)
+
+                self.assertTrue(
+                    any("raw HTML href/src" in error for error in errors), errors
+                )
+
     def test_rejects_a_skills_root_symlink(self) -> None:
         with (
             tempfile.TemporaryDirectory() as repository_directory,

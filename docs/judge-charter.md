@@ -163,9 +163,9 @@ Agent 声称“完成”不构成完成。只有指定版本通过 Judge，任�
 5. 禁止修改或删除规则来绕过失败。
 6. 规则废弃必须保留原因和决策记录。
 
-双签完成后，由后续 commit C 只提交 detached approval envelope：完整 `approvalCommit`、两名独立审查者的 `approvedBy`、两条可解析的 `approvalReviewRefs` 和签名 Review Results。C 必须保持 B 的 Rule payload 不变；只有 C 上的仓库级门禁通过后，规则才是 effective approved。B 签名后禁止 squash、rebase 或 amend。删除 envelope、删除规则、把 effective approved 降回 candidate，或更换 reviewer trust registry，均必须 fail closed；当前尚未定义可信 retirement/key-rotation 协议。
+双签完成后，由单父 commit C 只提交 canonical artifact root 下的 regular JSON detached approval envelope；C 的完整树差异不得夹带 Rule、Judge、workflow、业务或其他路径。完整 `approvalCommit`、两名独立审查者的 `approvedBy`、两条可解析的 `approvalReviewRefs`、Judge 成功执行证明和签名 Review Results 都必须绑定 B。只有 C 上的仓库级门禁通过后，规则才是 effective approved。B 签名后禁止 squash、rebase 或 amend。删除 envelope、删除规则、把 effective approved 降回 candidate，或更换 reviewer trust registry，均必须 fail closed；当前尚未定义可信 retirement/key-rotation 协议。
 
-Bundle 必须显式声明 `lifecycleStatus`。`draft` 只允许 positional 本地预检；canonical artifact root 只接收 `closed`，并要求恰好两名 reviewer ID 和 key ID 均不同的有效签名 PASS。跨 bundle 重复引用完全相同的 Review Result 可以去重，但同一 `reviewResultId` 或 `reviewIdempotencyKey` 对应不同签名内容时必须拒绝。
+Bundle 必须显式声明 `lifecycleStatus`。`draft` 只允许 positional 本地预检；canonical artifact root 只接收 `closed`，并要求恰好两名 reviewer ID 和 key ID 均不同的有效签名 PASS。closed slice 至少声明一个可在 evaluated Judge registry 解析的 check ID，两名 reviewer 都必须签署命令、目标 SHA、`exitCode: 0` 与结果摘要；即使没有 approved Rule 也不能省略。签名覆盖严格 finding schema、Judge 执行结果和整个 `queueItems` 的 `queueDigest`。Queue 按 fingerprint 跨完整 merge DAG、相对真实直接父提交 append-only 回放，不得删除、改写不变字段或跳过状态；一个 fingerprint 分歧不得屏蔽其他一致项的校验，分叉父状态必须由后续单父 commit 实际改变签名 Queue 状态并绑定新 evaluated version，纯代码后继不能冒充调和。每次 `reviewing -> implementing` 递增签名内的 `failedReviewRounds`，第三次失败必须进入 `human-decision`，获人类授权后重新实施时归零。历史 JSON、policy 或签名错误即使随后删除也继续 fail closed。
 
 Reviewer 公钥、角色、稳定 target repository ID、Rulebook/Judge 路径由 `.agents/payment-modernization-policy.json` 固定。PR 以受保护基准分支 SHA、`main` push 以上一次 main SHA 作为外部 policy anchor；bundle 不能用自己先登记的公钥自签。当前 registry 为空，因此规则批准有意保持不可用，直到独立人工流程完成 key bootstrap。Rulebook 以长度分帧、按路径排序的实际内容 SHA-256 摘要作为身份；人工标签只用于展示。
 
@@ -228,7 +228,7 @@ Judge 使用三类测试资产：
 - 老系统源码、配置、数据库转储、日志、Trace 和 Payload 样本均视为不可信且可能含敏感信息；
 - 历史数据必须在引用前脱敏，使用合成同形值或 `${ENV_VAR}` 占位符；
 - 密钥、Token、密码、连接串、个人信息和生产标识不得进入分析、规格、队列、评审、提示词、测试或其他仓库产物；
-- 所有证据派生产物提交前必须通过仓库批准的 `python3 scripts/check_sensitive_artifacts.py`；无参数时覆盖治理与文档根目录，位于其他目录的产物必须显式传入路径，二进制或超限文件必须改用已批准的专用扫描器；命中后不得把敏感值复制到错误或审查日志；
+- 所有证据派生产物提交前必须通过仓库批准的 `python3 -I scripts/check_sensitive_artifacts.py --repository-root <repo> --base-commit <trusted-base-SHA> --commit <target-SHA>`；不可变 diff 只用于定位全部新增/修改路径，每个目标文本 blob 必须全文扫描，不依赖目录名或可被 `.gitattributes` 改写的 patch。危险 mode、二进制、非 UTF-8 或超限变更 fail closed；命中后不得把敏感值复制到错误或审查日志；
 - 时间、随机、汇率和外部渠道必须使用固定时钟及受控模拟器；
 - Judge 使用外部可观察契约，不依赖目标实现的私有函数；
 - 每个历史事故和已确认缺陷都必须成为永久回归样本。
