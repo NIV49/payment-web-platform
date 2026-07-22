@@ -5,16 +5,47 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 REPOSITORY = SCRIPTS_DIR.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from check_sensitive_artifacts import scan_git_diff, scan_repository  # noqa: E402
+from check_sensitive_artifacts import (  # noqa: E402
+    scan_git_diff,
+    scan_repository,
+    scan_text_content,
+)
 
 
 class SensitiveArtifactValidationTest(unittest.TestCase):
+    def initialize_git_repository(self, repository: Path) -> None:
+        subprocess.run(("git", "init", "--quiet"), cwd=repository, check=True)
+        subprocess.run(
+            ("git", "config", "user.name", "CI"), cwd=repository, check=True
+        )
+        subprocess.run(
+            ("git", "config", "user.email", "ci@example.invalid"),
+            cwd=repository,
+            check=True,
+        )
+
+    def commit_all(self, repository: Path, message: str) -> str:
+        subprocess.run(("git", "add", "-A"), cwd=repository, check=True)
+        subprocess.run(
+            ("git", "commit", "--quiet", "-m", message),
+            cwd=repository,
+            check=True,
+        )
+        return subprocess.run(
+            ("git", "rev-parse", "HEAD"),
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
     def write_artifact(
         self,
         repository: Path,
@@ -480,6 +511,515 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.assertTrue(any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors), errors)
             self.assertNotIn("hidden-by-gitattributes", "\n".join(errors))
+
+    def test_immutable_diff_scans_secrets_removed_before_the_target_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.initialize_git_repository(repository)
+            self.write_artifact(repository, "safe\n", "README.md")
+            self.write_artifact(repository, "safe=true\n", "config/runtime.conf")
+            base = self.commit_all(repository, "base")
+
+            transient_value = "transient-history-value"
+            self.write_artifact(
+                repository,
+                "DATABASE_PASS" + f"WORD={transient_value}\n",
+                "docs/transient.md",
+            )
+            self.commit_all(repository, "add transient credential")
+            repository.joinpath("docs/transient.md").unlink()
+            self.commit_all(repository, "delete transient credential")
+
+            restored_value = "restored-history-value"
+            self.write_artifact(
+                repository,
+                "CLIENT_SEC" + f"RET={restored_value}\n",
+                "config/runtime.conf",
+            )
+            self.commit_all(repository, "modify tracked config with credential")
+            self.write_artifact(repository, "safe=true\n", "config/runtime.conf")
+            target = self.commit_all(repository, "restore baseline content")
+
+            errors = scan_git_diff(repository, base, target)
+            rendered = "\n".join(errors)
+
+            self.assertGreaterEqual(rendered.count("GENERIC_SECRET_ASSIGNMENT"), 2, errors)
+            self.assertNotIn(transient_value, rendered)
+            self.assertNotIn(restored_value, rendered)
+
+    def test_immutable_diff_scans_hidden_commit_on_a_merged_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.initialize_git_repository(repository)
+            self.write_artifact(repository, "safe\n", "README.md")
+            base = self.commit_all(repository, "base")
+
+            subprocess.run(
+                ("git", "checkout", "--quiet", "-b", "credential-side"),
+                cwd=repository,
+                check=True,
+            )
+            hidden_value = "side-branch-history-value"
+            self.write_artifact(
+                repository,
+                "AUTH_TO" + f"KEN={hidden_value}\n",
+                "docs/side-only.md",
+            )
+            self.commit_all(repository, "add credential on side branch")
+
+            subprocess.run(
+                ("git", "checkout", "--quiet", "-b", "mainline", base),
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                (
+                    "git",
+                    "merge",
+                    "--quiet",
+                    "--no-ff",
+                    "-s",
+                    "ours",
+                    "credential-side",
+                    "-m",
+                    "merge side history without its tree",
+                ),
+                cwd=repository,
+                check=True,
+            )
+            target = subprocess.run(
+                ("git", "rev-parse", "HEAD"),
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            errors = scan_git_diff(repository, base, target)
+            rendered = "\n".join(errors)
+
+            self.assertIn("GENERIC_SECRET_ASSIGNMENT", rendered)
+            self.assertNotIn(hidden_value, rendered)
+
+    def test_immutable_diff_rejects_shallow_history_that_hides_a_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            shallow = root / "shallow"
+            source.mkdir()
+            self.initialize_git_repository(source)
+            self.write_artifact(source, "safe\n", "README.md")
+            root_commit = self.commit_all(source, "root")
+
+            subprocess.run(
+                ("git", "checkout", "--quiet", "-b", "mainline"),
+                cwd=source,
+                check=True,
+            )
+            self.write_artifact(source, "mainline\n", "main.txt")
+            base = self.commit_all(source, "trusted base")
+
+            subprocess.run(
+                ("git", "checkout", "--quiet", "-b", "secret-side", root_commit),
+                cwd=source,
+                check=True,
+            )
+            hidden_value = "shallow-hidden-value"
+            self.write_artifact(
+                source,
+                "CLIENT_SEC" + f"RET={hidden_value}\n",
+                "docs/hidden.md",
+            )
+            self.commit_all(source, "add hidden credential")
+            source.joinpath("docs/hidden.md").unlink()
+            self.commit_all(source, "delete hidden credential")
+
+            subprocess.run(
+                ("git", "checkout", "--quiet", "mainline"),
+                cwd=source,
+                check=True,
+            )
+            subprocess.run(
+                (
+                    "git",
+                    "merge",
+                    "--quiet",
+                    "--no-ff",
+                    "-s",
+                    "ours",
+                    "secret-side",
+                    "-m",
+                    "merge hidden history",
+                ),
+                cwd=source,
+                check=True,
+            )
+            target = subprocess.run(
+                ("git", "rev-parse", "HEAD"),
+                cwd=source,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                (
+                    "git",
+                    "clone",
+                    "--quiet",
+                    "--depth",
+                    "2",
+                    source.resolve().as_uri(),
+                    str(shallow),
+                ),
+                check=True,
+            )
+            self.assertEqual(
+                "true",
+                subprocess.run(
+                    ("git", "rev-parse", "--is-shallow-repository"),
+                    cwd=shallow,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip(),
+            )
+
+            errors = scan_git_diff(shallow, base, target)
+            rendered = "\n".join(errors)
+
+            self.assertIn("IMMUTABLE_DIFF", rendered)
+            self.assertNotIn(hidden_value, rendered)
+
+    def test_immutable_diff_rejects_graft_parent_rewrites(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.initialize_git_repository(repository)
+            self.write_artifact(repository, "safe\n", "README.md")
+            base = self.commit_all(repository, "base")
+            hidden_value = "graft-hidden-value"
+            self.write_artifact(
+                repository,
+                "AUTH_TO" + f"KEN={hidden_value}\n",
+                "docs/transient.md",
+            )
+            self.commit_all(repository, "add credential")
+            repository.joinpath("docs/transient.md").unlink()
+            target = self.commit_all(repository, "delete credential")
+            grafts_path = subprocess.run(
+                ("git", "rev-parse", "--git-path", "info/grafts"),
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            grafts = Path(grafts_path)
+            if not grafts.is_absolute():
+                grafts = repository / grafts
+            grafts.parent.mkdir(parents=True, exist_ok=True)
+            grafts.write_text(f"{target} {base}\n", encoding="utf-8")
+
+            errors = scan_git_diff(repository, base, target)
+            rendered = "\n".join(errors)
+
+            self.assertIn("IMMUTABLE_DIFF", rendered)
+            self.assertNotIn(hidden_value, rendered)
+
+    def test_immutable_diff_rejects_alternate_graft_environment_with_newline_path(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.initialize_git_repository(repository)
+            self.write_artifact(repository, "safe\n", "README.md")
+            base = self.commit_all(repository, "base")
+            self.write_artifact(repository, "still-safe\n", "README.md")
+            target = self.commit_all(repository, "target")
+            alternate_grafts = repository / "alternate-grafts\n"
+            alternate_grafts.write_text(f"{target} {base}\n", encoding="ascii")
+
+            with mock.patch.dict(
+                "os.environ",
+                {"GIT_GRAFT_FILE": str(alternate_grafts)},
+                clear=False,
+            ):
+                errors = scan_git_diff(repository, base, target)
+
+            self.assertTrue(
+                any("IMMUTABLE_DIFF" in error for error in errors), errors
+            )
+
+    def test_immutable_diff_rejects_symlink_and_gitlink_type_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.initialize_git_repository(repository)
+            self.write_artifact(repository, "safe\n", "docs/policy.md")
+            self.write_artifact(repository, "safe\n", "modules/provider")
+            base = self.commit_all(repository, "base regular blobs")
+
+            repository.joinpath("docs/policy.md").unlink()
+            repository.joinpath("docs/policy.md").symlink_to("outside-policy.md")
+            self.commit_all(repository, "replace policy with symlink")
+            subprocess.run(
+                (
+                    "git",
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    f"160000,{base},modules/provider",
+                ),
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ("git", "commit", "--quiet", "-m", "replace provider with gitlink"),
+                cwd=repository,
+                check=True,
+            )
+            target = subprocess.run(
+                ("git", "rev-parse", "HEAD"),
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            errors = scan_git_diff(repository, base, target)
+            rendered = "\n".join(errors)
+
+            self.assertEqual(2, rendered.count("UNSAFE_GIT_MODE"), errors)
+            self.assertNotIn("outside-policy.md", rendered)
+
+    def test_immutable_diff_rejects_gitlink_oid_changes_ignored_by_configuration(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.initialize_git_repository(repository)
+            self.write_artifact(repository, "anchor\n", "README.md")
+            anchor = self.commit_all(repository, "anchor commit")
+            self.write_artifact(
+                repository,
+                (
+                    '[submodule "provider"]\n'
+                    "  path = modules/provider\n"
+                    "  url = https://example.invalid/provider.git\n"
+                    "  ignore = all\n"
+                ),
+                ".gitmodules",
+            )
+            subprocess.run(
+                ("git", "add", ".gitmodules"),
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                (
+                    "git",
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    f"160000,{anchor},modules/provider",
+                ),
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ("git", "commit", "--quiet", "-m", "base gitlink"),
+                cwd=repository,
+                check=True,
+            )
+            base = subprocess.run(
+                ("git", "rev-parse", "HEAD"),
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            subprocess.run(
+                ("git", "commit", "--quiet", "--allow-empty", "-m", "replacement"),
+                cwd=repository,
+                check=True,
+            )
+            replacement = subprocess.run(
+                ("git", "rev-parse", "HEAD"),
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                (
+                    "git",
+                    "update-index",
+                    "--cacheinfo",
+                    f"160000,{replacement},modules/provider",
+                ),
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ("git", "commit", "--quiet", "-m", "change ignored gitlink oid"),
+                cwd=repository,
+                check=True,
+            )
+            target = subprocess.run(
+                ("git", "rev-parse", "HEAD"),
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            errors = scan_git_diff(repository, base, target)
+
+            self.assertTrue(any("UNSAFE_GIT_MODE" in error for error in errors), errors)
+
+    def test_json_and_xml_structured_secrets_are_rejected_without_echoing_values(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            json_value = "json-structured-value"
+            xml_value = "xml-structured-value"
+            unicode_value = "unicode-structured-value"
+            json_content = (
+                "{\n"
+                '  "client_sec' + 'ret":\n'
+                f'    "{json_value}",\n'
+                '  "pa\\u0073sword":\n'
+                f'    "{unicode_value}"\n'
+                "}\n"
+            )
+            xml_content = (
+                "<config>\n"
+                "  <client_sec" + "ret>\n"
+                f"    {xml_value}\n"
+                "  </client_sec" + "ret>\n"
+                "  <entry key=\"pass&#119;ord\">\n"
+                "    another-xml-value\n"
+                "  </entry>\n"
+                "</config>\n"
+            )
+            self.write_artifact(repository, json_content, "docs/config.json")
+            self.write_artifact(repository, xml_content, "docs/config.xml")
+
+            errors = scan_repository(repository, ("docs",))
+            rendered = "\n".join(errors)
+
+            self.assertEqual(2, rendered.count("JSON_SECRET_SCALAR"), errors)
+            self.assertEqual(2, rendered.count("XML_SECRET_SCALAR"), errors)
+            self.assertNotIn(json_value, rendered)
+            self.assertNotIn(xml_value, rendered)
+            self.assertNotIn(unicode_value, rendered)
+
+    def test_json_and_xml_descriptor_objects_are_rejected_without_echoing_values(
+        self,
+    ) -> None:
+        json_value = "json-descriptor-value"
+        xml_value = "xml-descriptor-value"
+        json_content = (
+            '[{"name": "pass' + 'word", "value": "' + json_value + '"},'
+            '{"key": "client_sec' + 'ret", "value": "another-value"}]'
+        )
+        xml_content = (
+            "<config><property><name>pass"
+            + "word</name><value>"
+            + xml_value
+            + "</value></property><property><key>client_sec"
+            + "ret</key><value>another-value</value></property></config>"
+        )
+
+        errors = [
+            *scan_text_content("docs/config.json", json_content),
+            *scan_text_content("docs/config.xml", xml_content),
+        ]
+        rendered = "\n".join(errors)
+
+        self.assertEqual(2, rendered.count("JSON_SECRET_SCALAR"), errors)
+        self.assertEqual(2, rendered.count("XML_SECRET_SCALAR"), errors)
+        self.assertNotIn(json_value, rendered)
+        self.assertNotIn(xml_value, rendered)
+
+    def test_xml_namespaced_sensitive_attributes_cannot_overwrite_each_other(
+        self,
+    ) -> None:
+        secret_value = "namespace-collision-value"
+        xml_content = (
+            '<config xmlns:a="urn:unsafe" xmlns:b="urn:safe"\n'
+            "  a:pass" + "word =\n"
+            f'    "{secret_value}"\n'
+            "  b:pass" + "word =\n"
+            '    "${PASSWORD}"/>\n'
+        )
+
+        errors = scan_text_content("docs/config.xml", xml_content)
+        rendered = "\n".join(errors)
+
+        self.assertIn("XML_SECRET_SCALAR", rendered)
+        self.assertNotIn(secret_value, rendered)
+
+    def test_xml_safe_value_attribute_cannot_hide_sensitive_element_text(
+        self,
+    ) -> None:
+        hidden_value = "descriptor-shadow-value"
+        xml_content = (
+            '<entry key="'
+            + "pass"
+            + 'word" value="${PASSWORD}">'
+            + hidden_value
+            + "</entry>"
+        )
+
+        errors = scan_text_content("docs/config.xml", xml_content)
+        rendered = "\n".join(errors)
+
+        self.assertIn("XML_SECRET_SCALAR", rendered)
+        self.assertNotIn(hidden_value, rendered)
+
+    def test_malformed_json_xml_and_xml_doctype_fail_closed_without_echoing_content(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            malformed_value = "malformed-structured-value"
+            self.write_artifact(
+                repository,
+                '{"safe": "' + malformed_value + '"',
+                "docs/malformed.json",
+            )
+            self.write_artifact(
+                repository,
+                "<config><safe>" + malformed_value + "</config>",
+                "docs/malformed.xml",
+            )
+            self.write_artifact(
+                repository,
+                '<!DOCTYPE config [<!ENTITY x "' + malformed_value + '">]><config>&x;</config>',
+                "docs/doctype.xml",
+            )
+
+            errors = scan_repository(repository, ("docs",))
+            rendered = "\n".join(errors)
+
+            self.assertIn("INVALID_JSON", rendered)
+            self.assertGreaterEqual(rendered.count("INVALID_XML"), 2, errors)
+            self.assertNotIn(malformed_value, rendered)
+
+    def test_structured_secret_placeholders_null_and_false_are_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            json_content = (
+                '{"pass' + 'word": null, "client_sec' + 'ret": "${CLIENT_SECRET}"}\n'
+            )
+            xml_content = (
+                "<config><pass" + "word>${PASSWORD}</pass" + "word>"
+                '<entry key="client_secret" value="${CLIENT_SECRET}"/></config>\n'
+            )
+            self.write_artifact(repository, json_content, "docs/config.json")
+            self.write_artifact(repository, xml_content, "docs/config.xml")
+
+            self.assertEqual([], scan_repository(repository, ("docs",)))
 
     def test_yaml_multiline_secret_and_uncommon_account_weak_password_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

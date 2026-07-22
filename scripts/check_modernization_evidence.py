@@ -17,6 +17,19 @@ FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 REGULAR_BLOB_MODES = {"100644", "100755"}
 UNSAFE_GIT_MODES = {"120000": "symbolic link", "160000": "gitlink"}
 DEFAULT_MAX_EVIDENCE_BYTES = 5 * 1024 * 1024
+FORBIDDEN_GIT_ENVIRONMENT = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_DIR",
+        "GIT_GRAFT_FILE",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+)
 SAFE_OPENAT_SUPPORTED = (
     hasattr(os, "O_DIRECTORY")
     and hasattr(os, "O_NOFOLLOW")
@@ -31,6 +44,8 @@ class EvidenceError(ValueError):
 
 def _run_git(repository: Path, arguments: Sequence[str]) -> bytes:
     environment = os.environ.copy()
+    if FORBIDDEN_GIT_ENVIRONMENT.intersection(environment):
+        raise EvidenceError("Git environment overrides are forbidden")
     environment["GIT_NO_REPLACE_OBJECTS"] = "1"
     environment["GIT_LITERAL_PATHSPECS"] = "1"
     result = subprocess.run(
@@ -45,6 +60,15 @@ def _run_git(repository: Path, arguments: Sequence[str]) -> bytes:
     return result.stdout
 
 
+def _decode_git_single_line(raw_value: bytes) -> str:
+    if not raw_value.endswith(b"\n"):
+        raise EvidenceError("Git output is not a single terminated line")
+    value = raw_value[:-1]
+    if not value or any(character in value for character in (b"\x00", b"\r", b"\n")):
+        raise EvidenceError("Git output contains an unsafe line boundary")
+    return os.fsdecode(value)
+
+
 def _canonical_repository(repository: Path | str) -> Path:
     try:
         canonical = Path(repository).resolve(strict=True)
@@ -53,9 +77,11 @@ def _canonical_repository(repository: Path | str) -> Path:
     if not canonical.is_dir():
         raise EvidenceError("repository must be a directory")
 
-    top_level = _run_git(canonical, ["rev-parse", "--show-toplevel"])
+    top_level = _decode_git_single_line(
+        _run_git(canonical, ["rev-parse", "--show-toplevel"])
+    )
     try:
-        actual = Path(os.fsdecode(top_level).strip()).resolve(strict=True)
+        actual = Path(top_level).resolve(strict=True)
     except OSError as error:
         raise EvidenceError("repository top level cannot be resolved") from error
     if actual != canonical:
@@ -66,12 +92,59 @@ def _canonical_repository(repository: Path | str) -> Path:
 def _resolve_commit(repository: Path, commit_sha: str) -> str:
     if not FULL_SHA_PATTERN.fullmatch(commit_sha):
         raise EvidenceError("commit SHA must contain exactly 40 hexadecimal characters")
-    resolved = os.fsdecode(
+    resolved = _decode_git_single_line(
         _run_git(repository, ["rev-parse", "--verify", f"{commit_sha}^{{commit}}"])
-    ).strip()
+    )
     if resolved != commit_sha:
         raise EvidenceError("commit SHA did not resolve to the declared object")
     return resolved
+
+
+def _git_metadata_path(repository: Path, path: str) -> Path:
+    raw_path = _decode_git_single_line(
+        _run_git(repository, ["rev-parse", "--git-path", path])
+    )
+    metadata_path = Path(raw_path)
+    if not metadata_path.is_absolute():
+        metadata_path = repository / metadata_path
+    return metadata_path
+
+
+def _assert_complete_commit_graph(repository: Path) -> None:
+    shallow = _decode_git_single_line(
+        _run_git(repository, ["rev-parse", "--is-shallow-repository"])
+    )
+    if shallow != "false":
+        if shallow == "true":
+            raise EvidenceError("shallow Git history cannot prove immutable ancestry")
+        raise EvidenceError("Git shallow-repository state could not be validated")
+
+    grafts_path = _git_metadata_path(repository, "info/grafts")
+    try:
+        os.lstat(grafts_path)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise EvidenceError("Git graft metadata could not be validated") from error
+    raise EvidenceError("Git graft metadata is forbidden for immutable history")
+
+
+def _raw_commit_parents(repository: Path, commit_sha: str) -> list[str]:
+    raw_commit = _run_git(repository, ["cat-file", "commit", commit_sha])
+    parents: list[str] = []
+    for line in raw_commit.splitlines():
+        if not line:
+            break
+        if not line.startswith(b"parent "):
+            continue
+        try:
+            parent = line.removeprefix(b"parent ").decode("ascii")
+        except UnicodeDecodeError as error:
+            raise EvidenceError("Git commit contains an invalid parent header") from error
+        if not FULL_SHA_PATTERN.fullmatch(parent):
+            raise EvidenceError("Git commit contains an invalid parent header")
+        parents.append(_resolve_commit(repository, parent))
+    return parents
 
 
 def canonical_repository_path(repository: Path | str) -> Path:
@@ -86,6 +159,7 @@ def validate_git_ancestor(
     """Prove ancestry using immutable commit IDs with replace refs disabled."""
 
     canonical_repository = _canonical_repository(repository)
+    _assert_complete_commit_graph(canonical_repository)
     ancestor = _resolve_commit(canonical_repository, ancestor_sha)
     descendant = _resolve_commit(canonical_repository, descendant_sha)
     try:
@@ -103,9 +177,9 @@ def resolve_head_commit(repository: Path | str) -> str:
     """Resolve HEAD to a full commit with replace refs disabled."""
 
     canonical_repository = _canonical_repository(repository)
-    resolved = os.fsdecode(
+    resolved = _decode_git_single_line(
         _run_git(canonical_repository, ["rev-parse", "--verify", "HEAD^{commit}"])
-    ).strip()
+    )
     return _resolve_commit(canonical_repository, resolved)
 
 
@@ -113,20 +187,9 @@ def commit_parents(repository: Path | str, commit_sha: str) -> list[str]:
     """Return immutable direct parents for a full commit SHA."""
 
     canonical_repository = _canonical_repository(repository)
+    _assert_complete_commit_graph(canonical_repository)
     commit = _resolve_commit(canonical_repository, commit_sha)
-    fields = (
-        os.fsdecode(
-            _run_git(
-                canonical_repository,
-                ["rev-list", "--parents", "-n", "1", commit],
-            )
-        )
-        .strip()
-        .split()
-    )
-    if not fields or fields[0] != commit:
-        raise EvidenceError("Git commit parents could not be validated")
-    return [_resolve_commit(canonical_repository, parent) for parent in fields[1:]]
+    return _raw_commit_parents(canonical_repository, commit)
 
 
 def commits_touching_paths(
@@ -167,6 +230,7 @@ def changed_paths_for_commit(
     """Return the complete immutable tree delta for a commit, across all parents."""
 
     canonical_repository = _canonical_repository(repository)
+    _assert_complete_commit_graph(canonical_repository)
     commit = _resolve_commit(canonical_repository, commit_sha)
     output = _run_git(
         canonical_repository,
@@ -174,6 +238,8 @@ def changed_paths_for_commit(
             "diff-tree",
             "--root",
             "-m",
+            "--no-ext-diff",
+            "--ignore-submodules=none",
             "--no-commit-id",
             "--name-only",
             "-r",
@@ -314,9 +380,9 @@ def read_git_evidence(
     )
     try:
         blob_size = int(
-            os.fsdecode(
+            _decode_git_single_line(
                 _run_git(canonical_repository, ["cat-file", "-s", object_id])
-            ).strip()
+            )
         )
     except ValueError as error:
         raise EvidenceError("Git blob size could not be validated") from error

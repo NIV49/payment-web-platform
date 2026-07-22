@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import math
 import os
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
 import yaml
@@ -57,6 +60,8 @@ TRACKED_TEST_ASSET_SUFFIXES = {
     ".yml",
 }
 MAX_TEXT_FILE_BYTES = 5 * 1024 * 1024
+MAX_STRUCTURED_NODES = 100_000
+MAX_STRUCTURED_DEPTH = 128
 SAFE_LITERAL_VALUES = {
     "cookie-session",
     "disabled",
@@ -221,6 +226,21 @@ COMMON_WEAK_PASSWORDS = {
     "welcome",
 }
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+
+class JsonObject(list[tuple[str, object]]):
+    """Preserve duplicate JSON members so an unsafe earlier value cannot vanish."""
+
+
+def _reject_json_constant(_value: str) -> object:
+    raise ValueError("non-standard JSON constant")
+
+
+def _parse_finite_json_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("non-finite JSON number")
+    return number
 
 
 def is_safe_placeholder(value: str) -> bool:
@@ -445,6 +465,151 @@ def scan_yaml_sensitive_scalars(
     return errors
 
 
+def _is_sensitive_structured_key(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and re.fullmatch(SENSITIVE_KEY_PATTERN, value, re.IGNORECASE) is not None
+    )
+
+
+def _is_safe_structured_secret(value: object) -> bool:
+    if value is None or value is False:
+        return True
+    return isinstance(value, str) and is_safe_placeholder(value)
+
+
+def scan_json_sensitive_scalars(label: str, content: str) -> list[str]:
+    if Path(label).suffix.casefold() != ".json":
+        return []
+    try:
+        document = json.loads(
+            content,
+            object_pairs_hook=JsonObject,
+            parse_constant=_reject_json_constant,
+            parse_float=_parse_finite_json_float,
+        )
+    except (json.JSONDecodeError, RecursionError, TypeError, ValueError):
+        return [f"{label}: INVALID_JSON: changed JSON cannot be parsed safely"]
+
+    errors: list[str] = []
+    pending: list[tuple[object, int]] = [(document, 0)]
+    visited = 0
+    while pending:
+        value, depth = pending.pop()
+        visited += 1
+        if visited > MAX_STRUCTURED_NODES or depth > MAX_STRUCTURED_DEPTH:
+            return [f"{label}: INVALID_JSON: changed JSON exceeds structural limits"]
+        if isinstance(value, JsonObject):
+            descriptors = [
+                child
+                for key, child in value
+                if isinstance(key, str)
+                and key.casefold() in {"key", "name"}
+                and _is_sensitive_structured_key(child)
+            ]
+            if descriptors:
+                structured_values = [
+                    child
+                    for key, child in value
+                    if isinstance(key, str) and key.casefold() == "value"
+                ]
+                if not structured_values or any(
+                    not _is_safe_structured_secret(child)
+                    for child in structured_values
+                ):
+                    errors.append(f"{label}: JSON_SECRET_SCALAR")
+            for key, child in value:
+                if _is_sensitive_structured_key(key) and not _is_safe_structured_secret(
+                    child
+                ):
+                    errors.append(f"{label}: JSON_SECRET_SCALAR")
+                pending.append((child, depth + 1))
+        elif isinstance(value, list):
+            pending.extend((child, depth + 1) for child in value)
+    return errors
+
+
+def _xml_local_name(value: str) -> str:
+    return value.rsplit("}", 1)[-1].rsplit(":", 1)[-1]
+
+
+def scan_xml_sensitive_scalars(label: str, content: str) -> list[str]:
+    if Path(label).suffix.casefold() != ".xml":
+        return []
+    if re.search(r"<!\s*(?:DOCTYPE|ENTITY)\b", content, re.IGNORECASE):
+        return [f"{label}: INVALID_XML: declarations and entities are not allowed"]
+    try:
+        root = ElementTree.fromstring(content)
+    except (ElementTree.ParseError, RecursionError, TypeError, ValueError):
+        return [f"{label}: INVALID_XML: changed XML cannot be parsed safely"]
+
+    errors: list[str] = []
+    pending: list[tuple[ElementTree.Element, int]] = [(root, 0)]
+    visited = 0
+    while pending:
+        element, depth = pending.pop()
+        visited += 1
+        if visited > MAX_STRUCTURED_NODES or depth > MAX_STRUCTURED_DEPTH:
+            return [f"{label}: INVALID_XML: changed XML exceeds structural limits"]
+
+        attributes = [
+            (_xml_local_name(name), value) for name, value in element.attrib.items()
+        ]
+        children = list(element)
+        text_value = "".join(element.itertext()).strip()
+        if _is_sensitive_structured_key(_xml_local_name(element.tag)):
+            if not _is_safe_structured_secret(text_value):
+                errors.append(f"{label}: XML_SECRET_SCALAR")
+        for name, value in attributes:
+            if _is_sensitive_structured_key(name) and not _is_safe_structured_secret(
+                value
+            ):
+                errors.append(f"{label}: XML_SECRET_SCALAR")
+
+        descriptors = [
+            value
+            for name, value in attributes
+            if name.casefold() in {"key", "name"}
+            and _is_sensitive_structured_key(value)
+        ]
+        descriptors.extend(
+            child_text
+            for child in children
+            if _xml_local_name(child.tag).casefold() in {"key", "name"}
+            and _is_sensitive_structured_key(
+                child_text := "".join(child.itertext()).strip()
+            )
+        )
+        if descriptors:
+            structured_values = [
+                value for name, value in attributes if name.casefold() == "value"
+            ]
+            structured_values.extend(
+                child_text
+                for child in children
+                if _xml_local_name(child.tag).casefold() == "value"
+                and (child_text := "".join(child.itertext()).strip())
+            )
+            direct_text = "".join(
+                [element.text or "", *(child.tail or "" for child in children)]
+            ).strip()
+            if direct_text:
+                structured_values.append(direct_text)
+            structured_values.extend(
+                child_text
+                for child in children
+                if _xml_local_name(child.tag).casefold() not in {"key", "name", "value"}
+                and (child_text := "".join(child.itertext()).strip())
+            )
+            if not structured_values or any(
+                not _is_safe_structured_secret(value) for value in structured_values
+            ):
+                errors.append(f"{label}: XML_SECRET_SCALAR")
+
+        pending.extend((child, depth + 1) for child in children)
+    return errors
+
+
 def scan_text_content(
     label: str,
     content: str,
@@ -546,6 +711,8 @@ def scan_text_content(
             if passes_luhn(match.group(0)):
                 errors.append(f"{label}:{line_number}: PAYMENT_CARD_NUMBER")
     errors.extend(scan_yaml_sensitive_scalars(label, content, selected_lines))
+    errors.extend(scan_json_sensitive_scalars(label, content))
+    errors.extend(scan_xml_sensitive_scalars(label, content))
     return errors
 
 
@@ -562,8 +729,25 @@ def scan_file(path: Path, repository: Path) -> list[str]:
     return scan_text_content(label, content)
 
 
+FORBIDDEN_GIT_ENVIRONMENT = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_DIR",
+        "GIT_GRAFT_FILE",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+)
+
+
 def _run_immutable_git(repository: Path, arguments: tuple[str, ...]) -> bytes:
     environment = os.environ.copy()
+    if FORBIDDEN_GIT_ENVIRONMENT.intersection(environment):
+        raise ValueError("immutable Git environment overrides are not allowed")
     environment["GIT_NO_REPLACE_OBJECTS"] = "1"
     environment["GIT_LITERAL_PATHSPECS"] = "1"
     result = subprocess.run(
@@ -578,25 +762,154 @@ def _run_immutable_git(repository: Path, arguments: tuple[str, ...]) -> bytes:
     return result.stdout
 
 
+def _decode_git_single_line(raw_value: bytes) -> str:
+    if not raw_value.endswith(b"\n"):
+        raise ValueError("immutable Git output is not a single terminated line")
+    value = raw_value[:-1]
+    if not value or any(character in value for character in (b"\x00", b"\r", b"\n")):
+        raise ValueError("immutable Git output contains an unsafe line boundary")
+    return os.fsdecode(value)
+
+
+def _git_metadata_path(repository: Path, name: str) -> Path:
+    raw_path = _run_immutable_git(repository, ("rev-parse", "--git-path", name))
+    decoded = _decode_git_single_line(raw_path)
+    path = Path(decoded)
+    return path if path.is_absolute() else repository / path
+
+
+def _raw_commit_parents(repository: Path, commit: str) -> tuple[str, ...]:
+    raw_commit = _run_immutable_git(repository, ("cat-file", "commit", commit))
+    headers = raw_commit.split(b"\n\n", 1)[0].splitlines()
+    parents: list[str] = []
+    for header in headers:
+        if not header.startswith(b"parent "):
+            continue
+        parent = os.fsdecode(header.removeprefix(b"parent "))
+        if FULL_SHA_PATTERN.fullmatch(parent) is None:
+            raise ValueError("raw commit contains an invalid parent object ID")
+        parents.append(parent)
+    return tuple(parents)
+
+
 def scan_git_diff(repository: Path, base_commit: str, commit: str) -> list[str]:
     repository = repository.resolve()
     if not FULL_SHA_PATTERN.fullmatch(base_commit) or not FULL_SHA_PATTERN.fullmatch(commit):
         return ["repository: INVALID_COMMIT: immutable diff requires full lowercase SHAs"]
     try:
+        shallow = _decode_git_single_line(
+            _run_immutable_git(
+                repository, ("rev-parse", "--is-shallow-repository")
+            )
+        )
+        if shallow != "false":
+            raise ValueError("shallow repositories cannot prove complete commit history")
+        grafts_path = _git_metadata_path(repository, "info/grafts")
+        try:
+            os.lstat(grafts_path)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise ValueError("Git graft state cannot be inspected safely") from error
+        else:
+            raise ValueError("Git grafts are not allowed in immutable diff mode")
         _run_immutable_git(repository, ("merge-base", "--is-ancestor", base_commit, commit))
-        raw_paths = _run_immutable_git(
+        raw_history = _run_immutable_git(
             repository,
-            ("diff", "--name-only", "-z", "--diff-filter=AMCR", "--no-renames", base_commit, commit),
+            (
+                "rev-list",
+                "--full-history",
+                "--topo-order",
+                "--reverse",
+                "--parents",
+                f"{base_commit}..{commit}",
+            ),
         )
     except ValueError as error:
         return [f"repository: IMMUTABLE_DIFF: {error}"]
     errors: list[str] = []
-    for raw_path in (value for value in raw_paths.split(b"\x00") if value):
+    commits_with_parents: list[tuple[str, tuple[str, ...]]] = []
+    for raw_line in raw_history.splitlines():
+        values = tuple(os.fsdecode(value) for value in raw_line.split())
+        if not values or any(FULL_SHA_PATTERN.fullmatch(value) is None for value in values):
+            return ["repository: IMMUTABLE_DIFF: commit history contains an invalid object ID"]
+        try:
+            raw_parents = _raw_commit_parents(repository, values[0])
+        except ValueError as error:
+            return [f"repository: IMMUTABLE_DIFF: {error}"]
+        if values[1:] != raw_parents:
+            return [
+                "repository: IMMUTABLE_DIFF: commit parent graph differs "
+                "from the raw commit object"
+            ]
+        commits_with_parents.append((values[0], values[1:]))
+
+    changed_paths: list[tuple[str, bytes]] = []
+    seen_paths: set[tuple[str, bytes]] = set()
+    try:
+        for child_commit, parents in commits_with_parents:
+            edges: tuple[str | None, ...] = parents or (None,)
+            for parent_commit in edges:
+                if parent_commit is None:
+                    raw_paths = _run_immutable_git(
+                        repository,
+                        (
+                            "diff-tree",
+                            "--root",
+                            "--no-commit-id",
+                            "--name-only",
+                            "-z",
+                            "--diff-filter=ACMRT",
+                            "--no-renames",
+                            "--no-ext-diff",
+                            "--ignore-submodules=none",
+                            "-r",
+                            child_commit,
+                        ),
+                    )
+                else:
+                    raw_paths = _run_immutable_git(
+                        repository,
+                        (
+                            "diff",
+                            "--name-only",
+                            "-z",
+                            "--diff-filter=ACMRT",
+                            "--no-renames",
+                            "--no-ext-diff",
+                            "--ignore-submodules=none",
+                            parent_commit,
+                            child_commit,
+                        ),
+                    )
+                for raw_path in (
+                    value for value in raw_paths.split(b"\x00") if value
+                ):
+                    identity = (child_commit, raw_path)
+                    if identity not in seen_paths:
+                        seen_paths.add(identity)
+                        changed_paths.append(identity)
+    except ValueError as error:
+        return [f"repository: IMMUTABLE_DIFF: {error}"]
+
+    for child_commit, raw_path in changed_paths:
         path = os.fsdecode(raw_path)
         try:
-            tree = _run_immutable_git(repository, ("ls-tree", "-z", commit, "--", path))
-            metadata = tree.split(b"\t", 1)[0].split()
-            if len(metadata) != 3 or metadata[0] not in {b"100644", b"100755"} or metadata[1] != b"blob":
+            tree = _run_immutable_git(
+                repository, ("ls-tree", "-z", child_commit, "--", path)
+            )
+            records = [record for record in tree.split(b"\x00") if record]
+            if len(records) != 1 or b"\t" not in records[0]:
+                errors.append(f"{path}: UNSAFE_GIT_MODE: changed path is not a regular blob")
+                continue
+            raw_metadata, resolved_path = records[0].split(b"\t", 1)
+            metadata = raw_metadata.split()
+            if (
+                resolved_path != raw_path
+                or len(metadata) != 3
+                or metadata[0] not in {b"100644", b"100755"}
+                or metadata[1] != b"blob"
+            ):
                 errors.append(f"{path}: UNSAFE_GIT_MODE: changed path is not a regular blob")
                 continue
             object_id = os.fsdecode(metadata[2])

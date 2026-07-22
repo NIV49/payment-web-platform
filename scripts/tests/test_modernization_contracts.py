@@ -148,6 +148,59 @@ class ImmutableEvidenceTest(unittest.TestCase):
 
         self.assertEqual(resolved, b"SAFE_AT_DECLARED_COMMIT")
 
+    def test_commit_parent_validation_rejects_grafted_history(self) -> None:
+        (self.repository / "evidence.txt").write_text("base", encoding="utf-8")
+        commit_all(self.repository, "base evidence")
+        (self.repository / "evidence.txt").write_text("child", encoding="utf-8")
+        child = commit_all(self.repository, "child evidence")
+        grafts = self.repository / ".git/info/grafts"
+        grafts.parent.mkdir(parents=True, exist_ok=True)
+        grafts.write_text(f"{child}\n", encoding="ascii")
+
+        with self.assertRaisesRegex(evidence.EvidenceError, "graft"):
+            evidence.commit_parents(self.repository, child)
+
+    def test_commit_parent_validation_rejects_alternate_graft_environment(
+        self,
+    ) -> None:
+        (self.repository / "evidence.txt").write_text("base", encoding="utf-8")
+        base = commit_all(self.repository, "base evidence")
+        (self.repository / "evidence.txt").write_text("child", encoding="utf-8")
+        child = commit_all(self.repository, "child evidence")
+        alternate_grafts = self.root / "alternate-grafts\n"
+        alternate_grafts.write_text(f"{child} {base}\n", encoding="ascii")
+
+        with mock.patch.dict(
+            os.environ,
+            {"GIT_GRAFT_FILE": str(alternate_grafts)},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(evidence.EvidenceError, "environment|graft"):
+                evidence.commit_parents(self.repository, child)
+
+    def test_commit_parent_validation_rejects_shallow_history(self) -> None:
+        (self.repository / "evidence.txt").write_text("base", encoding="utf-8")
+        commit_all(self.repository, "base evidence")
+        (self.repository / "evidence.txt").write_text("child", encoding="utf-8")
+        commit_all(self.repository, "child evidence")
+        shallow_repository = self.root / "shallow"
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--quiet",
+                "--depth=1",
+                self.repository.resolve().as_uri(),
+                str(shallow_repository),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        shallow_head = git(shallow_repository, "rev-parse", "HEAD")
+
+        with self.assertRaisesRegex(evidence.EvidenceError, "shallow"):
+            evidence.commit_parents(shallow_repository, shallow_head)
+
     def test_path_history_includes_treesame_side_branch_commits(self) -> None:
         path = self.repository / "governance.json"
         path.write_text('{"state":"base"}\n', encoding="utf-8")
@@ -164,6 +217,42 @@ class ImmutableEvidenceTest(unittest.TestCase):
         )
 
         self.assertIn(side, history)
+
+    def test_changed_paths_cannot_hide_gitlink_oid_change_with_submodule_ignore(
+        self,
+    ) -> None:
+        (self.repository / "README.md").write_text("anchor", encoding="utf-8")
+        anchor = commit_all(self.repository, "anchor")
+        (self.repository / ".gitmodules").write_text(
+            '[submodule "provider"]\n'
+            "  path = modules/provider\n"
+            "  url = https://example.invalid/provider.git\n"
+            "  ignore = all\n",
+            encoding="utf-8",
+        )
+        git(
+            self.repository,
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{anchor},modules/provider",
+        )
+        git(self.repository, "add", ".gitmodules")
+        git(self.repository, "commit", "-m", "register ignored gitlink")
+        base = git(self.repository, "rev-parse", "HEAD")
+        git(
+            self.repository,
+            "update-index",
+            "--cacheinfo",
+            f"160000,{base},modules/provider",
+        )
+        git(self.repository, "commit", "-m", "change ignored gitlink oid")
+        target = git(self.repository, "rev-parse", "HEAD")
+
+        self.assertIn(
+            "modules/provider",
+            evidence.changed_paths_for_commit(self.repository, target),
+        )
 
     def test_rejects_git_blob_and_materialized_file_over_size_limit(self) -> None:
         oversized = b"x" * (evidence.DEFAULT_MAX_EVIDENCE_BYTES + 1)
@@ -1195,6 +1284,36 @@ class ModernizationContractV2RedTest(unittest.TestCase):
         self.assertIn("不能依赖该文件自我批准或自我保护", bootstrap)
         self.assertIn("GitHub API", bootstrap)
 
+    def test_codeowners_parser_honors_inline_comments_and_rejects_bad_patterns(
+        self,
+    ) -> None:
+        invalid_content = (
+            "/.github/CODEOWNERS # @NIV49\n"
+            "/[.]github/CODEOWNERS @NIV49\n"
+            "/.github**CODEOWNERS @NIV49\n"
+        )
+
+        rules, errors = artifacts.parse_codeowners_rules(invalid_content)
+
+        self.assertEqual([("/.github/CODEOWNERS", ())], rules)
+        self.assertEqual(2, len(errors), errors)
+        self.assertTrue(any("unsupported pattern" in error for error in errors), errors)
+        self.assertFalse(
+            artifacts._codeowners_pattern_matches(
+                "/.github**CODEOWNERS",
+                ".github/CODEOWNERS",
+            )
+        )
+
+        valid_rules, valid_errors = artifacts.parse_codeowners_rules(
+            "/.github/CODEOWNERS @NIV49\n"
+        )
+        self.assertEqual([], valid_errors)
+        self.assertEqual(
+            [("/.github/CODEOWNERS", ("@NIV49",))],
+            valid_rules,
+        )
+
     def test_artifact_discovery_rejects_symlinked_json(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
             root = Path(raw_root)
@@ -1621,7 +1740,7 @@ class HardenedBundleFixtureTest(unittest.TestCase):
             "fingerprint": "stable-unresolved-blocker",
             "sliceId": "iam-login",
             "evaluatedVersionKey": evaluated_version_key,
-            "failureSource": {"type": "review", "checkId": "review:B-1"},
+            "failureSource": {"type": "judge", "checkId": "judge:B-1"},
             "severity": "BLOCKER",
             "trigger": "reproduce",
             "controlFlow": ["one", "two"],
@@ -1642,6 +1761,168 @@ class HardenedBundleFixtureTest(unittest.TestCase):
 
         bundle["lifecycleStatus"] = "draft"
         self.assertEqual(self.validate(bundle), [])
+
+    def test_closed_bundle_requires_queue_for_an_unresolved_should_fix_finding(
+        self,
+    ) -> None:
+        bundle = self.make_bundle()
+        review = bundle["reviewResults"][0]  # type: ignore[index]
+        finding_id = "S-QUEUE-001"
+        finding = {
+            "findingId": finding_id,
+            "severity": "SHOULD_FIX",
+            "status": "open",
+            "repositoryRelativePath": "modules/identity/Policy.java",
+            "line": 7,
+            "symbol": "authorize",
+            "controlFlow": ["request", "authorize"],
+            "trigger": "scoped request",
+            "impact": "verified reliability gap",
+            "evidence": ["synthetic review evidence"],
+            "verification": "python -I -m unittest",
+            "targetCommitSha": review["targetCommitSha"],
+            "evaluatedVersionKey": review["evaluatedVersionKey"],
+            "rulebookDigest": review["rulebookDigest"],
+            "judgeDigest": review["judgeDigest"],
+            "resolution": "unresolved",
+        }
+        review["findings"] = [finding]
+        self.sign_review(review, "key-b")
+
+        missing_errors = self.validate(bundle)
+
+        self.assertTrue(
+            any("unresolved Review finding" in error for error in missing_errors),
+            missing_errors,
+        )
+
+        queue_item = {
+            "fingerprint": "stable-should-fix-root-cause",
+            "sliceId": "iam-login",
+            "evaluatedVersionKey": review["evaluatedVersionKey"],
+            "failureSource": {
+                "type": "review",
+                "checkId": f"review:{finding_id}",
+            },
+            "severity": "SHOULD_FIX",
+            "trigger": finding["trigger"],
+            "controlFlow": finding["controlFlow"],
+            "evidence": finding["evidence"],
+            "impact": finding["impact"],
+            "verification": finding["verification"],
+            "status": "open",
+            "failedReviewRounds": 0,
+        }
+        bundle["queueItems"] = [queue_item]
+        self.bind_queue_and_resign(bundle)
+
+        self.assertEqual([], self.validate(bundle))
+
+        second_review = bundle["reviewResults"][1]  # type: ignore[index]
+        second_review["findings"] = [dict(finding)]
+        self.bind_queue_and_resign(bundle)
+
+        duplicate_finding_errors = self.validate(bundle)
+
+        self.assertTrue(
+            any("findingId must be unique" in error for error in duplicate_finding_errors),
+            duplicate_finding_errors,
+        )
+
+    def test_review_queue_item_cannot_exist_without_a_matching_finding(self) -> None:
+        bundle = self.make_bundle()
+        review = bundle["reviewResults"][0]  # type: ignore[index]
+        bundle["queueItems"] = [
+            {
+                "fingerprint": "orphan-review-queue-item",
+                "sliceId": "iam-login",
+                "evaluatedVersionKey": review["evaluatedVersionKey"],
+                "failureSource": {
+                    "type": "review",
+                    "checkId": "review:S-ORPHAN",
+                },
+                "severity": "SHOULD_FIX",
+                "trigger": "synthetic orphan",
+                "controlFlow": ["review", "queue"],
+                "evidence": ["synthetic review evidence"],
+                "impact": "untraceable work item",
+                "verification": "python -I -m unittest",
+                "status": "open",
+                "failedReviewRounds": 0,
+            }
+        ]
+        self.bind_queue_and_resign(bundle)
+
+        errors = self.validate(bundle)
+
+        self.assertTrue(
+            any("does not map to an unresolved Review finding" in error for error in errors),
+            errors,
+        )
+
+    def test_review_finding_queue_mapping_rejects_mismatch_and_duplicates(self) -> None:
+        bundle = self.make_bundle()
+        review = bundle["reviewResults"][0]  # type: ignore[index]
+        finding_id = "S-QUEUE-AMBIGUOUS"
+        finding = {
+            "findingId": finding_id,
+            "severity": "SHOULD_FIX",
+            "status": "open",
+            "repositoryRelativePath": "modules/identity/Policy.java",
+            "line": 9,
+            "symbol": "authorize",
+            "controlFlow": ["request", "authorize"],
+            "trigger": "scoped request",
+            "impact": "verified reliability gap",
+            "evidence": ["synthetic review evidence"],
+            "verification": "python -I -m unittest",
+            "targetCommitSha": review["targetCommitSha"],
+            "evaluatedVersionKey": review["evaluatedVersionKey"],
+            "rulebookDigest": review["rulebookDigest"],
+            "judgeDigest": review["judgeDigest"],
+            "resolution": "unresolved",
+        }
+        review["findings"] = [finding]
+        self.sign_review(review, "key-b")
+        queue_item = {
+            "fingerprint": "stable-review-root-cause-one",
+            "sliceId": "iam-login",
+            "evaluatedVersionKey": review["evaluatedVersionKey"],
+            "failureSource": {
+                "type": "review",
+                "checkId": f"review:{finding_id}",
+            },
+            "severity": "SHOULD_FIX",
+            "trigger": finding["trigger"],
+            "controlFlow": finding["controlFlow"],
+            "evidence": finding["evidence"],
+            "impact": finding["impact"],
+            "verification": finding["verification"],
+            "status": "closed",
+            "failedReviewRounds": 0,
+        }
+        bundle["queueItems"] = [queue_item]
+        self.bind_queue_and_resign(bundle)
+
+        mismatch_errors = self.validate(bundle)
+
+        self.assertTrue(
+            any("status does not match" in error for error in mismatch_errors),
+            mismatch_errors,
+        )
+
+        queue_item["status"] = "open"
+        duplicate = dict(queue_item)
+        duplicate["fingerprint"] = "stable-review-root-cause-two"
+        bundle["queueItems"] = [queue_item, duplicate]
+        self.bind_queue_and_resign(bundle)
+
+        duplicate_errors = self.validate(bundle)
+
+        self.assertTrue(
+            any("exactly one Queue Item" in error for error in duplicate_errors),
+            duplicate_errors,
+        )
 
     def test_canonical_artifact_root_requires_readme_and_rejects_other_files(
         self,

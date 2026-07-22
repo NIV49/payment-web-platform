@@ -56,7 +56,7 @@
 | 后端适配器/API | `./mvnw -s maven-settings.xml clean verify`，必要时 Testcontainers 集成测试 |
 | Flyway | 新库迁移、已有本地库升级、回滚/兼容性检查 |
 | 跨端契约 | 前端契约测试、后端集成测试、真实浏览器联调 |
-| 文档/规则 | `git diff --check`，检查相对链接与源码路径，运行 `python3 -I scripts/check_sensitive_artifacts.py --repository-root <repo> --base-commit <trusted-base-SHA> --commit <target-SHA>` 扫描不可变 diff 中全部新增/修改文本；涉及权限决策时运行 `python3 -I scripts/check-doc-decisions.py` |
+| 文档/规则 | `git diff --check`，检查相对链接与源码路径，运行 `python3 -I scripts/check_sensitive_artifacts.py --repository-root <repo> --base-commit <trusted-base-SHA> --commit <target-SHA>` 扫描完整 `base..target` DAG 每条父边的新增/修改/类型变化 blob；涉及权限决策时运行 `python3 -I scripts/check-doc-decisions.py` |
 | 项目级 Agent skill | `python3 -I -m unittest discover -s scripts/tests -p 'test_*.py'`、`python3 -I scripts/check_project_skills.py`，并运行其关联的文档/规则门禁 |
 | Payment modernization 产物 | `python3 -I scripts/check_modernization_artifacts.py --repository-root <target-repository> --commit <full-target-SHA> --trusted-policy-commit <protected-base-SHA>`；CI 权威检查必须读取 Git 对象，canonical root 只允许 `README.md` 与 closed JSON bundle，每个 closed bundle 必须带两份独立签名 PASS；positional draft 预检不能替代 |
 
@@ -64,11 +64,11 @@
 
 权限跨文档决策使用 `<!-- decision-status id=<ID> status=<pending|accepted|superseded> ref=<none|repo-relative-path> -->` 标记。属性必须且只能各出现一次。`pending` 必须使用 `ref=none`；`accepted` 或 `superseded` 必须引用 `docs/adr/NNNN-slug.md`，该 ADR 必须且只能声明一次 `Status: accepted.` 和匹配的 `Decision-ID: <ID>`。修改任一决策状态时，必须同步全部登记文档并运行一致性检查。
 
-该轻量治理 CI 对所有 PR 和 `main` 推送运行。它固定 `linux/amd64` 执行平台、Python 3.13.14 容器的单平台 manifest 摘要、Action 完整提交和依赖 wheel 哈希，并在运行 PR 可修改的测试前先执行四道门禁；测试后校验 `HEAD`、tracked worktree 与 untracked 文件均未漂移，再从禁用 replace objects 的提交 `git archive` 重建隔离快照。快照脚本以 `-I` 重跑，敏感扫描器从可信 base 到目标 SHA 的 Git 对象 diff 定位所有新增/修改路径，并扫描每个目标 blob 的完整内容，不信任可被 `.gitattributes` 改写的 patch 行；modernization checker 必须显式接收外部 `--trusted-policy-commit`，不会回退到父提交。非 UTF-8、NUL/control、二进制、危险 Git mode 或超限变更默认拒绝。
+该轻量治理 CI 对所有 PR 和 `main` 推送运行。它固定 `linux/amd64` 执行平台、Python 3.13.14 容器的单平台 manifest 摘要、Action 完整提交和依赖 wheel 哈希，并在运行 PR 可修改的测试前先执行四道门禁；每个测试前后都显式禁用 replace objects，拒绝 shallow 仓库、`.git/info/grafts`、`GIT_GRAFT_FILE`、`GIT_SHALLOW_FILE` 以及有效、损坏或松散/打包形式的 `refs/replace/*`。它校验原始 commit/tree object、真实 index tree，拒绝 assume-unchanged/skip-worktree 标志，并用从目标 tree 新建的临时 index 强制逐内容比较工作树，最后检查 untracked 文件，再从不可变提交的 `git archive` 重建隔离快照。快照脚本以 `-I` 重跑；敏感扫描器拒绝不完整或被 graft 改写的提交图以及可重定向仓库、对象和图状态的 Git 环境变量，严格解析 Git 单行元数据，核对 raw commit parent header，遍历可信 base 到目标 SHA 的完整可达提交 DAG 及每条真实父边，扫描新增、修改或类型变化的每个不可变 blob，覆盖中间提交和合并分支，并显式忽略 `.gitattributes` patch 与 submodule ignore 对覆盖范围的影响；JSON/XML Unicode key、多行结构、`key|name + value` descriptor、namespace 同名属性与 YAML 一并结构化检查，安全 XML `value` 属性不能遮蔽同节点的不安全文本。modernization checker 必须显式接收外部 `--trusted-policy-commit`，不会回退到父提交；activation commit 的完整路径差异强制 `--ignore-submodules=none`。非 UTF-8、NUL/control、二进制、symlink/gitlink、危险 Git mode、超限或无法安全解析的结构化变更默认拒绝。
 
 当前 trusted reviewer registry 有意保持为空，所以任何 `approved` Rule Card 都会 fail closed，直到独立的人工作业完成 reviewer key bootstrap。含 `sourceSnapshots` 的历史证据还要求运行环境能只读访问项目登记的 legacy workspace；GitHub 托管 Ubuntu runner 不具备该本地路径时会阻断，不能跳过验证，需改用受控的 self-hosted evidence runner 或后续获批的不可变证据 attestation 方案。
 
-仓库内脚本不能成为自己的最终信任根。必须按 [`docs/governance/codeowners-bootstrap.md`](../governance/codeowners-bootstrap.md) 先在目标分支落地 CODEOWNERS，再由仓库管理员启用并通过平台 API 核验 ruleset。首次 CODEOWNERS 提交不能自我保护；仓库测试只验证 policy、Judge、全部 workflow 和治理路径的覆盖关系，不证明平台配置已生效。
+仓库内脚本不能成为自己的最终信任根。必须按 [`docs/governance/codeowners-bootstrap.md`](../governance/codeowners-bootstrap.md) 先在目标分支落地 CODEOWNERS，再由仓库管理员启用并通过平台 API 核验 ruleset。首次 CODEOWNERS 提交不能自我保护；仓库测试只验证 policy、Judge、全部 workflow 和治理路径的覆盖关系，不证明平台配置已生效。CODEOWNERS 本地验证按 GitHub 语义剥离行内注释，只接受整段 `**`，并拒绝 GitHub 不支持的 `!`、`[]`、反斜杠和嵌入式 `**` 模式。
 
 ## 4. 完成定义
 

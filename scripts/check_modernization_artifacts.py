@@ -53,12 +53,21 @@ DEFAULT_ARTIFACT_ROOT = PurePosixPath(".agents/payment-modernization/artifacts")
 ARTIFACT_README_PATH = DEFAULT_ARTIFACT_ROOT / "README.md"
 CODEOWNERS_PATH = PurePosixPath(".github/CODEOWNERS")
 CODEOWNERS_BOOTSTRAP_PATH = "docs/governance/codeowners-bootstrap.md"
+MAX_CODEOWNERS_BYTES = 3 * 1024 * 1024
 DEFAULT_LEGACY_WORKSPACE = Path("/Users/mac/Documents/work/backend")
 
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 RAW_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 RULE_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_-]*-[0-9]{3,}$")
+CODEOWNER_ACCOUNT_PATTERN = re.compile(
+    r"^@[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})"
+    r"(?:/[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})?)?$"
+)
+CODEOWNER_EMAIL_PATTERN = re.compile(
+    r"^[A-Za-z0-9.!$%&'*+/=?^_{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$"
+)
 
 READ_METHODS = {
     "validated-git-object",
@@ -1537,6 +1546,103 @@ def validate_queue_item(item: Mapping[str, Any]) -> list[str]:
     return errors
 
 
+def validate_review_finding_queue_traceability(
+    reviews: Sequence[Mapping[str, Any]],
+    queue_items: Sequence[Any],
+) -> list[str]:
+    errors: list[str] = []
+    findings_by_check_id: dict[str, Mapping[str, Any]] = {}
+    review_queue_counts: dict[str, int] = {}
+    for review in reviews:
+        findings = review.get("findings")
+        if not isinstance(findings, list):
+            continue
+        for finding in findings:
+            if not isinstance(finding, Mapping) or not isinstance(
+                finding.get("findingId"), str
+            ):
+                continue
+            check_id = f"review:{finding['findingId']}"
+            if check_id in findings_by_check_id:
+                errors.append(
+                    f"Review findingId must be unique across the bundle: "
+                    f"{finding['findingId']}"
+                )
+                continue
+            findings_by_check_id[check_id] = finding
+
+    for check_id, finding in findings_by_check_id.items():
+        if finding.get("status") == "closed":
+            continue
+        matches = [
+            item
+            for item in queue_items
+            if isinstance(item, Mapping)
+            and item.get("failureSource")
+            == {"type": "review", "checkId": check_id}
+        ]
+        if len(matches) != 1:
+            errors.append(
+                f"unresolved Review finding {finding['findingId']} must map "
+                "to exactly one Queue Item"
+            )
+            continue
+        item = matches[0]
+        for field in (
+            "severity",
+            "status",
+            "trigger",
+            "controlFlow",
+            "evidence",
+            "impact",
+            "verification",
+        ):
+            if item.get(field) != finding.get(field):
+                errors.append(
+                    f"Queue Item {field} does not match unresolved Review "
+                    f"finding {finding['findingId']}"
+                )
+
+    for item in queue_items:
+        if not isinstance(item, Mapping):
+            continue
+        source = item.get("failureSource")
+        if not isinstance(source, Mapping) or source.get("type") != "review":
+            continue
+        check_id = source.get("checkId")
+        if isinstance(check_id, str):
+            review_queue_counts[check_id] = review_queue_counts.get(check_id, 0) + 1
+        finding = findings_by_check_id.get(check_id) if isinstance(check_id, str) else None
+        if finding is None:
+            errors.append(
+                f"Review Queue Item {check_id!r} does not map to an unresolved "
+                "Review finding"
+            )
+            continue
+        if finding.get("status") == "closed":
+            for field in (
+                "severity",
+                "status",
+                "trigger",
+                "controlFlow",
+                "evidence",
+                "impact",
+                "verification",
+            ):
+                if item.get(field) != finding.get(field):
+                    errors.append(
+                        f"Queue Item {field} does not match closed Review "
+                        f"finding {finding['findingId']}"
+                    )
+    for check_id, count in review_queue_counts.items():
+        if count != 1:
+            errors.append(
+                f"Review Queue Item checkId must be unique across the bundle: "
+                f"{check_id}"
+            )
+    return errors
+
+
 def validate_bundle(
     bundle: Mapping[str, Any],
     *,
@@ -1824,6 +1930,7 @@ def validate_bundle(
     reviews: dict[str, Mapping[str, Any]] = {}
     per_review_errors: dict[str, list[str]] = {}
     seen_review_keys: set[str] = set()
+    valid_reviews: list[Mapping[str, Any]] = []
     valid_pass_reviews: list[Mapping[str, Any]] = []
     for index, review in enumerate(raw_reviews):
         if not isinstance(review, Mapping):
@@ -1852,6 +1959,8 @@ def validate_bundle(
         )
         if isinstance(review_id, str):
             per_review_errors[review_id] = review_validation_errors
+        if not review_validation_errors:
+            valid_reviews.append(review)
         if not review_validation_errors and review.get("verdict") == "PASS":
             valid_pass_reviews.append(review)
         errors.extend(
@@ -1938,11 +2047,19 @@ def validate_bundle(
     if not isinstance(raw_queue, list):
         errors.append("queueItems must be a list")
     else:
+        seen_queue_fingerprints: set[str] = set()
         for index, item in enumerate(raw_queue):
             if not isinstance(item, Mapping):
                 errors.append(f"queueItems[{index}] must be a mapping")
                 continue
             item_errors = validate_queue_item(item)
+            fingerprint = item.get("fingerprint")
+            if isinstance(fingerprint, str):
+                if fingerprint in seen_queue_fingerprints:
+                    item_errors.append(
+                        "Queue Item fingerprint must be unique within a bundle"
+                    )
+                seen_queue_fingerprints.add(fingerprint)
             if item.get("sliceId") != capability.get("sliceId"):
                 item_errors.append(
                     "Queue Item sliceId does not bind this Capability Slice"
@@ -1960,6 +2077,9 @@ def validate_bundle(
                     "closed artifact bundle contains an unresolved BLOCKER Queue Item"
                 )
             errors.extend(f"queueItems[{index}]: {error}" for error in item_errors)
+        errors.extend(
+            validate_review_finding_queue_traceability(valid_reviews, raw_queue)
+        )
     return errors
 
 
@@ -2395,15 +2515,78 @@ def _load_optional_policy(
     return load_policy(repository, commit_sha)
 
 
+def parse_codeowners_rules(
+    content: str,
+) -> tuple[list[tuple[str, tuple[str, ...]]], list[str]]:
+    rules: list[tuple[str, tuple[str, ...]]] = []
+    errors: list[str] = []
+    for line_number, line in enumerate(content.splitlines(), start=1):
+        stripped = line.split("#", 1)[0].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        fields = stripped.split()
+        pattern = fields[0]
+        owners = tuple(fields[1:])
+        normalized = pattern.strip("/")
+        segments = normalized.split("/")
+        if (
+            pattern.startswith("!")
+            or any(character in pattern for character in "[]\\")
+            or "***" in pattern
+            or pattern in {"", "/"}
+            or any(not segment for segment in segments)
+            or any("**" in segment and segment != "**" for segment in segments)
+        ):
+            errors.append(
+                f"CODEOWNERS line {line_number} uses an unsupported pattern"
+            )
+            continue
+        if any(
+            CODEOWNER_ACCOUNT_PATTERN.fullmatch(owner) is None
+            and CODEOWNER_EMAIL_PATTERN.fullmatch(owner) is None
+            for owner in owners
+        ):
+            errors.append(f"CODEOWNERS line {line_number} has an invalid owner")
+            continue
+        rules.append((pattern, owners))
+    return rules, errors
+
+
 def _codeowners_pattern_matches(pattern: str, path: str) -> bool:
-    normalized = pattern.lstrip("/")
-    if normalized.endswith("/**"):
-        return path.startswith(normalized[:-2])
-    if normalized.endswith("/"):
-        return path.startswith(normalized)
-    if any(character in normalized for character in "*?["):
-        return PurePosixPath(path).match(normalized)
-    return path == normalized
+    rooted = pattern.startswith("/")
+    directory_pattern = pattern.endswith("/")
+    normalized = pattern.lstrip("/").rstrip("/")
+    segments = normalized.split("/")
+    if any(not segment for segment in segments) or any(
+        "**" in segment and segment != "**" for segment in segments
+    ):
+        return False
+    has_internal_slash = "/" in normalized
+    prefix = "^" if rooted or has_internal_slash else r"(?:^|.*/)"
+    expression: list[str] = [prefix]
+    index = 0
+    while index < len(normalized):
+        character = normalized[index]
+        if character == "*":
+            if index + 1 < len(normalized) and normalized[index + 1] == "*":
+                index += 2
+                if index < len(normalized) and normalized[index] == "/":
+                    expression.append(r"(?:.*/)?")
+                    index += 1
+                else:
+                    expression.append(".*")
+                continue
+            expression.append(r"[^/]*")
+        elif character == "?":
+            expression.append(r"[^/]")
+        else:
+            expression.append(re.escape(character))
+        index += 1
+    last_segment = normalized.rsplit("/", 1)[-1]
+    if directory_pattern or not any(character in last_segment for character in "*?"):
+        expression.append(r"(?:/.*)?")
+    expression.append("$")
+    return re.match("".join(expression), path) is not None
 
 
 def validate_governance_coverage(
@@ -2433,19 +2616,13 @@ def validate_governance_coverage(
         workflow_paths = list_git_files(
             repository, commit_sha, ".github/workflows"
         )
-        lines = raw_codeowners.decode("utf-8").splitlines()
+        if len(raw_codeowners) >= MAX_CODEOWNERS_BYTES:
+            return errors + ["immutable CODEOWNERS exceeds GitHub's size limit"]
+        codeowners_content = raw_codeowners.decode("utf-8")
     except (EvidenceError, UnicodeError):
         return errors + ["immutable CODEOWNERS coverage cannot be resolved"]
-    rules: list[tuple[str, tuple[str, ...]]] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        fields = stripped.split()
-        if len(fields) < 2:
-            errors.append("CODEOWNERS contains a rule without an owner")
-            continue
-        rules.append((fields[0], tuple(fields[1:])))
+    rules, codeowners_errors = parse_codeowners_rules(codeowners_content)
+    errors.extend(codeowners_errors)
     protected_paths = dict.fromkeys(
         [
             *policy["rulebookPaths"],

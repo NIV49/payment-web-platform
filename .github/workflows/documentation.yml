@@ -12,6 +12,8 @@ permissions:
 env:
   # PRs trust the protected base branch; pushes trust the previous main commit.
   TRUSTED_POLICY_COMMIT: ${{ github.event.pull_request.base.sha || github.event.before }}
+  # Every Git plumbing check must ignore repository-controlled replacement refs.
+  GIT_NO_REPLACE_OBJECTS: "1"
 
 concurrency:
   group: documentation-${{ github.workflow }}-${{ github.ref }}
@@ -65,11 +67,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          checked_out_sha="$(git rev-parse --verify HEAD)"
+          export GIT_NO_REPLACE_OBJECTS=1
+          unset GIT_REPLACE_REF_BASE
+          verify_index_and_worktree() {
+            local expected_tree="$1"
+            local snapshot_index
+            test "$(git --no-replace-objects write-tree)" = "$expected_tree"
+            if git --no-replace-objects ls-files -v | grep -E '^[a-zS] '; then
+              return 1
+            fi
+            snapshot_index="$(mktemp)"
+            rm -f "$snapshot_index"
+            GIT_INDEX_FILE="$snapshot_index" git --no-replace-objects read-tree "$expected_tree"
+            if ! GIT_INDEX_FILE="$snapshot_index" git --no-replace-objects diff-files \
+              --quiet --no-ext-diff --ignore-submodules=none; then
+              rm -f "$snapshot_index"
+              return 1
+            fi
+            rm -f "$snapshot_index"
+          }
+          test -z "${GIT_GRAFT_FILE+x}"
+          test -z "${GIT_SHALLOW_FILE+x}"
+          replace_ref_dir="$(git --no-replace-objects rev-parse --git-path refs/replace)"
+          grafts_path="$(git --no-replace-objects rev-parse --git-path info/grafts)"
+          test ! -e "$grafts_path"
+          test ! -L "$grafts_path"
+          test ! -L "$replace_ref_dir"
+          test "$(git --no-replace-objects rev-parse --is-shallow-repository)" = "false"
+          if test -e "$replace_ref_dir"; then
+            test -d "$replace_ref_dir"
+            test -z "$(find "$replace_ref_dir" -mindepth 1 -print -quit)"
+          fi
+          replace_refs="$(git --no-replace-objects for-each-ref --format='%(refname)' refs/replace/)"
+          test -z "$replace_refs"
+          checked_out_sha="$(git --no-replace-objects rev-parse --verify 'HEAD^{commit}')"
+          checked_out_tree="$(git --no-replace-objects rev-parse --verify "${checked_out_sha}^{tree}")"
           test "$checked_out_sha" = "$GITHUB_SHA"
+          verify_index_and_worktree "$checked_out_tree"
           snapshot="$(mktemp -d)"
           trap 'rm -rf "$snapshot"' EXIT
-          GIT_NO_REPLACE_OBJECTS=1 git --no-replace-objects archive "$checked_out_sha" | tar -x -C "$snapshot"
+          git --no-replace-objects archive "$checked_out_sha" | tar -x -C "$snapshot"
           git -C "$snapshot" init --quiet
           git -C "$snapshot" add -f -A
           (
@@ -85,17 +122,86 @@ jobs:
             --repository-root "$GITHUB_WORKSPACE" \
             --commit "$checked_out_sha" \
             --trusted-policy-commit "$TRUSTED_POLICY_COMMIT"
-          test "$(git rev-parse --verify HEAD)" = "$checked_out_sha"
-          git diff --exit-code "$checked_out_sha" --
-          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          replace_ref_dir="$(git --no-replace-objects rev-parse --git-path refs/replace)"
+          grafts_path="$(git --no-replace-objects rev-parse --git-path info/grafts)"
+          test -z "${GIT_GRAFT_FILE+x}"
+          test -z "${GIT_SHALLOW_FILE+x}"
+          test ! -e "$grafts_path"
+          test ! -L "$grafts_path"
+          test ! -L "$replace_ref_dir"
+          test "$(git --no-replace-objects rev-parse --is-shallow-repository)" = "false"
+          if test -e "$replace_ref_dir"; then
+            test -d "$replace_ref_dir"
+            test -z "$(find "$replace_ref_dir" -mindepth 1 -print -quit)"
+          fi
+          replace_refs="$(git --no-replace-objects for-each-ref --format='%(refname)' refs/replace/)"
+          test -z "$replace_refs"
+          test "$(git --no-replace-objects rev-parse --verify 'HEAD^{commit}')" = "$checked_out_sha"
+          test "$(git --no-replace-objects rev-parse --verify 'HEAD^{tree}')" = "$checked_out_tree"
+          test "$(git --no-replace-objects rev-parse --verify "${checked_out_sha}^{tree}")" = "$checked_out_tree"
+          verify_index_and_worktree "$checked_out_tree"
+          git --no-replace-objects diff --no-ext-diff --exit-code "$checked_out_sha" --
+          test -z "$(git --no-replace-objects status --porcelain=v1 --untracked-files=all)"
 
       - name: Test documentation governance without snapshot drift
         shell: bash
         run: |
           set -euo pipefail
-          checked_out_sha="$(git rev-parse --verify HEAD)"
+          export GIT_NO_REPLACE_OBJECTS=1
+          unset GIT_REPLACE_REF_BASE
+          verify_index_and_worktree() {
+            local expected_tree="$1"
+            local snapshot_index
+            test "$(git --no-replace-objects write-tree)" = "$expected_tree"
+            if git --no-replace-objects ls-files -v | grep -E '^[a-zS] '; then
+              return 1
+            fi
+            snapshot_index="$(mktemp)"
+            rm -f "$snapshot_index"
+            GIT_INDEX_FILE="$snapshot_index" git --no-replace-objects read-tree "$expected_tree"
+            if ! GIT_INDEX_FILE="$snapshot_index" git --no-replace-objects diff-files \
+              --quiet --no-ext-diff --ignore-submodules=none; then
+              rm -f "$snapshot_index"
+              return 1
+            fi
+            rm -f "$snapshot_index"
+          }
+          test -z "${GIT_GRAFT_FILE+x}"
+          test -z "${GIT_SHALLOW_FILE+x}"
+          replace_ref_dir="$(git --no-replace-objects rev-parse --git-path refs/replace)"
+          grafts_path="$(git --no-replace-objects rev-parse --git-path info/grafts)"
+          test ! -e "$grafts_path"
+          test ! -L "$grafts_path"
+          test ! -L "$replace_ref_dir"
+          test "$(git --no-replace-objects rev-parse --is-shallow-repository)" = "false"
+          if test -e "$replace_ref_dir"; then
+            test -d "$replace_ref_dir"
+            test -z "$(find "$replace_ref_dir" -mindepth 1 -print -quit)"
+          fi
+          replace_refs="$(git --no-replace-objects for-each-ref --format='%(refname)' refs/replace/)"
+          test -z "$replace_refs"
+          checked_out_sha="$(git --no-replace-objects rev-parse --verify 'HEAD^{commit}')"
+          checked_out_tree="$(git --no-replace-objects rev-parse --verify "${checked_out_sha}^{tree}")"
           test "$checked_out_sha" = "$GITHUB_SHA"
+          verify_index_and_worktree "$checked_out_tree"
           python3 -I -m unittest discover -s scripts/tests -p "test_*.py"
-          test "$(git rev-parse --verify HEAD)" = "$checked_out_sha"
-          git diff --exit-code "$checked_out_sha" --
-          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          replace_ref_dir="$(git --no-replace-objects rev-parse --git-path refs/replace)"
+          grafts_path="$(git --no-replace-objects rev-parse --git-path info/grafts)"
+          test -z "${GIT_GRAFT_FILE+x}"
+          test -z "${GIT_SHALLOW_FILE+x}"
+          test ! -e "$grafts_path"
+          test ! -L "$grafts_path"
+          test ! -L "$replace_ref_dir"
+          test "$(git --no-replace-objects rev-parse --is-shallow-repository)" = "false"
+          if test -e "$replace_ref_dir"; then
+            test -d "$replace_ref_dir"
+            test -z "$(find "$replace_ref_dir" -mindepth 1 -print -quit)"
+          fi
+          replace_refs="$(git --no-replace-objects for-each-ref --format='%(refname)' refs/replace/)"
+          test -z "$replace_refs"
+          test "$(git --no-replace-objects rev-parse --verify 'HEAD^{commit}')" = "$checked_out_sha"
+          test "$(git --no-replace-objects rev-parse --verify 'HEAD^{tree}')" = "$checked_out_tree"
+          test "$(git --no-replace-objects rev-parse --verify "${checked_out_sha}^{tree}")" = "$checked_out_tree"
+          verify_index_and_worktree "$checked_out_tree"
+          git --no-replace-objects diff --no-ext-diff --exit-code "$checked_out_sha" --
+          test -z "$(git --no-replace-objects status --porcelain=v1 --untracked-files=all)"

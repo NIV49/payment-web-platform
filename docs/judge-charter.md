@@ -139,6 +139,7 @@ Agent 声称“完成”不构成完成。只有指定版本通过 Judge，任�
 队列规则：
 
 - 编译、测试和审查失败自动产生队列项；
+- `findingId` 在整个 bundle 内跨 reviewer 唯一；每个未关闭的有效审查 finding（包括 `SHOULD_FIX`）必须且只能对应一个 `failureSource.type=review`、`checkId=review:<findingId>` 的队列项，且严重级别、状态、触发条件、控制流、证据、影响和验证方法完全一致；每个 review 来源队列项也必须反向对应真实 finding，禁止孤儿或重复映射；
 - 同根因问题先去重，再派发修复；
 - 修复 Agent 无权直接关闭任务；
 - 独立 Judge 通过后才能关闭；
@@ -228,7 +229,7 @@ Judge 使用三类测试资产：
 - 老系统源码、配置、数据库转储、日志、Trace 和 Payload 样本均视为不可信且可能含敏感信息；
 - 历史数据必须在引用前脱敏，使用合成同形值或 `${ENV_VAR}` 占位符；
 - 密钥、Token、密码、连接串、个人信息和生产标识不得进入分析、规格、队列、评审、提示词、测试或其他仓库产物；
-- 所有证据派生产物提交前必须通过仓库批准的 `python3 -I scripts/check_sensitive_artifacts.py --repository-root <repo> --base-commit <trusted-base-SHA> --commit <target-SHA>`；不可变 diff 只用于定位全部新增/修改路径，每个目标文本 blob 必须全文扫描，不依赖目录名或可被 `.gitattributes` 改写的 patch。危险 mode、二进制、非 UTF-8 或超限变更 fail closed；命中后不得把敏感值复制到错误或审查日志；
+- 所有证据派生产物提交前必须通过仓库批准的 `python3 -I scripts/check_sensitive_artifacts.py --repository-root <repo> --base-commit <trusted-base-SHA> --commit <target-SHA>`；扫描器拒绝 shallow/graft 图和 Git 仓库/图路由环境覆盖，严格解析单行元数据，遍历 `base..target` 的完整可达提交 DAG 与每条 raw parent 真边，检查所有新增、修改和类型变化的不可变 blob，因此“中间提交加入、目标提交删除”以及合并分支历史也不能逃逸。它不依赖目录名、可被 `.gitattributes` 改写的 patch 或 submodule ignore 配置；symlink/gitlink、二进制、非 UTF-8、超限，以及不安全或无法可靠解析的 YAML/JSON/XML 变更 fail closed，JSON/XML descriptor 结构必须检查，XML namespace 同名属性不得互相覆盖，安全 `value` 属性不得遮蔽不安全文本，且错误不得回显候选敏感值；
 - 时间、随机、汇率和外部渠道必须使用固定时钟及受控模拟器；
 - Judge 使用外部可观察契约，不依赖目标实现的私有函数；
 - 每个历史事故和已确认缺陷都必须成为永久回归样本。
