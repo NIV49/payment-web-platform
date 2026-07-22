@@ -13,6 +13,8 @@ if SPEC is None or SPEC.loader is None:
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
+DECISION_DOCUMENTS = MODULE.DECISION_DOCUMENTS
+parse_markers = MODULE.parse_markers
 validate_decision = MODULE.validate_decision
 validate_reference = MODULE.validate_reference
 
@@ -62,6 +64,114 @@ class DocumentationDecisionValidationTest(unittest.TestCase):
         )
 
         self.assertTrue(any("malformed attribute" in error for error in errors), errors)
+
+    def test_ignores_a_decision_marker_inside_a_fenced_example(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "example.md"
+            document.write_text(
+                "```markdown\n"
+                "<!-- decision-status "
+                f"id={self.decision_id} status=accepted "
+                "ref=docs/adr/0008-membership.md -->\n"
+                "```\n",
+                encoding="utf-8",
+            )
+
+            markers, errors = parse_markers(document)
+
+            self.assertEqual([], errors)
+            self.assertEqual([], markers)
+
+    def test_ignores_a_decision_marker_inside_a_block_quote(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "example.md"
+            document.write_text(
+                "> <!-- decision-status "
+                f"id={self.decision_id} status=accepted "
+                "ref=docs/adr/0008-membership.md -->\n",
+                encoding="utf-8",
+            )
+
+            markers, errors = parse_markers(document)
+
+            self.assertEqual([], errors)
+            self.assertEqual([], markers)
+
+    def test_rejects_noncanonical_markers_outside_code_examples(self) -> None:
+        marker = (
+            f"<!-- decision-status id={self.decision_id} status=pending ref=none -->"
+        )
+        cases = {
+            "inline paragraph": f"policy text {marker}\n",
+            "list item": f"- {marker}\n",
+            "preformatted html": f"<pre>\n{marker}\n</pre>\n",
+            "details html": f"<details>\n{marker}\n</details>\n",
+        }
+
+        for label, content in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                document = Path(directory) / "invalid.md"
+                document.write_text(content, encoding="utf-8")
+
+                markers, errors = parse_markers(document)
+
+                self.assertEqual([], markers)
+                self.assertTrue(
+                    any("noncanonical decision-status" in error for error in errors),
+                    errors,
+                )
+
+    def test_rejects_a_multiline_conflicting_decision_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            relative_path = "docs/decision-context.md"
+            self.write_document(
+                repository,
+                relative_path,
+                "<!-- decision-status "
+                f"id={self.decision_id} status=pending ref=none -->\n\n"
+                "<!-- decision-status\n"
+                f"id={self.decision_id}\n"
+                "status=accepted\n"
+                "ref=docs/adr/0008-membership.md\n"
+                "-->\n",
+            )
+
+            errors = validate_decision(
+                repository,
+                self.decision_id,
+                (relative_path,),
+            )
+
+            self.assertTrue(
+                any("expected exactly one marker" in error for error in errors),
+                errors,
+            )
+
+    def test_rejects_an_unclosed_conflicting_decision_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            relative_path = "docs/decision-context.md"
+            self.write_document(
+                repository,
+                relative_path,
+                "<!-- decision-status "
+                f"id={self.decision_id} status=pending ref=none -->\n\n"
+                "<!-- decision-status\n"
+                f"id={self.decision_id}\n"
+                "status=accepted\n",
+            )
+
+            errors = validate_decision(
+                repository,
+                self.decision_id,
+                (relative_path,),
+            )
+
+            self.assertTrue(
+                any("malformed decision-status comment" in error for error in errors),
+                errors,
+            )
 
     def test_rejects_an_accepted_reference_outside_the_adr_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -124,6 +234,37 @@ class DocumentationDecisionValidationTest(unittest.TestCase):
                     reference,
                 ),
             )
+
+    def test_rejects_adr_metadata_that_only_appears_in_a_fenced_example(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            reference = "docs/adr/0008-membership.md"
+            self.write_document(
+                repository,
+                reference,
+                "# Membership ADR\n\n"
+                "```text\n"
+                "Status: accepted.\n\n"
+                f"Decision-ID: {self.decision_id}\n"
+                "```\n",
+            )
+
+            errors = validate_reference(
+                repository,
+                self.decision_id,
+                "accepted",
+                reference,
+            )
+
+            self.assertTrue(
+                any("not an accepted ADR" in error for error in errors), errors
+            )
+
+    def test_registers_readme_as_a_normative_decision_carrier(self) -> None:
+        self.assertIn(
+            "README.md",
+            DECISION_DOCUMENTS[self.decision_id],
+        )
 
 
 if __name__ == "__main__":

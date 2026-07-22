@@ -175,6 +175,46 @@ class ProjectSkillValidationTest(unittest.TestCase):
                 errors,
             )
 
+    def test_rejects_frontmatter_without_a_yaml_mapping_separator(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            skill = self.create_skill(repository)
+            skill_file = skill / "SKILL.md"
+            skill_file.write_text(
+                skill_file.read_text(encoding="utf-8").replace(
+                    'name: "sample-skill"',
+                    'name:"sample-skill"',
+                ),
+                encoding="utf-8",
+            )
+
+            errors = validate_repository(repository)
+
+            self.assertTrue(
+                any("valid YAML mapping" in error for error in errors),
+                errors,
+            )
+
+    def test_rejects_openai_metadata_without_a_yaml_mapping_separator(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            skill = self.create_skill(repository)
+            metadata = skill / "agents" / "openai.yaml"
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8").replace(
+                    '  display_name: "Sample Skill"',
+                    '  display_name:"Sample Skill"',
+                ),
+                encoding="utf-8",
+            )
+
+            errors = validate_repository(repository)
+
+            self.assertTrue(
+                any("valid YAML mapping" in error for error in errors),
+                errors,
+            )
+
     def test_rejects_an_unquoted_numeric_description(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
@@ -308,6 +348,100 @@ class ProjectSkillValidationTest(unittest.TestCase):
                 errors,
             )
             self.assertNotIn("SECRET_SENTINEL", "\n".join(errors))
+
+    def test_rejects_an_escaping_reference_style_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            skill = self.create_skill(repository)
+            skill_file = skill / "SKILL.md"
+            skill_file.write_text(
+                skill_file.read_text(encoding="utf-8").replace(
+                    "Read [the rules](references/rules.md).",
+                    "Read [the rules][outside].\n\n[outside]: ../../../../outside.md",
+                ),
+                encoding="utf-8",
+            )
+
+            errors = validate_repository(repository)
+
+            self.assertTrue(
+                any("local link escapes the repository" in error for error in errors),
+                errors,
+            )
+
+    def test_rejects_a_missing_reference_style_link_definition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            skill = self.create_skill(repository)
+            skill_file = skill / "SKILL.md"
+            skill_file.write_text(
+                skill_file.read_text(encoding="utf-8").replace(
+                    "Read [the rules](references/rules.md).",
+                    "Read [the rules][missing].",
+                ),
+                encoding="utf-8",
+            )
+
+            errors = validate_repository(repository)
+
+            self.assertTrue(
+                any(
+                    "missing Markdown reference definition" in error for error in errors
+                ),
+                errors,
+            )
+
+    def test_rejects_a_formatted_missing_reference_style_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            skill = self.create_skill(repository)
+            skill_file = skill / "SKILL.md"
+            skill_file.write_text(
+                skill_file.read_text(encoding="utf-8").replace(
+                    "Read [the rules](references/rules.md).",
+                    "Read [**the rules**][missing].",
+                ),
+                encoding="utf-8",
+            )
+
+            errors = validate_repository(repository)
+
+            self.assertTrue(
+                any(
+                    "missing Markdown reference definition" in error for error in errors
+                ),
+                errors,
+            )
+
+    def test_ignores_reference_syntax_inside_an_inline_code_example(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            skill = self.create_skill(repository)
+            skill_file = skill / "SKILL.md"
+            skill_file.write_text(
+                skill_file.read_text(encoding="utf-8").replace(
+                    "Read [the rules](references/rules.md).",
+                    "Use `[label][missing]` only as a literal example.",
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual([], validate_repository(repository))
+
+    def test_accepts_a_valid_reference_style_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            skill = self.create_skill(repository)
+            skill_file = skill / "SKILL.md"
+            skill_file.write_text(
+                skill_file.read_text(encoding="utf-8").replace(
+                    "Read [the rules](references/rules.md).",
+                    "Read [the rules][rules].\n\n[rules]: references/rules.md",
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual([], validate_repository(repository))
 
     def test_rejects_a_skills_root_symlink(self) -> None:
         with (

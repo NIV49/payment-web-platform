@@ -2,7 +2,7 @@
 
 ## Verdict Order
 
-Evaluate the exact commit against the exact Rulebook version.
+Evaluate the exact commit against the evaluated Rulebook and Judge content digests declared by `evaluatedVersionKey`. Resolve both manifests from immutable Git objects; a version label alone is not identity.
 
 1. Snapshot integrity.
 2. Build and static checks.
@@ -41,7 +41,7 @@ Each finding must include:
 - trigger and observable impact;
 - code, test, data, or configuration evidence;
 - reproducible verification;
-- target commit and Rulebook version.
+- target commit, `evaluatedVersionKey`, `rulebookDigest`, and `judgeDigest`.
 
 ## Automatic PASS
 
@@ -49,6 +49,7 @@ Each finding must include:
 snapshot valid
 + all required builds and tests pass
 + all included rules have Judge coverage
++ every requested-approved Rule Card has one unique valid detached envelope containing two independently signed PASS approval reviews
 + no unresolved BLOCKER
 + all deviations adjudicated
 + traceability complete
@@ -60,6 +61,9 @@ An implementation agent's report is evidence, never the verdict.
 ## Loop Control
 
 - Fingerprint findings by normalized root cause, not wording.
-- Do not review the same version key twice.
+- Recompute `taskIdentityKey`, `evaluatedVersionKey`, and `reviewIdempotencyKey` with the versioned, namespaced canonical-JSON functions in `scripts/check_modernization_artifacts.py`; never implement them as raw string concatenation.
+- Reject a duplicate `reviewIdempotencyKey`. The same evaluated version must still receive the required independent reviews from distinct `reviewerId` values; different `reviewerRole` values are recorded, not inferred.
+- Require `startCommitSha == endCommitSha == targetCommitSha`; invalidate the result on any checkout, Rulebook, or Judge digest drift.
+- Verify every Review Result's Ed25519 signature against the reviewer ID, role, and key anchored in the protected baseline policy. A bundle-selected trust registry is not authoritative.
 - A fix requires a new commit and independent re-review.
 - After three unsuccessful valid review rounds, stop and request human decision.

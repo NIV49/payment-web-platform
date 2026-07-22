@@ -6,9 +6,13 @@ import re
 import sys
 from pathlib import Path
 
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
+
 
 DECISION_DOCUMENTS = {
     "IAM-GLOBAL-USER-MULTI-TENANT": (
+        "README.md",
         "docs/permission-refactor-product-requirements.md",
         "docs/new-payment-system-target-architecture.md",
         "docs/ai-context/permission/01-current-state.md",
@@ -20,7 +24,11 @@ DECISION_DOCUMENTS = {
 }
 ALLOWED_STATUSES = {"accepted", "pending", "superseded"}
 ALLOWED_MARKER_ATTRIBUTES = {"id", "ref", "status"}
-MARKER_PATTERN = re.compile(r"<!--\s*decision-status\s+(?P<attributes>.*?)\s*-->")
+MARKER_PATTERN = re.compile(
+    r"<!--\s*decision-status\s+(?P<attributes>.*?)\s*-->",
+    re.DOTALL,
+)
+MARKER_START_PATTERN = re.compile(r"<!--\s*decision-status\b")
 ATTRIBUTE_PATTERN = re.compile(r"(?P<name>[a-z]+)=(?P<value>[^\s=]+)")
 CANONICAL_ADR_PATTERN = re.compile(r"docs/adr/\d{4}-[a-z0-9]+(?:-[a-z0-9]+)*\.md")
 ADR_STATUS_PATTERN = re.compile(r"^Status:\s*(?P<status>[a-z]+)\.\s*$", re.MULTILINE)
@@ -28,13 +36,64 @@ ADR_DECISION_ID_PATTERN = re.compile(
     r"^Decision-ID:\s*(?P<decision_id>[A-Z0-9]+(?:-[A-Z0-9]+)*)\s*$",
     re.MULTILINE,
 )
+MARKDOWN = MarkdownIt("commonmark")
+
+
+def parse_markdown(content: str) -> list[Token]:
+    return MARKDOWN.parse(content)
+
+
+def top_level_paragraphs(tokens: list[Token]) -> list[str]:
+    paragraphs: list[str] = []
+    for index, token in enumerate(tokens[:-1]):
+        if token.type != "paragraph_open" or token.level != 0:
+            continue
+        inline = tokens[index + 1]
+        if inline.type == "inline" and inline.level == 1:
+            paragraphs.append(inline.content)
+    return paragraphs
 
 
 def parse_markers(document: Path) -> tuple[list[dict[str, str]], list[str]]:
     content = document.read_text(encoding="utf-8")
     markers: list[dict[str, str]] = []
     errors: list[str] = []
-    for marker_number, match in enumerate(MARKER_PATTERN.finditer(content), start=1):
+    marker_matches: list[re.Match[str]] = []
+    blockquote_depth = 0
+    for token in parse_markdown(content):
+        if token.type == "blockquote_open":
+            blockquote_depth += 1
+            continue
+        if token.type == "blockquote_close":
+            blockquote_depth = max(0, blockquote_depth - 1)
+            continue
+        if blockquote_depth or token.type in {"fence", "code_block"}:
+            continue
+
+        if token.type == "html_block":
+            stripped = token.content.strip()
+            canonical = MARKER_PATTERN.fullmatch(stripped)
+            if canonical is not None and token.level == 0:
+                marker_matches.append(canonical)
+            elif MARKER_START_PATTERN.search(token.content):
+                errors.append(
+                    f"{document}: malformed decision-status comment; "
+                    "noncanonical decision-status marker outside a code example"
+                )
+            continue
+
+        if token.type == "inline":
+            for child in token.children or []:
+                if child.type == "code_inline":
+                    continue
+                if MARKER_START_PATTERN.search(child.content):
+                    errors.append(
+                        f"{document}: malformed decision-status comment; "
+                        "noncanonical decision-status marker outside a code example"
+                    )
+                    break
+
+    for marker_number, match in enumerate(marker_matches, start=1):
         attributes: dict[str, str] = {}
         for token in match.group("attributes").split():
             item = ATTRIBUTE_PATTERN.fullmatch(token)
@@ -96,13 +155,16 @@ def validate_reference(
         return [f"{decision_id}: ref does not exist: {reference}"]
 
     content = evidence.read_text(encoding="utf-8")
-    statuses = [match.group("status") for match in ADR_STATUS_PATTERN.finditer(content)]
+    metadata = "\n".join(top_level_paragraphs(parse_markdown(content)))
+    statuses = [
+        match.group("status") for match in ADR_STATUS_PATTERN.finditer(metadata)
+    ]
     if statuses != ["accepted"]:
         return [f"{decision_id}: {status} ref is not an accepted ADR: {reference}"]
 
     declared_ids = [
         match.group("decision_id")
-        for match in ADR_DECISION_ID_PATTERN.finditer(content)
+        for match in ADR_DECISION_ID_PATTERN.finditer(metadata)
     ]
     if declared_ids != [decision_id]:
         rendered = ", ".join(declared_ids) if declared_ids else "none"

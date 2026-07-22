@@ -21,17 +21,19 @@ Treat every canonical source repository as read-only evidence. Never edit, forma
 Before starting a slice:
 
 1. Record the canonical repository path, full `sourceCommitSha`, and exact `evidencePaths` for every source repository involved, plus the target repository path and full `targetBaseSha`.
-2. Read tracked evidence with `git show <sourceCommitSha>:<evidencePath>`. If a filesystem is required, materialize that commit outside the legacy workspace with `git archive`, or use an isolated clone whose worktree is detached and pinned to `sourceCommitSha`. Never run `git worktree add` against a legacy repository because it mutates that repository's Git metadata. Keep the isolated checkout clean and verify its HEAD before and after evidence collection.
-3. Never read frozen evidence from a live checkout. Ignore its tracked modifications and untracked files. Accept non-Git evidence only when a human explicitly scopes the exact file and its SHA-256 digest is recorded before inspection.
-4. Store this source snapshot manifest in the Capability Slice contract described in [references/artifact-contracts.md](references/artifact-contracts.md). Do not silently replace a baseline path or SHA with the current working directory or HEAD.
+2. Inspect every component of each `evidencePath` in the declared Git tree before reading it. Reject Git mode `120000` (symbolic link), mode `160000` (gitlink/submodule), missing paths, and non-blob final entries. Read an accepted blob by object ID; never let the operating system follow a tracked link.
+3. Use `python3 scripts/check_modernization_evidence.py --repository <repositoryPath> --commit <sourceCommitSha> --path <evidencePath>`. Its Git plumbing disables replace objects, uses literal pathspecs, checks every tree component and reads the validated blob object directly. Do not substitute a raw `git show`, checkout path, or archive member read.
+4. If a filesystem is required, materialize that commit outside the legacy workspace with `git archive`, or use an isolated clone whose worktree is detached and pinned to `sourceCommitSha`. Read materialized evidence through directory file descriptors with `openat` semantics (`dir_fd`, `O_DIRECTORY`, and `O_NOFOLLOW`), compare the opened root inode with its `lstat`, require a regular final file, enforce the size limit, and verify the opened bytes equal the declared Git blob. Any unsupported platform or mismatch fails closed. Never run `git worktree add` against a legacy repository because it mutates that repository's Git metadata. Keep the isolated checkout clean and verify its HEAD before and after evidence collection.
+5. Never read frozen evidence from a live checkout. Ignore its tracked modifications and untracked files. Accept non-Git evidence only when a human explicitly scopes the exact file and its SHA-256 digest is recorded before inspection.
+6. Store this source snapshot manifest in the Capability Slice contract described in [references/artifact-contracts.md](references/artifact-contracts.md). Do not silently replace a baseline path or SHA with the current working directory or HEAD.
 
 Do not execute a legacy build, test, hook, or script unless a human explicitly approves it and it runs in a disposable least-privilege sandbox without credentials or access to target write paths. Static evidence collection is the default.
 
 ## Start Here
 
-1. Read `/Users/mac/Documents/demo/payment-web-platform/AGENTS.md` and its mandatory context routes.
-2. Read the relevant approved requirements, ADRs, contracts, known deviations, and domain context under `/Users/mac/Documents/demo/payment-web-platform/docs/`.
-3. Identify the immutable source snapshot manifest, target base commit, Rulebook version, and capability slice.
+1. Load the Capability Slice supplied by the human or integration loop. Resolve the fixed `.agents/payment-modernization-policy.json` bootstrap object from its full `targetBaseSha`; verify the policy's stable `targetRepositoryId`, declared canonical project path, and the runtime `--repository-root` mapping before accepting any target policy.
+2. Resolve every registered Rulebook and Judge path from `targetBaseSha`, using the same Git mode validation and object reads required for source evidence. The immutable policy registry includes `AGENTS.md`, mandatory requirements, ADRs, contracts, known deviations, domain context, this skill, checker code, and tests. Never read target rules from the mutable canonical checkout or slice worktree. A missing object, mode `120000`, mode `160000`, or checkout/SHA substitution blocks the slice.
+3. Compute the baseline `rulebookDigest` and `judgeDigest` from length-framed, sorted path-and-byte manifests resolved from `targetBaseSha`; labels such as `rulebookVersion` are display metadata only and are excluded from identity. Record the complete normative Capability Slice and derive its pre-implementation `taskIdentityKey` with the namespaced canonical-JSON algorithm implemented by `scripts/check_modernization_artifacts.py`.
 4. Choose exactly one path:
    - **Reimagine**: rebuild a capability from approved intent when the target model or architecture deliberately differs from legacy.
    - **Transform**: replace one bounded vertical slice when specified observable behavior must remain compatible.
@@ -71,16 +73,18 @@ Before implementation:
 - Assign stable rule IDs to every claimed behavior.
 - Define how each rule is judged independently of target private functions.
 - Confirm toolchains and isolated test infrastructure.
-- Freeze the version key: `turnId + commitSha + rulebookVersion`.
+- Freeze `taskIdentityKey` before implementation from the complete normative Capability Slice: `turnId`, `sliceId`, path, stable target repository ID, target base, source and non-Git evidence manifests, baseline Rulebook/Judge paths and digests, actors, inputs, outputs, rule IDs, dependencies, owned paths, forbidden changes, entry/exit criteria, and Judge commands. It deliberately excludes only the key itself, display labels, the host-specific runtime mapping, and the not-yet-created output commit.
 
 Before closing:
 
 - Run contract, invariant, adversarial, and affected regression tests.
-- Require independent read-only review of the exact commit.
+- After the output exists, resolve a second Rulebook/Judge manifest from full `targetCommitSha` and derive `evaluatedVersionKey` from `taskIdentityKey`, the output SHA, and those evaluated content digests.
+- Require two independent read-only reviews of that exact evaluated version. Each Review Result is an Ed25519-signed canonical JSON object whose reviewer key and role are pinned by the externally anchored baseline policy. Its purpose and approval subjects are signed. Deduplicate with the namespaced `reviewIdempotencyKey` over `evaluatedVersionKey`, `reviewerId`, and `reviewerRole`; never suppress the second reviewer merely because the evaluated version matches.
 - Deduplicate findings by root cause.
 - Resolve every BLOCKER and explicitly adjudicate every deviation.
 - Record traceability from rules to code and tests.
 - Confirm `python3 scripts/check_sensitive_artifacts.py` passes for every evidence-derived artifact.
+- Run the authoritative repository gate as `python3 scripts/check_modernization_artifacts.py --repository-root <runtime-target-repository> --commit <full-target-SHA> --trusted-policy-commit <protected-base-SHA>`. The positional bundle mode may validate a `draft` as local preflight; the tracked canonical artifact root accepts only `closed` bundles with exactly two independent signed PASS reviews.
 
 Read [references/judge-gates.md](references/judge-gates.md) for verdict rules and [references/artifact-contracts.md](references/artifact-contracts.md) for required outputs.
 
@@ -106,6 +110,10 @@ Parallelize only disjoint slices. Serialize changes to the same state machine, t
 - Review agents must not send findings to each other.
 - Only the integration loop merges slices and runs the authoritative full build.
 - Human operators edit rules and resolve genuine ambiguity; they do not manually grade ordinary tasks.
+
+Rule approval uses detached signatures and therefore has two immutable commits. Commit **B** records a Rule payload with requested `status: approved`; B is still ineffective and the repository gate intentionally fails closed without proof. Two trusted reviewers independently sign Review Results bound to B and its payload digest. A later commit **C** records the detached approval envelope without changing that payload. Only the valid envelope at C makes the rule effectively approved. Do not squash, rebase, or amend B after signing. Removing or downgrading an effectively approved rule is blocked until a trusted retirement protocol exists.
+
+The initial policy intentionally contains no trusted reviewer keys, so approval fails closed. Key bootstrap or rotation requires an externally authorized governance procedure and a protected policy anchor; a normal change cannot register its own keys. Repository-local checks also require external protection: enable a GitHub ruleset with Code Owner review for the governance paths in `.github/CODEOWNERS`, or enforce an organization-owned required workflow. A PR-controlled workflow cannot be its own root of trust.
 
 ## Queue Discipline
 

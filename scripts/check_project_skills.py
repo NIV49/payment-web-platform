@@ -2,19 +2,104 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
+
+import yaml
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode, Node, ScalarNode
 
 
 ALLOWED_FRONTMATTER_KEYS = {"description", "name"}
 NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FRONTMATTER_PATTERN = re.compile(r"\A---\n(?P<header>.*?)\n---(?:\n|\Z)", re.DOTALL)
-MARKDOWN_LINK_PATTERN = re.compile(r"\[[^\]]*\]\((?P<target>[^)]+)\)")
+UNRESOLVED_REFERENCE_LINK_PATTERN = re.compile(r"\[[^\]\n]+\]\[[^\]\n]*\]")
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
+MARKDOWN = MarkdownIt("commonmark")
+
+
+class UniqueKeySafeLoader(yaml.SafeLoader):
+    pass
+
+
+def construct_unique_mapping(
+    loader: UniqueKeySafeLoader,
+    node: MappingNode,
+    deep: bool = False,
+) -> dict[object, object]:
+    mapping: dict[object, object] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            duplicate = key in mapping
+        except TypeError as error:
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "found an unhashable mapping key",
+                key_node.start_mark,
+            ) from error
+        if duplicate:
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+UniqueKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    construct_unique_mapping,
+)
+
+
+def yaml_problem_line(error: yaml.YAMLError, line_offset: int = 0) -> str:
+    mark = getattr(error, "problem_mark", None)
+    if mark is None:
+        return ""
+    return f" at line {mark.line + 1 + line_offset}"
+
+
+def load_yaml_mapping(
+    content: str,
+    source: Path,
+    *,
+    line_offset: int = 0,
+) -> tuple[dict[object, object], MappingNode | None, list[str]]:
+    try:
+        value = yaml.load(content, Loader=UniqueKeySafeLoader)
+        node = yaml.compose(content, Loader=yaml.SafeLoader)
+    except yaml.YAMLError as error:
+        return (
+            {},
+            None,
+            [
+                f"{source}: content must be a valid YAML mapping"
+                f"{yaml_problem_line(error, line_offset)}; ambiguous plain YAML "
+                "scalars are not allowed"
+            ],
+        )
+
+    if not isinstance(value, dict) or not isinstance(node, MappingNode):
+        return {}, None, [f"{source}: content must be a valid YAML mapping"]
+    return value, node, []
+
+
+def mapping_value_nodes(node: MappingNode) -> dict[str, Node]:
+    values: dict[str, Node] = {}
+    for key_node, value_node in node.value:
+        if isinstance(key_node, ScalarNode):
+            values[key_node.value] = value_node
+    return values
 
 
 def parse_frontmatter(skill_file: Path) -> tuple[dict[str, str], str, list[str]]:
@@ -23,51 +108,35 @@ def parse_frontmatter(skill_file: Path) -> tuple[dict[str, str], str, list[str]]
     if match is None:
         return {}, content, [f"{skill_file}: invalid or missing YAML frontmatter"]
 
+    parsed, root_node, errors = load_yaml_mapping(
+        match.group("header"),
+        skill_file,
+        line_offset=1,
+    )
+    if root_node is None:
+        return {}, content[match.end() :], errors
+
     values: dict[str, str] = {}
-    errors: list[str] = []
-    for line_number, line in enumerate(match.group("header").splitlines(), start=2):
-        if not line.strip():
+    value_nodes = mapping_value_nodes(root_node)
+    for key, value in parsed.items():
+        if not isinstance(key, str) or key not in ALLOWED_FRONTMATTER_KEYS:
+            errors.append(f"{skill_file}: unsupported frontmatter key: {key}")
             continue
-        if line[:1].isspace() or ":" not in line:
+        value_node = value_nodes.get(key)
+        if (
+            not isinstance(value, str)
+            or not isinstance(value_node, ScalarNode)
+            or value_node.style != '"'
+        ):
             errors.append(
-                f"{skill_file}:{line_number}: frontmatter must use one-line key/value entries"
-            )
-            continue
-
-        key, raw_value = line.split(":", 1)
-        key = key.strip()
-        raw_value = raw_value.strip()
-        if key not in ALLOWED_FRONTMATTER_KEYS:
-            errors.append(
-                f"{skill_file}:{line_number}: unsupported frontmatter key: {key}"
-            )
-            continue
-        if key in values:
-            errors.append(
-                f"{skill_file}:{line_number}: duplicate frontmatter key: {key}"
-            )
-            continue
-        if not raw_value:
-            errors.append(f"{skill_file}:{line_number}: {key} must not be empty")
-            continue
-
-        if not raw_value.startswith('"'):
-            errors.append(
-                f"{skill_file}:{line_number}: ambiguous plain YAML scalar for {key}; "
+                f"{skill_file}: ambiguous plain YAML scalar for {key}; "
                 f"{key} must be a double-quoted string"
             )
             continue
-        try:
-            parsed = json.loads(raw_value)
-        except json.JSONDecodeError:
-            errors.append(
-                f"{skill_file}:{line_number}: invalid double-quoted value for {key}"
-            )
+        if not value.strip():
+            errors.append(f"{skill_file}: {key} must not be empty")
             continue
-        if not isinstance(parsed, str):
-            errors.append(f"{skill_file}:{line_number}: {key} must be a string")
-            continue
-        values[key] = parsed.strip()
+        values[key] = value.strip()
 
     return values, content[match.end() :], errors
 
@@ -116,74 +185,57 @@ def validate_openai_yaml(skill_directory: Path, skill_name: str | None) -> list[
         return [f"{metadata_file}: required UI metadata file is missing"]
 
     errors: list[str] = []
-    sections: dict[str, dict[str, object]] = {}
-    current_section: str | None = None
     allowed_fields = {
         "interface": {"default_prompt", "display_name", "short_description"},
         "policy": {"allow_implicit_invocation"},
     }
 
-    for line_number, line in enumerate(
-        metadata_file.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        if not line.strip() or line.lstrip().startswith("#"):
+    loaded, root_node, yaml_errors = load_yaml_mapping(
+        metadata_file.read_text(encoding="utf-8"),
+        metadata_file,
+    )
+    if root_node is None:
+        return yaml_errors
+    errors.extend(yaml_errors)
+
+    sections: dict[str, dict[str, object]] = {}
+    section_nodes = mapping_value_nodes(root_node)
+    for section, raw_fields in loaded.items():
+        if not isinstance(section, str) or section not in allowed_fields:
+            errors.append(f"{metadata_file}: unsupported top-level entry: {section}")
             continue
-        if "\t" in line:
-            errors.append(f"{metadata_file}:{line_number}: tabs are not allowed")
+        if not isinstance(raw_fields, dict):
+            errors.append(f"{metadata_file}: {section} must be a YAML mapping")
             continue
-        if not line.startswith(" "):
-            if line not in {"interface:", "policy:"}:
-                errors.append(
-                    f"{metadata_file}:{line_number}: unsupported top-level entry: {line}"
-                )
-                current_section = None
+
+        section_node = section_nodes.get(section)
+        if not isinstance(section_node, MappingNode):
+            errors.append(f"{metadata_file}: {section} must be a YAML mapping")
+            continue
+        field_nodes = mapping_value_nodes(section_node)
+        sections[section] = {}
+        for field, value in raw_fields.items():
+            if not isinstance(field, str) or field not in allowed_fields[section]:
+                errors.append(f"{metadata_file}: unsupported {section} field: {field}")
                 continue
-            current_section = line[:-1]
-            if current_section in sections:
+            value_node = field_nodes.get(field)
+            if section == "policy":
+                if type(value) is not bool:
+                    errors.append(
+                        f"{metadata_file}: allow_implicit_invocation must be true or false"
+                    )
+                    continue
+            elif (
+                not isinstance(value, str)
+                or not value
+                or not isinstance(value_node, ScalarNode)
+                or value_node.style != '"'
+            ):
                 errors.append(
-                    f"{metadata_file}:{line_number}: duplicate section: {current_section}"
-                )
-            sections.setdefault(current_section, {})
-            continue
-
-        if (
-            current_section is None
-            or not line.startswith("  ")
-            or line.startswith("   ")
-        ):
-            errors.append(f"{metadata_file}:{line_number}: invalid indentation")
-            continue
-        field, separator, raw_value = line.strip().partition(":")
-        if not separator or field not in allowed_fields[current_section]:
-            errors.append(
-                f"{metadata_file}:{line_number}: unsupported {current_section} field: {field}"
-            )
-            continue
-        if field in sections[current_section]:
-            errors.append(f"{metadata_file}:{line_number}: duplicate field: {field}")
-            continue
-
-        raw_value = raw_value.strip()
-        if current_section == "policy":
-            if raw_value not in {"true", "false"}:
-                errors.append(
-                    f"{metadata_file}:{line_number}: allow_implicit_invocation must be true or false"
+                    f"{metadata_file}: interface strings must be double-quoted"
                 )
                 continue
-            sections[current_section][field] = raw_value == "true"
-            continue
-
-        try:
-            parsed = json.loads(raw_value)
-        except json.JSONDecodeError:
-            errors.append(
-                f"{metadata_file}:{line_number}: interface strings must be double-quoted"
-            )
-            continue
-        if not isinstance(parsed, str) or not parsed:
-            errors.append(f"{metadata_file}:{line_number}: {field} must be a string")
-            continue
-        sections[current_section][field] = parsed
+            sections[section][field] = value
 
     for section, required_fields in allowed_fields.items():
         if section not in sections:
@@ -213,28 +265,89 @@ def validate_openai_yaml(skill_directory: Path, skill_name: str | None) -> list[
     return errors
 
 
+def iter_tokens(tokens: list[Token]) -> Iterator[Token]:
+    for token in tokens:
+        yield token
+        if token.children:
+            yield from iter_tokens(token.children)
+
+
+def validate_link_target(
+    document: Path,
+    repository: Path,
+    raw_target: str,
+) -> str | None:
+    target_text = raw_target.strip()
+    if not target_text or target_text.startswith("#"):
+        return None
+    if "\\" in target_text or "\x00" in target_text:
+        return f"{document}: invalid local link target: {raw_target}"
+
+    parsed = urlsplit(target_text)
+    scheme = parsed.scheme.lower()
+    if scheme in {"http", "https", "mailto"}:
+        return None
+    if scheme or parsed.netloc:
+        return f"{document}: unsupported link scheme or authority: {raw_target}"
+
+    relative_target = unquote(parsed.path)
+    if not relative_target:
+        return None
+    target = (document.parent / relative_target).resolve()
+    try:
+        target.relative_to(repository)
+    except ValueError:
+        return f"{document}: local link escapes the repository: {raw_target}"
+    if not target.exists():
+        return f"{document}: missing local link target: {raw_target}"
+    return None
+
+
 def validate_links(skill_directory: Path, repository: Path) -> list[str]:
     errors: list[str] = []
     repository = repository.resolve()
     for document in sorted(skill_directory.rglob("*.md")):
         content = document.read_text(encoding="utf-8")
-        for match in MARKDOWN_LINK_PATTERN.finditer(content):
-            raw_target = match.group("target").strip().split(maxsplit=1)[0].strip("<>")
-            if raw_target.startswith(("#", "http://", "https://", "mailto:")):
-                continue
-            relative_target = unquote(raw_target.split("#", 1)[0])
-            if not relative_target:
-                continue
-            target = (document.parent / relative_target).resolve()
-            try:
-                target.relative_to(repository)
-            except ValueError:
+        environment: dict[str, object] = {}
+        tokens = MARKDOWN.parse(content, environment)
+        checked_targets: set[str] = set()
+        for inline in (token for token in tokens if token.type == "inline"):
+            visible_text = "".join(
+                child.content for child in inline.children or [] if child.type == "text"
+            )
+            reference_match = UNRESOLVED_REFERENCE_LINK_PATTERN.search(visible_text)
+            if reference_match is not None:
                 errors.append(
-                    f"{document}: local link escapes the repository: {raw_target}"
+                    f"{document}: missing Markdown reference definition: "
+                    f"{reference_match.group(0)}"
                 )
+
+        for token in iter_tokens(tokens):
+            raw_target: str | None = None
+            if token.type == "link_open":
+                raw_target = token.attrGet("href")
+            elif token.type == "image":
+                raw_target = token.attrGet("src")
+
+            if raw_target is None or raw_target in checked_targets:
                 continue
-            if not target.exists():
-                errors.append(f"{document}: missing local link target: {raw_target}")
+            checked_targets.add(raw_target)
+            error = validate_link_target(document, repository, raw_target)
+            if error is not None:
+                errors.append(error)
+
+        references = environment.get("references", {})
+        if isinstance(references, dict):
+            for reference in references.values():
+                if not isinstance(reference, dict):
+                    continue
+                raw_target = reference.get("href")
+                if not isinstance(raw_target, str) or raw_target in checked_targets:
+                    continue
+                checked_targets.add(raw_target)
+                error = validate_link_target(document, repository, raw_target)
+                if error is not None:
+                    errors.append(error)
     return errors
 
 

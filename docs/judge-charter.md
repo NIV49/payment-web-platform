@@ -128,8 +128,9 @@ Agent 声称“完成”不构成完成。只有指定版本通过 Judge，任�
 每个队列项必须包含：
 
 - 唯一问题指纹；
-- 目标 commit、能力切片和 Rulebook 版本；
-- 被违反的 `ruleId` 或失败的 Judge；
+- 目标 commit、能力切片和绑定规则/Judge 内容摘要的 `evaluatedVersionKey`；
+- 带类型的失败来源：规则失败记录 `ruleId`，Judge、构建、测试或审查失败记录对应类型和稳定 `checkId`；
+- 被违反的 `ruleId` 或带类型的 `checkId`，不得为非规则失败伪造领域规则；
 - 可复现输入、控制流和证据；
 - `BLOCKER` 或 `SHOULD_FIX`；
 - 依赖项、负责人和状态；
@@ -155,12 +156,18 @@ Agent 声称“完成”不构成完成。只有指定版本通过 Judge，任�
 
 规则治理：
 
-1. Agent 只能提交候选规则，不能直接使其生效。
-2. 候选规则必须由两名独立审查者确认。
+1. Agent 可以提交 `candidate`，也可以在独立 commit B 中把 payload 的请求状态写为 `approved`；该字段本身不产生有效批准，缺少可信 envelope 时门禁必须失败。
+2. 请求批准的规则必须由两名独立审查者确认；两份 Ed25519 签名结果都必须绑定同一 commit B、同一 `evaluatedVersionKey`、同一 Rulebook/Judge 内容摘要和同一 Rule payload digest，并且是快照有效的 PASS。review purpose 必须为 `rule-approval`，被批准的 subject 也必须进入签名内容。
 3. 规则生效时必须同时增加回归测试。
 4. Rulebook 变化触发受影响能力切片重新验收。
 5. 禁止修改或删除规则来绕过失败。
 6. 规则废弃必须保留原因和决策记录。
+
+双签完成后，由后续 commit C 只提交 detached approval envelope：完整 `approvalCommit`、两名独立审查者的 `approvedBy`、两条可解析的 `approvalReviewRefs` 和签名 Review Results。C 必须保持 B 的 Rule payload 不变；只有 C 上的仓库级门禁通过后，规则才是 effective approved。B 签名后禁止 squash、rebase 或 amend。删除 envelope、删除规则、把 effective approved 降回 candidate，或更换 reviewer trust registry，均必须 fail closed；当前尚未定义可信 retirement/key-rotation 协议。
+
+Bundle 必须显式声明 `lifecycleStatus`。`draft` 只允许 positional 本地预检；canonical artifact root 只接收 `closed`，并要求恰好两名 reviewer ID 和 key ID 均不同的有效签名 PASS。跨 bundle 重复引用完全相同的 Review Result 可以去重，但同一 `reviewResultId` 或 `reviewIdempotencyKey` 对应不同签名内容时必须拒绝。
+
+Reviewer 公钥、角色、稳定 target repository ID、Rulebook/Judge 路径由 `.agents/payment-modernization-policy.json` 固定。PR 以受保护基准分支 SHA、`main` push 以上一次 main SHA 作为外部 policy anchor；bundle 不能用自己先登记的公钥自签。当前 registry 为空，因此规则批准有意保持不可用，直到独立人工流程完成 key bootstrap。Rulebook 以长度分帧、按路径排序的实际内容 SHA-256 摘要作为身份；人工标签只用于展示。
 
 ## 9. 运行隔离与幂等
 
@@ -170,14 +177,42 @@ Agent 声称“完成”不构成完成。只有指定版本通过 Judge，任�
 - 审查 Agent 只读，不得修改代码。
 - 只有集成循环负责合并、完整构建和全量回归。
 - 并行 Agent 只运行切片级快速验证。
-- 任务版本键为：
+- 实现前任务身份使用 namespaced canonical JSON，而不是歧义字符串拼接：
 
 ```text
-turnId + commitSha + rulebookVersion
+taskIdentityKey = sha256(canonical-json({
+  namespace: "payment-modernization-task-v2",
+  turnId, sliceId, path, targetRepositoryId, targetBaseSha,
+  sourceSnapshots, nonGitEvidence,
+  baselineRulebookPaths, baselineRulebookDigest,
+  baselineJudgePaths, baselineJudgeDigest,
+  actors, inputs, outputs, ruleIds, dependencies, ownedPaths,
+  forbiddenChanges, entryCriteria, exitCriteria, judgeCommands
+}))
 ```
 
-- 相同版本键禁止重复实现、审查或合并。
-- 工作区不干净、SHA 不一致或规则版本漂移时，本轮结果作废。
+`taskIdentityKey` 不包含尚未产生的输出 commit、host-specific runtime path 或 display-only manifest label；同一任务身份禁止重复实现或合并。输出 commit 产生后，先从目标 commit 重新计算 evaluated Rulebook/Judge 摘要，再得到评估版本：
+
+```text
+evaluatedVersionKey = sha256(canonical-json({
+  namespace: "payment-modernization-evaluated-version-v2",
+  taskIdentityKey, targetCommitSha,
+  evaluatedRulebookDigest, evaluatedJudgeDigest
+}))
+```
+
+每个独立审查的幂等键为：
+
+```text
+reviewIdempotencyKey = sha256(canonical-json({
+  namespace: "payment-modernization-review-v2",
+  evaluatedVersionKey, reviewerId, reviewerRole
+}))
+```
+
+- 相同 `reviewIdempotencyKey` 禁止重复审查；不同 `reviewerId` 的审查必须能够针对同一 `evaluatedVersionKey` 分别完成，不能被版本级去重误杀。
+- Rulebook 和 Judge 摘要必须由指定 commit 中长度分帧、按路径排序的路径与实际 bytes 计算，不能用可变标签代替。baseline 与 evaluated manifests 分别绑定 `targetBaseSha` 和 `targetCommitSha`，不能混用。
+- 工作区不干净、目标 SHA 不一致、`startCommitSha`、`endCommitSha`、`targetCommitSha` 三者不完全相等，或规则/Judge 摘要漂移时，本轮结果作废。
 
 ## 10. 测试数据与 Oracle
 

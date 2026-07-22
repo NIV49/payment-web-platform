@@ -71,11 +71,13 @@ User: payment_dev
 Password: payment_dev
 ```
 
-这些账号和密码只属于绑定 `127.0.0.1` 的本地开发 fixture。敏感信息扫描器仅按 `文件 + 行号 + 规则 + 值哈希` 放行已登记的本地说明；复制到其他位置仍会失败，生产环境不得复用。
+这些账号和密码只属于绑定 `127.0.0.1` 的本地开发 fixture。敏感信息扫描器仅按 `文件 + 行号 + 规则 + 值哈希 + loopback/local profile 上下文` 放行已登记的本地说明；复制到其他位置或把 Host 改为非本机地址都会失败，生产环境不得复用。
 
 ## AI 开发与 Judge
 
 所有开发任务先读 [仓库开发规则](AGENTS.md) 和 [AI 上下文入口](docs/ai-context/README.md)。迁移、重构、Judge 或多 Agent 能力切片还必须遵循 [Judge Charter](docs/judge-charter.md)；项目级 [payment-modernization skill](.agents/skills/payment-modernization/SKILL.md) 提供 Reimagine/Transform 路由、产物契约和门禁流程。
+
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
 
 Judge 与 skill 不覆盖产品决策。全局 User 是否允许关联多个 TenantMembership、工作空间选择和 session realm/Token audience 方案仍为待确认项，只有产品基线或 accepted ADR 可以使其生效。
 

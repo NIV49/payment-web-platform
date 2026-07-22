@@ -52,7 +52,10 @@ class PaymentModernizationGovernanceTest(unittest.TestCase):
         self.assertIn("multi-repository workspace", skill)
         self.assertIn("exclude `_worktrees`", skill)
         self.assertIn("live checkout", skill)
-        self.assertIn("`git show <sourceCommitSha>:<evidencePath>`", skill)
+        self.assertIn("scripts/check_modernization_evidence.py", skill)
+        self.assertIn("disables replace objects", skill)
+        self.assertIn("Do not substitute a raw `git show`", skill)
+        self.assertIn("`O_NOFOLLOW`", skill)
         self.assertIn(
             "whose worktree is detached and pinned to `sourceCommitSha`", skill
         )

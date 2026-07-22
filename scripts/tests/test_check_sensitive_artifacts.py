@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -7,6 +8,7 @@ from pathlib import Path
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
+REPOSITORY = SCRIPTS_DIR.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from check_sensitive_artifacts import scan_repository  # noqa: E402
@@ -39,9 +41,11 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            lines = [""] * 71
-            lines[59] = "Local fixture: `admin / Admin@123456`."
-            lines[70] = "Password: payment_dev"
+            lines = (
+                REPOSITORY.joinpath("README.md")
+                .read_text(encoding="utf-8")
+                .splitlines()[:71]
+            )
             readme = "\n".join(lines) + "\n"
             self.write_artifact(repository, readme, "README.md")
             self.write_artifact(repository, "Password: payment_dev\n")
@@ -61,6 +65,72 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             self.assertTrue(
                 any("INLINE_CREDENTIAL_PAIR" in error for error in copied_pair_errors),
                 copied_pair_errors,
+            )
+
+    def test_rejects_an_allowlisted_password_when_its_host_is_not_loopback(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            lines = (
+                REPOSITORY.joinpath("README.md")
+                .read_text(encoding="utf-8")
+                .splitlines()[:71]
+            )
+            lines[66] = "Host: database.production.example.com"
+            self.write_artifact(repository, "\n".join(lines) + "\n", "README.md")
+
+            errors = scan_repository(repository, ("README.md",))
+
+            self.assertTrue(
+                any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors),
+                errors,
+            )
+
+    def test_rejects_a_production_host_despite_an_unrelated_loopback_comment(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            lines = (
+                REPOSITORY.joinpath("README.md")
+                .read_text(encoding="utf-8")
+                .splitlines()[:71]
+            )
+            lines[66] = "Host: database.production.example.com"
+            lines[70] = f"{lines[70]} # unrelated localhost note"
+            self.write_artifact(repository, "\n".join(lines) + "\n", "README.md")
+
+            errors = scan_repository(repository, ("README.md",))
+
+            self.assertTrue(
+                any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors),
+                errors,
+            )
+
+    def test_rejects_a_changed_production_endpoint_on_an_allowlisted_line(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            approved_line = (
+                REPOSITORY.joinpath("README.md")
+                .read_text(encoding="utf-8")
+                .splitlines()[59]
+            )
+            changed_line = approved_line.replace(
+                "http://127.0.0.1:8080/api",
+                "https://api.production.example.com",
+            )
+            lines = [""] * 60
+            lines[59] = changed_line
+            self.write_artifact(repository, "\n".join(lines) + "\n", "README.md")
+
+            errors = scan_repository(repository, ("README.md",))
+
+            self.assertTrue(
+                any("INLINE_CREDENTIAL_PAIR" in error for error in errors),
+                errors,
             )
 
     def test_detects_a_secret_without_echoing_its_value(self) -> None:
@@ -92,6 +162,67 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             self.assertEqual(2, rendered.count("GENERIC_SECRET_ASSIGNMENT"), errors)
             for value in values:
                 self.assertNotIn(value, rendered)
+
+    def test_detects_json_namespaced_backtick_aws_and_safe_prefix_secrets(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            values = (
+                "lowercase-only",
+                "weakpassword",
+                "backtick-secret",
+                "abcdefghijklmnopqrstuvwxyz0123456789ABCD",
+                "null#secret",
+            )
+            self.write_artifact(
+                repository,
+                "\n".join(
+                    (
+                        f'{{"password": "{values[0]}"}}',
+                        f"DATABASE_PASSWORD={values[1]}",
+                        f"service.password=`{values[2]}`",
+                        f"AWS_SECRET_ACCESS_KEY={values[3]}",
+                        f"password={values[4]}",
+                    )
+                ),
+            )
+
+            errors = scan_repository(repository, ("docs",))
+            rendered = "\n".join(errors)
+
+            self.assertEqual(5, rendered.count("GENERIC_SECRET_ASSIGNMENT"), errors)
+            for value in values:
+                self.assertNotIn(value, rendered)
+
+    def test_detects_a_weak_inline_account_password(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            values = ("lowerpassword", "123456")
+            self.write_artifact(
+                repository,
+                f"admin / {values[0]}\nuser / {values[1]}\n",
+            )
+
+            errors = scan_repository(repository, ("docs",))
+            rendered = "\n".join(errors)
+
+            self.assertEqual(2, rendered.count("INLINE_CREDENTIAL_PAIR"), errors)
+            for value in values:
+                self.assertNotIn(value, rendered)
+
+    def test_rejects_utf16le_without_a_bom_instead_of_silently_skipping_it(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            artifact = repository / "docs/evidence.txt"
+            artifact.parent.mkdir(parents=True)
+            artifact.write_bytes("password=utf16-secret\n".encode("utf-16le"))
+
+            errors = scan_repository(repository, ("docs",))
+
+            self.assertTrue(any("NON_UTF8" in error for error in errors), errors)
 
     def test_detects_a_private_key_header(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -182,6 +313,106 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             errors = scan_repository(repository, ("backend/fixtures/legacy.txt",))
 
             self.assertTrue(
+                any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors),
+                errors,
+            )
+
+    def test_default_scan_discovers_git_tracked_test_fixture_resources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            resources = (
+                "scripts/tests/fixtures/legacy-payload.txt",
+                "backend/src/test/resources/request.txt",
+                "review/evidence/trace.log",
+            )
+            for index, relative_path in enumerate(resources):
+                self.write_artifact(
+                    repository,
+                    f"password=tracked-fixture-secret-{index}\n",
+                    relative_path,
+                )
+            subprocess.run(
+                ("git", "init", "--quiet"),
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ("git", "add", *resources),
+                cwd=repository,
+                check=True,
+            )
+
+            errors = scan_repository(repository)
+
+            self.assertEqual(
+                3,
+                sum("GENERIC_SECRET_ASSIGNMENT" in error for error in errors),
+                errors,
+            )
+
+    def test_default_scan_discovers_fixture_named_files_under_test_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            resources = (
+                "tests/payment.fixture.json",
+                "frontend/portal/tests/data/payment.json",
+            )
+            for index, relative_path in enumerate(resources):
+                self.write_artifact(
+                    repository,
+                    f'{{"password":"test-asset-secret-{index}"}}\n',
+                    relative_path,
+                )
+            subprocess.run(("git", "init", "--quiet"), cwd=repository, check=True)
+            subprocess.run(("git", "add", *resources), cwd=repository, check=True)
+
+            errors = scan_repository(repository)
+
+            self.assertEqual(
+                2,
+                sum("GENERIC_SECRET_ASSIGNMENT" in error for error in errors),
+                errors,
+            )
+
+    def test_default_scan_fails_closed_for_a_tracked_binary_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            artifact = repository / "scripts/tests/fixtures/capture.bin"
+            artifact.parent.mkdir(parents=True)
+            artifact.write_bytes(b"\x00password=binary-secret\xff")
+            subprocess.run(("git", "init", "--quiet"), cwd=repository, check=True)
+            subprocess.run(
+                ("git", "add", "scripts/tests/fixtures/capture.bin"),
+                cwd=repository,
+                check=True,
+            )
+
+            errors = scan_repository(repository)
+
+            self.assertTrue(any("NON_UTF8" in error for error in errors), errors)
+
+    def test_default_scan_does_not_treat_test_source_as_fixture_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.write_artifact(
+                repository,
+                'EXAMPLE = "password=synthetic-test-value"\n',
+                "scripts/tests/test_example.py",
+            )
+            subprocess.run(
+                ("git", "init", "--quiet"),
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ("git", "add", "scripts/tests/test_example.py"),
+                cwd=repository,
+                check=True,
+            )
+
+            errors = scan_repository(repository)
+
+            self.assertFalse(
                 any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors),
                 errors,
             )

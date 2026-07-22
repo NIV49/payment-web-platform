@@ -22,7 +22,7 @@ Select equivalence strength explicitly:
 
 ## 2. Bind the Plan
 
-Read the approved modernization brief and capability spec. Stop if the slice is absent or entry criteria are unmet.
+Read the fixed policy registry, approved modernization brief, capability spec, Rulebook, and Judge inputs from the declared `targetBaseSha`, never from the mutable canonical checkout or slice worktree. Verify the baseline `rulebookDigest` and `judgeDigest`, freeze `taskIdentityKey` over the complete normative Capability Slice, and stop if the slice is absent, a digest drifts, or entry criteria are unmet.
 
 Present:
 
@@ -61,7 +61,7 @@ Run:
 - adversarial boundary tests;
 - affected integration tests.
 
-Then run two independent read-only reviews of the exact commit. Fix confirmed findings and rerun the same Judge version.
+Then resolve evaluated Rulebook/Judge manifests from the exact output commit and derive `evaluatedVersionKey` from their digests plus the frozen task identity. Run two independent read-only reviews of that exact evaluated version. Each result is signed by a reviewer key anchored in the protected baseline policy and uses a distinct namespaced `reviewIdempotencyKey` derived from its `reviewerId` and `reviewerRole`; fix confirmed findings and rerun against the same immutable Judge content.
 
 ## 6. Record Traceability
 

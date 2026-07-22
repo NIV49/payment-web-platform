@@ -4,11 +4,53 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 
 DEFAULT_TARGETS = (".agents", "docs", "AGENTS.md", "README.md")
+TRACKED_ARTIFACT_DIRECTORY_NAMES = {
+    "__fixtures__",
+    "__snapshots__",
+    "evidence",
+    "evidences",
+    "fixture",
+    "fixtures",
+    "snapshots",
+    "test-data",
+    "test-fixtures",
+    "testdata",
+}
+TRACKED_ARTIFACT_FILENAME_MARKERS = (
+    ".evidence.",
+    ".fixture.",
+    ".payload.",
+    ".snapshot.",
+    ".trace.",
+)
+TRACKED_TEST_ROOT_NAMES = {"__tests__", "test", "tests"}
+TRACKED_TEST_ASSET_SUFFIXES = {
+    ".bin",
+    ".cfg",
+    ".conf",
+    ".csv",
+    ".env",
+    ".har",
+    ".http",
+    ".json",
+    ".log",
+    ".md",
+    ".pem",
+    ".properties",
+    ".snap",
+    ".sql",
+    ".txt",
+    ".toml",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
 MAX_TEXT_FILE_BYTES = 5 * 1024 * 1024
 SAFE_LITERAL_VALUES = {
     "cookie-session",
@@ -53,23 +95,65 @@ APPROVED_FINDING_HASHES = {
         "ad89b64d66caa8e30e5d5ce4a9763f4ecc205814c412175f3e2c50027471426d",
     ): "Local-profile API contract fixture",
 }
+APPROVED_FINDING_CONTEXTS = {
+    ("README.md", 60, "INLINE_CREDENTIAL_PAIR"): (
+        "exact_line",
+        "518f9e3632b794406cbfcf8ad00bebabc838f55dd1063faf347856f674af8a12",
+    ),
+    ("README.md", 71, "GENERIC_SECRET_ASSIGNMENT"): (
+        "host_block",
+        "2424bdd7f718ac372ec02673eb89a31ccd105ca26c0454ce21affe6032006bb1",
+    ),
+    (
+        "docs/ai-context/backend/README.md",
+        299,
+        "USER_PASSWORD_PAIR",
+    ): (
+        "exact_line",
+        "6f9ae979a5eb1d4af1843c938021cf985ed0f8fdba2229c80fb0cd0b7f84efa1",
+    ),
+    (
+        "docs/ai-context/backend/README.md",
+        310,
+        "INLINE_CREDENTIAL_PAIR",
+    ): (
+        "exact_line",
+        "13accd0745652975ecd5204ad0aa1959706c015a75e162556525d0fa3c1beb49",
+    ),
+    (
+        "docs/ai-contract/identity-admin-api-contract.md",
+        281,
+        "DOCUMENTED_PASSWORD",
+    ): (
+        "exact_line",
+        "c861e4650c36f90feccd9183f843cae3a1cc9ed83d691b2120ec3117f34103a1",
+    ),
+}
 PLACEHOLDER_PATTERN = re.compile(
     r"(?:\$\{[A-Z][A-Z0-9_]*\}|\{\{[A-Z][A-Z0-9_]*\}\}|<[A-Z][A-Z0-9_]*>)"
 )
+MASK_PATTERN = re.compile(r"(?:\*{3,}|x{3,}|•{3,})", re.IGNORECASE)
+SENSITIVE_KEY_PATTERN = (
+    r"(?:[A-Za-z][A-Za-z0-9]*[_.-])*"
+    r"(?:api[_-]?key|client[_-]?secret|password|passwd|"
+    r"access[_-]?token|refresh[_-]?token|auth[_-]?token|"
+    r"aws[_-]?secret[_-]?access[_-]?key)"
+)
+SECRET_ASSIGNMENT_PREFIX = (
+    rf"(?<![A-Za-z0-9_])(?:[\"']?){SENSITIVE_KEY_PATTERN}(?:[\"']?)"
+    r"\s*[:=]\s*"
+)
 GENERIC_SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"\b(?:api[_-]?key|client[_-]?secret|password|passwd|"
-    r"access[_-]?token|refresh[_-]?token|auth[_-]?token)\b"
-    r"\s*[:=]\s*(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
+    SECRET_ASSIGNMENT_PREFIX + r"(?P<quote>[\"'`])(?P<value>.*?)(?P=quote)",
     re.IGNORECASE,
 )
 UNQUOTED_SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"\b(?:api[_-]?key|client[_-]?secret|password|passwd|"
-    r"access[_-]?token|refresh[_-]?token|auth[_-]?token)\b"
-    r"\s*[:=]\s*(?P<value>(?![\"'])[^\s,;#`]+)",
+    SECRET_ASSIGNMENT_PREFIX + r"(?P<value>(?![\"'`])[^\s,;]+)",
     re.IGNORECASE,
 )
 INLINE_CREDENTIAL_PAIR_PATTERN = re.compile(
-    r"\b[A-Za-z0-9._-]{3,}\s+/\s+(?P<value>[^\s`,;，。]{8,})"
+    r"\b(?P<user>[A-Za-z0-9._-]{3,})\s+/\s+"
+    r"(?P<value>[^\s`,;，。]{4,})"
 )
 USER_PASSWORD_PAIR_PATTERN = re.compile(
     r"用户/密码\s*`?[^`\s/]+\s*/\s*(?P<value>[^`\s，。；;]+)"
@@ -107,6 +191,17 @@ HIGH_CONFIDENCE_PATTERNS = (
         ),
     ),
 )
+HOST_FIELD_PATTERN = re.compile(
+    r"^\s*(?:Host|主机)\s*[:：]\s*(?P<host>[^\s`]+)",
+    re.IGNORECASE,
+)
+COMMON_ACCOUNT_NAMES = {
+    "admin",
+    "administrator",
+    "root",
+    "user",
+    "username",
+}
 
 
 def is_safe_placeholder(value: str) -> bool:
@@ -114,6 +209,7 @@ def is_safe_placeholder(value: str) -> bool:
     return (
         stripped.casefold() in SAFE_LITERAL_VALUES
         or PLACEHOLDER_PATTERN.fullmatch(stripped) is not None
+        or MASK_PATTERN.fullmatch(stripped) is not None
     )
 
 
@@ -146,14 +242,60 @@ def looks_like_password(value: str) -> bool:
     )
 
 
+def looks_like_inline_credential(user: str, value: str) -> bool:
+    return (
+        user.casefold() in COMMON_ACCOUNT_NAMES
+        or looks_like_password(value)
+        or value.casefold()
+        in {"admin123", "changeme", "password", "password1", "password123"}
+    )
+
+
+def has_required_approval_context(
+    context: tuple[str, str],
+    lines: list[str],
+    line_number: int,
+) -> bool:
+    context_kind, expected_digest = context
+    line_index = line_number - 1
+    if not 0 <= line_index < len(lines):
+        return False
+    if context_kind == "exact_line":
+        material = lines[line_index].strip()
+    elif context_kind == "host_block":
+        host_index: int | None = None
+        for candidate in range(line_index - 1, max(-1, line_index - 9), -1):
+            if HOST_FIELD_PATTERN.search(lines[candidate]):
+                host_index = candidate
+                break
+        if host_index is None:
+            return False
+        material = "\n".join(
+            line.strip() for line in lines[host_index : line_index + 1]
+        )
+    else:
+        return False
+    actual_digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return actual_digest == expected_digest
+
+
 def is_approved_finding(
     path: str,
     line_number: int,
     rule_id: str,
     value: str,
+    lines: list[str] | None = None,
 ) -> bool:
     digest = hashlib.sha256(value.strip().encode("utf-8")).hexdigest()
-    return (path, line_number, rule_id, digest) in APPROVED_FINDING_HASHES
+    key = (path, line_number, rule_id, digest)
+    if key not in APPROVED_FINDING_HASHES or lines is None:
+        return False
+    required_context = APPROVED_FINDING_CONTEXTS.get((path, line_number, rule_id))
+    return required_context is not None and has_required_approval_context(
+        required_context,
+        lines,
+        line_number,
+    )
 
 
 def display_path(path: Path, repository: Path) -> str:
@@ -168,6 +310,7 @@ def collect_files(
     targets: tuple[str, ...],
 ) -> tuple[list[Path], list[str]]:
     files: list[Path] = []
+    seen_files: set[Path] = set()
     errors: list[str] = []
     for target in targets:
         path = repository / target
@@ -186,7 +329,9 @@ def collect_files(
             errors.append(f"{label}: MISSING_TARGET: sensitive-scan target is missing")
             continue
         if path.is_file():
-            files.append(path)
+            if path not in seen_files:
+                files.append(path)
+                seen_files.add(path)
             continue
 
         for entry in sorted(path.rglob("*")):
@@ -196,8 +341,47 @@ def collect_files(
                     f"{entry_label}: SYMLINK: sensitive-scan targets must not contain links"
                 )
             elif entry.is_file():
-                files.append(entry)
+                if entry not in seen_files:
+                    files.append(entry)
+                    seen_files.add(entry)
     return files, errors
+
+
+def is_tracked_evidence_or_fixture(relative_path: str) -> bool:
+    parts = tuple(part.casefold() for part in Path(relative_path).parts)
+    if any(part in TRACKED_ARTIFACT_DIRECTORY_NAMES for part in parts[:-1]):
+        return True
+    filename = parts[-1] if parts else ""
+    if any(marker in filename for marker in TRACKED_ARTIFACT_FILENAME_MARKERS):
+        return True
+    if any(part in TRACKED_TEST_ROOT_NAMES for part in parts[:-1]):
+        if Path(filename).suffix.casefold() in TRACKED_TEST_ASSET_SUFFIXES:
+            return True
+    return any(
+        parts[index : index + 3] == ("src", "test", "resources")
+        for index in range(max(0, len(parts) - 2))
+    )
+
+
+def discover_tracked_artifact_targets(
+    repository: Path,
+) -> tuple[tuple[str, ...], list[str]]:
+    result = subprocess.run(
+        ("git", "-C", str(repository), "ls-files", "-z", "--cached"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode != 0:
+        return (), [
+            "repository: GIT_INDEX_UNAVAILABLE: default scan requires a Git index"
+        ]
+
+    tracked_paths = result.stdout.decode("utf-8", errors="surrogateescape").split("\0")
+    targets = tuple(
+        path for path in tracked_paths if path and is_tracked_evidence_or_fixture(path)
+    )
+    return targets, []
 
 
 def scan_file(path: Path, repository: Path) -> list[str]:
@@ -212,8 +396,19 @@ def scan_file(path: Path, repository: Path) -> list[str]:
     except UnicodeDecodeError:
         return [f"{label}: NON_UTF8: artifact requires an approved binary scanner"]
 
+    if any(
+        character == "\x00"
+        or (ord(character) < 32 and character not in {"\n", "\r", "\t"})
+        or ord(character) == 127
+        for character in content
+    ):
+        return [
+            f"{label}: NON_UTF8: artifact contains NUL/control bytes and was not scanned"
+        ]
+
     errors: list[str] = []
-    for line_number, line in enumerate(content.splitlines(), start=1):
+    lines = content.splitlines()
+    for line_number, line in enumerate(lines, start=1):
         for rule_id, pattern in HIGH_CONFIDENCE_PATTERNS:
             if pattern.search(line):
                 errors.append(f"{label}:{line_number}: {rule_id}")
@@ -225,6 +420,7 @@ def scan_file(path: Path, repository: Path) -> list[str]:
                 line_number,
                 "GENERIC_SECRET_ASSIGNMENT",
                 value,
+                lines,
             ):
                 errors.append(f"{label}:{line_number}: GENERIC_SECRET_ASSIGNMENT")
 
@@ -235,16 +431,20 @@ def scan_file(path: Path, repository: Path) -> list[str]:
                 line_number,
                 "GENERIC_SECRET_ASSIGNMENT",
                 value,
+                lines,
             ):
                 errors.append(f"{label}:{line_number}: GENERIC_SECRET_ASSIGNMENT")
 
         for match in INLINE_CREDENTIAL_PAIR_PATTERN.finditer(line):
             value = match.group("value")
-            if looks_like_password(value) and not is_approved_finding(
+            if looks_like_inline_credential(
+                match.group("user"), value
+            ) and not is_approved_finding(
                 label,
                 line_number,
                 "INLINE_CREDENTIAL_PAIR",
                 value,
+                lines,
             ):
                 errors.append(f"{label}:{line_number}: INLINE_CREDENTIAL_PAIR")
 
@@ -255,6 +455,7 @@ def scan_file(path: Path, repository: Path) -> list[str]:
                 line_number,
                 "USER_PASSWORD_PAIR",
                 value,
+                lines,
             ):
                 errors.append(f"{label}:{line_number}: USER_PASSWORD_PAIR")
 
@@ -265,6 +466,7 @@ def scan_file(path: Path, repository: Path) -> list[str]:
                 line_number,
                 "DOCUMENTED_PASSWORD",
                 value,
+                lines,
             ):
                 errors.append(f"{label}:{line_number}: DOCUMENTED_PASSWORD")
 
@@ -287,10 +489,17 @@ def scan_file(path: Path, repository: Path) -> list[str]:
 
 def scan_repository(
     repository: Path,
-    targets: tuple[str, ...] = DEFAULT_TARGETS,
+    targets: tuple[str, ...] | None = None,
 ) -> list[str]:
     repository = repository.resolve()
+    discovery_errors: list[str] = []
+    if targets is None:
+        tracked_targets, discovery_errors = discover_tracked_artifact_targets(
+            repository
+        )
+        targets = DEFAULT_TARGETS + tracked_targets
     files, errors = collect_files(repository, targets)
+    errors = discovery_errors + errors
     for path in files:
         errors.extend(scan_file(path, repository))
     return errors
@@ -298,7 +507,7 @@ def scan_repository(
 
 def main() -> int:
     repository = Path(__file__).resolve().parent.parent
-    targets = tuple(sys.argv[1:]) or DEFAULT_TARGETS
+    targets = tuple(sys.argv[1:]) or None
     errors = scan_repository(repository, targets)
     if errors:
         for error in errors:
@@ -309,7 +518,8 @@ def main() -> int:
         )
         return 1
 
-    print(f"Sensitive artifact scan passed for {len(targets)} target(s).")
+    target_label = str(len(targets)) if targets is not None else "default tracked"
+    print(f"Sensitive artifact scan passed for {target_label} target(s).")
     return 0
 
 

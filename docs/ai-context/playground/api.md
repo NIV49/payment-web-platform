@@ -114,7 +114,7 @@ loginApi(data, { withCredentials: true })
 {
   "selectAccount": "vben",
   "username": "vben",
-  "password": "123456",
+  "password": "${PLAYGROUND_PASSWORD}",
   "captcha": true
 }
 ```
@@ -124,7 +124,7 @@ mock 只使用：
 ```json
 {
   "username": "vben",
-  "password": "123456"
+  "password": "${PLAYGROUND_PASSWORD}"
 }
 ```
 
@@ -134,7 +134,7 @@ mock 只使用：
 {
   "code": 0,
   "data": {
-    "accessToken": "jwt-token"
+    "accessToken": "${PLAYGROUND_ACCESS_TOKEN}"
   },
   "error": null,
   "message": "ok"

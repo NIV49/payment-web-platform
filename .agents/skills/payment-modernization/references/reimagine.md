@@ -38,6 +38,8 @@ Do not infer P0 scope from code volume or legacy module boundaries.
 
 Ask one focused question covering unresolved product scope. Record the decision in the authoritative project document before continuing.
 
+Read the fixed policy registry, that decision, and all target policy from the Capability Slice's `targetBaseSha`, never from a mutable checkout. Recompute the baseline path-and-byte `rulebookDigest` and `judgeDigest`; stop on any mismatch. Freeze the pre-implementation `taskIdentityKey` over the complete normative Capability Slice before producing an output commit; display labels and host runtime paths are not identity.
+
 ## 4. Design and Attack the Architecture
 
 Design the smallest architecture that satisfies the approved spec. Then run an independent skeptical review for:
@@ -65,7 +67,7 @@ For each disjoint slice:
 
 The integration loop alone:
 
-- validates version and Rulebook consistency;
+- resolves evaluated Rulebook/Judge manifests from the exact output commit and derives `evaluatedVersionKey` from their digests plus the frozen task identity;
 - merges dependency-ready slices;
 - runs the full authoritative build and Judge;
 - creates deduplicated machine queue items for failures;
@@ -73,5 +75,5 @@ The integration loop alone:
 
 ## Exit
 
-Reimagine passes only when all included rules have an owner, executable Judge coverage, passing integration evidence, and no unresolved BLOCKER.
+Reimagine passes only when all included rules have an owner, executable Judge coverage, passing integration evidence, two independently signed reviews with distinct reviewer-specific idempotency keys, and no unresolved BLOCKER. Reviewer keys must come from the externally anchored baseline policy.
 All evidence-derived artifacts must also pass `python3 scripts/check_sensitive_artifacts.py`.
