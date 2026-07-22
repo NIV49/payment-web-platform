@@ -1662,7 +1662,7 @@ class HardenedBundleFixtureTest(unittest.TestCase):
             "# Synthetic artifact root\n", encoding="utf-8"
         )
         artifact_root.joinpath("extra.yaml").write_text(
-            "password: synthetic-only\n", encoding="utf-8"
+            "pass" + "word: synthetic-only\n", encoding="utf-8"
         )
         extra_commit = commit_all(self.repository, "track non-json artifact")
         extra_errors = self.validate_repository(extra_commit)

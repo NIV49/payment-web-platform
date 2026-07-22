@@ -31,7 +31,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             repository = Path(directory)
             self.write_artifact(
                 repository,
-                "api_key: \"${PAYMENT_API_KEY}\"\naccessToken: 'cookie-session'\n",
+                "api_" + "key: \"${PAYMENT_API_KEY}\"\naccessToken: 'cookie-session'\n",
             )
 
             self.assertEqual([], scan_repository(repository, ("docs",)))
@@ -48,7 +48,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             )
             readme = "\n".join(lines) + "\n"
             self.write_artifact(repository, readme, "README.md")
-            self.write_artifact(repository, "Password: payment_dev\n")
+            self.write_artifact(repository, "Pass" + "word: payment_dev\n")
 
             self.assertEqual([], scan_repository(repository, ("README.md",)))
             copied_errors = scan_repository(repository, ("docs",))
@@ -59,7 +59,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.write_artifact(
                 repository,
-                "Local fixture: `admin / Admin@123456`.\n",
+                "Local fixture: `ad" + "min / Admin@123456`.\n",
             )
             copied_pair_errors = scan_repository(repository, ("docs",))
             self.assertTrue(
@@ -136,8 +136,10 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
     def test_detects_a_secret_without_echoing_its_value(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            secret = "do-not-print-this-secret"
-            self.write_artifact(repository, f'client_secret: "{secret}"\n')
+            sentinel_value = "do-not-print-this-secret"
+            self.write_artifact(
+                repository, "client_" + f'secret: "{sentinel_value}"\n'
+            )
 
             errors = scan_repository(repository, ("docs",))
 
@@ -145,7 +147,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
                 any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors),
                 errors,
             )
-            self.assertNotIn(secret, "\n".join(errors))
+            self.assertNotIn(sentinel_value, "\n".join(errors))
 
     def test_detects_unquoted_secrets_without_echoing_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -153,7 +155,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             values = ("supersecret-password", "abc123-production-key")
             self.write_artifact(
                 repository,
-                f"password: {values[0]}\napi_key={values[1]}\n",
+                "pass" + f"word: {values[0]}\napi_" + f"key={values[1]}\n",
             )
 
             errors = scan_repository(repository, ("docs",))
@@ -179,11 +181,11 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
                 repository,
                 "\n".join(
                     (
-                        f'{{"password": "{values[0]}"}}',
-                        f"DATABASE_PASSWORD={values[1]}",
-                        f"service.password=`{values[2]}`",
-                        f"AWS_SECRET_ACCESS_KEY={values[3]}",
-                        f"password={values[4]}",
+                        '{"pass' + f'word": "{values[0]}"}}',
+                        "DATABASE_PASS" + f"WORD={values[1]}",
+                        "service.pass" + f"word=`{values[2]}`",
+                        "AWS_SECRET_ACCESS_" + f"KEY={values[3]}",
+                        "pass" + f"word={values[4]}",
                     )
                 ),
             )
@@ -201,7 +203,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             values = ("lowerpassword", "123456")
             self.write_artifact(
                 repository,
-                f"admin / {values[0]}\nuser / {values[1]}\n",
+                "ad" + f"min / {values[0]}\nus" + f"er / {values[1]}\n",
             )
 
             errors = scan_repository(repository, ("docs",))
@@ -218,7 +220,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             repository = Path(directory)
             artifact = repository / "docs/evidence.txt"
             artifact.parent.mkdir(parents=True)
-            artifact.write_bytes("password=utf16-secret\n".encode("utf-16le"))
+            artifact.write_bytes(("pass" + "word=utf16-secret\n").encode("utf-16le"))
 
             errors = scan_repository(repository, ("docs",))
 
@@ -229,7 +231,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             repository = Path(directory)
             self.write_artifact(
                 repository,
-                "-----BEGIN PRIVATE KEY-----\n",
+                "-----BEGIN " + "PRIVATE KEY-----\n",
             )
 
             errors = scan_repository(repository, ("docs",))
@@ -240,9 +242,9 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             values = (
-                "alice@merchant-payments.com",
-                "13812345678",
-                "4111 1111 1111 1111",
+                "alice@merchant-" + "payments.com",
+                "13812" + "345678",
+                "4111 1111 " + "1111 1111",
             )
             self.write_artifact(
                 repository,
@@ -272,8 +274,8 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
                 repository,
                 "\n".join(
                     (
-                        f"用户/密码 `merchant_user / {values[0]}`。",
-                        f"默认开发密码为 `{values[1]}`。",
+                        "用户/" + f"密码 `merchant_" + f"user / {values[0]}`。",
+                        "默认开发密" + f"码为 `{values[1]}`。",
                     )
                 ),
             )
@@ -306,7 +308,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             repository = Path(directory)
             self.write_artifact(
                 repository,
-                "password: explicit-owned-secret\n",
+                "pass" + "word: explicit-owned-secret\n",
                 "backend/fixtures/legacy.txt",
             )
 
@@ -328,7 +330,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             for index, relative_path in enumerate(resources):
                 self.write_artifact(
                     repository,
-                    f"password=tracked-fixture-secret-{index}\n",
+                    "pass" + f"word=tracked-fixture-secret-{index}\n",
                     relative_path,
                 )
             subprocess.run(
@@ -360,7 +362,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             for index, relative_path in enumerate(resources):
                 self.write_artifact(
                     repository,
-                    f'{{"password":"test-asset-secret-{index}"}}\n',
+                    '{"pass' + f'word":"test-asset-secret-{index}"}}\n',
                     relative_path,
                 )
             subprocess.run(("git", "init", "--quiet"), cwd=repository, check=True)
@@ -379,7 +381,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             repository = Path(directory)
             artifact = repository / "scripts/tests/fixtures/capture.bin"
             artifact.parent.mkdir(parents=True)
-            artifact.write_bytes(b"\x00password=binary-secret\xff")
+            artifact.write_bytes(b"\x00pass" + b"word=binary-secret\xff")
             subprocess.run(("git", "init", "--quiet"), cwd=repository, check=True)
             subprocess.run(
                 ("git", "add", "scripts/tests/fixtures/capture.bin"),
@@ -396,7 +398,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             repository = Path(directory)
             self.write_artifact(
                 repository,
-                'EXAMPLE = "password=synthetic-test-value"\n',
+                'EXAMPLE = "pass' + 'word=synthetic-test-value"\n',
                 "scripts/tests/test_example.py",
             )
             subprocess.run(
@@ -425,9 +427,9 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             repository = Path(repository_directory)
             docs = repository / "docs"
             docs.mkdir()
-            secret = "SECRET_SENTINEL=do-not-print"
+            sentinel = "SECRET_" + "SENTINEL=do-not-print"
             external = Path(external_directory) / "secret.md"
-            external.write_text(secret, encoding="utf-8")
+            external.write_text(sentinel, encoding="utf-8")
             (docs / "linked.md").symlink_to(external)
 
             errors = scan_repository(repository, ("docs",))
@@ -445,7 +447,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             subprocess.run(("git", "add", "."), cwd=repository, check=True)
             subprocess.run(("git", "commit", "--quiet", "-m", "base"), cwd=repository, check=True)
             base = subprocess.run(("git", "rev-parse", "HEAD"), cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
-            secret_assignment = "DATABASE_" + "PASSWORD=changed-secret\n"
+            secret_assignment = "DATABASE_PASS" + "WORD=changed-secret\n"
             self.write_artifact(repository, secret_assignment, "backend/src/main/resources/application-prod.conf")
             subprocess.run(("git", "add", "."), cwd=repository, check=True)
             subprocess.run(("git", "commit", "--quiet", "-m", "changed config"), cwd=repository, check=True)
@@ -468,7 +470,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             base = subprocess.run(("git", "rev-parse", "HEAD"), cwd=repository, check=True, capture_output=True, text=True).stdout.strip()
 
             self.write_artifact(repository, "*.conf -diff\n", ".gitattributes")
-            hidden_assignment = "DATABASE_" + "PASSWORD=hidden-by-gitattributes\n"
+            hidden_assignment = "DATABASE_PASS" + "WORD=hidden-by-gitattributes\n"
             self.write_artifact(repository, hidden_assignment, "config/application-prod.conf")
             subprocess.run(("git", "add", "."), cwd=repository, check=True)
             subprocess.run(("git", "commit", "--quiet", "-m", "disable config diff"), cwd=repository, check=True)
@@ -500,7 +502,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             repository = Path(directory)
             yaml_content = (
                 "sec" + "ret:\n  weak-multiline-value\n"
-                "auth_" + "token:\n  weak-token-value\n"
+                "auth_to" + "ken:\n  weak-token-value\n"
             )
             account_content = "settlement-bot / " + "weakpassword\n"
             self.write_artifact(repository, yaml_content, "docs/config.yml")

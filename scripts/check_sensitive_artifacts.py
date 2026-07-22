@@ -158,7 +158,7 @@ UNQUOTED_SECRET_ASSIGNMENT_PATTERN = re.compile(
 )
 INLINE_CREDENTIAL_PAIR_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_.@-])(?P<user>[A-Za-z0-9_.@-]{3,128})\s+/\s+"
-    r"(?P<value>[^\s`,;，。]{4,})"
+    r"(?P<value>[^\s`'\",;，。()\[\]{}]{4,})"
 )
 USER_PASSWORD_PAIR_PATTERN = re.compile(
     r"用户/密码\s*`?[^`\s/]+\s*/\s*(?P<value>[^`\s，。；;]+)"

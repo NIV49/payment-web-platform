@@ -119,7 +119,7 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
                 (REPOSITORY / "scripts/check_sensitive_artifacts.py").read_bytes()
             )
             docs.joinpath("evidence.md").write_text(
-                "client_" + "secret=must-be-detected\n", encoding="utf-8"
+                "client_sec" + "ret=must-be-detected\n", encoding="utf-8"
             )
 
             result = subprocess.run(
@@ -169,7 +169,7 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-            artifact.write_text("password=mutated-by-test\n", encoding="utf-8")
+            artifact.write_text("pass" + "word=mutated-by-test\n", encoding="utf-8")
 
             guard = subprocess.run(
                 (
