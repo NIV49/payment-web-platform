@@ -450,6 +450,7 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
             "core.hooksPath=/dev/null",
             "core.useReplaceRefs=false",
             "GIT_ALLOW_PROTOCOL=",
+            "GIT_ATTR_NOSYSTEM=1",
             "GIT_CONFIG_NOSYSTEM=1",
             "GIT_CONFIG_GLOBAL=/dev/null",
             "GIT_NO_LAZY_FETCH=1",
@@ -561,6 +562,7 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
                 "if [ \"${GIT_NO_LAZY_FETCH:-}\" != 1 ] ||\n"
                 "   [ \"${GIT_ALLOW_PROTOCOL+x}\" != x ] ||\n"
                 "   [ -n \"${GIT_ALLOW_PROTOCOL:-}\" ] ||\n"
+                "   [ \"${GIT_ATTR_NOSYSTEM:-}\" != 1 ] ||\n"
                 "   [ \"${GIT_TERMINAL_PROMPT:-}\" != 0 ]; then\n"
                 f"  : > {shlex.quote(str(transport_sentinel))}\n"
                 "fi\n"
@@ -1914,6 +1916,60 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
                     "attributes controls changed after controlled scripts",
                 )
                 self.assertNotIn(str(control_path), result.stderr)
+
+    def test_guard_rejects_configured_control_paths_with_trailing_newlines(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "core.excludesFile",
+                "core excludes file path is invalid",
+                "user-excludes",
+            ),
+            (
+                "core.attributesFile",
+                "core attributes file path is invalid",
+                "user-attributes",
+            ),
+        )
+        for config_key, expected_diagnostic, filename in cases:
+            with (
+                self.subTest(config=config_key),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                fixture_root = Path(directory)
+                _, linked, commit = self.create_linked_guarded_repository(
+                    fixture_root,
+                    {"tracked.txt": "tracked\n"},
+                )
+                decoy_path = fixture_root / filename
+                effective_path = Path(f"{decoy_path}\n")
+                decoy_path.write_text("*.txt text\n", encoding="utf-8")
+                effective_path.write_text("*.txt -text\n", encoding="utf-8")
+                self.run_fixture_git(
+                    linked,
+                    "config",
+                    config_key,
+                    str(effective_path),
+                )
+                script = (
+                    "set -euo pipefail\n"
+                    "source scripts/ci_repository_guard.sh\n"
+                    'ci_capture_repository_state "$GITHUB_SHA"\n'
+                    f"printf '%s\\n' '*.txt text' > "
+                    f"{shlex.quote(str(effective_path))}\n"
+                    "ci_verify_repository_state\n"
+                )
+
+                result = self.run_workflow_shell(
+                    fixture_root,
+                    linked,
+                    script,
+                    commit,
+                )
+
+                self.assert_guard_diagnostic(result, expected_diagnostic)
+                self.assertNotIn(str(effective_path), result.stderr)
 
     def test_workflow_is_valid_yaml(self) -> None:
         parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))

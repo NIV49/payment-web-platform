@@ -1019,6 +1019,7 @@ ci_discovery_git() {
     LC_ALL=C \
     GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_ATTR_NOSYSTEM=1 \
     GIT_ALLOW_PROTOCOL= \
     GIT_NO_LAZY_FETCH=1 \
     GIT_TERMINAL_PROMPT=0 \
@@ -1047,6 +1048,7 @@ ci_bound_git() {
     LC_ALL=C \
     GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_ATTR_NOSYSTEM=1 \
     GIT_ALLOW_PROTOCOL= \
     GIT_NO_LAZY_FETCH=1 \
     GIT_TERMINAL_PROMPT=0 \
@@ -1363,6 +1365,7 @@ with tarfile.open(archive_path, mode="r:") as archive:
         "LC_ALL": "C",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_ATTR_NOSYSTEM": "1",
         "GIT_ALLOW_PROTOCOL": "",
         "GIT_NO_LAZY_FETCH": "1",
         "GIT_OPTIONAL_LOCKS": "0",
@@ -1504,6 +1507,7 @@ ci_git_with_index() {
     LC_ALL=C \
     GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_ATTR_NOSYSTEM=1 \
     GIT_ALLOW_PROTOCOL= \
     GIT_NO_LAZY_FETCH=1 \
     GIT_TERMINAL_PROMPT=0 \
@@ -1648,15 +1652,31 @@ print(digest.hexdigest())
 ' "$@"
 }
 
-ci_effective_core_excludes_file() {
+ci_effective_core_control_file() {
+  local config_key="$1"
+  local default_path="$2"
+  local diagnostic_name="$3"
+  local captured
   local configured
   local status
 
-  if configured="$(
-    ci_git config --path --get core.excludesFile 2>/dev/null
+  if captured="$(
+    ci_git config --path --get "$config_key" 2>/dev/null
+    status=$?
+    printf '.'
+    exit "$status"
   )"; then
-    if [[ -z "$configured" || "$configured" == *$'\n'* ]]; then
-      ci_guard_fail "core excludes file path is invalid"
+    if [[ "$captured" != *$'\n.' ]]; then
+      ci_guard_fail "core $diagnostic_name file path output is invalid"
+      return 1
+    fi
+    configured="${captured%$'\n.'}"
+    if [[
+      -z "$configured" ||
+        "$configured" == *$'\n'* ||
+        "$configured" == *$'\r'*
+    ]]; then
+      ci_guard_fail "core $diagnostic_name file path is invalid"
       return 1
     fi
     if [[ "$configured" != /* ]]; then
@@ -1668,36 +1688,24 @@ ci_effective_core_excludes_file() {
     status=$?
   fi
   if (( status != 1 )); then
-    ci_guard_fail "core excludes file could not be resolved"
+    ci_guard_fail "core $diagnostic_name file could not be resolved"
     return 1
   fi
-  printf '%s\n' "$CI_SAFE_HOME/.config/git/ignore"
+  printf '%s\n' "$default_path"
+}
+
+ci_effective_core_excludes_file() {
+  ci_effective_core_control_file \
+    core.excludesFile \
+    "$CI_SAFE_HOME/.config/git/ignore" \
+    excludes
 }
 
 ci_effective_core_attributes_file() {
-  local configured
-  local status
-
-  if configured="$(
-    ci_git config --path --get core.attributesFile 2>/dev/null
-  )"; then
-    if [[ -z "$configured" || "$configured" == *$'\n'* ]]; then
-      ci_guard_fail "core attributes file path is invalid"
-      return 1
-    fi
-    if [[ "$configured" != /* ]]; then
-      configured="$CI_EXPECTED_WORKSPACE/$configured"
-    fi
-    printf '%s\n' "$configured"
-    return
-  else
-    status=$?
-  fi
-  if (( status != 1 )); then
-    ci_guard_fail "core attributes file could not be resolved"
-    return 1
-  fi
-  printf '%s\n' "$CI_SAFE_HOME/.config/git/attributes"
+  ci_effective_core_control_file \
+    core.attributesFile \
+    "$CI_SAFE_HOME/.config/git/attributes" \
+    attributes
 }
 
 ci_assert_no_external_filters() {
