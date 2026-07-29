@@ -799,8 +799,18 @@ def is_tracked_evidence_or_fixture(relative_path: str) -> bool:
 def discover_tracked_artifact_targets(
     repository: Path,
 ) -> tuple[tuple[str, ...], list[str]]:
+    repository = repository.resolve()
     result = subprocess.run(
-        ("git", "-C", str(repository), "ls-files", "-z", "--cached"),
+        (
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            f"safe.directory={repository}",
+            "ls-files",
+            "-z",
+            "--cached",
+        ),
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -4045,13 +4055,21 @@ FORBIDDEN_GIT_ENVIRONMENT = frozenset(
 
 
 def _run_immutable_git(repository: Path, arguments: tuple[str, ...]) -> bytes:
+    repository = repository.resolve()
     environment = os.environ.copy()
     if FORBIDDEN_GIT_ENVIRONMENT.intersection(environment):
         raise ValueError("immutable Git environment overrides are not allowed")
     environment["GIT_NO_REPLACE_OBJECTS"] = "1"
     environment["GIT_LITERAL_PATHSPECS"] = "1"
     result = subprocess.run(
-        ("git", "--no-replace-objects", "--literal-pathspecs", *arguments),
+        (
+            "git",
+            "-c",
+            f"safe.directory={repository}",
+            "--no-replace-objects",
+            "--literal-pathspecs",
+            *arguments,
+        ),
         cwd=repository,
         env=environment,
         check=False,

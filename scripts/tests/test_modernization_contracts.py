@@ -8,6 +8,7 @@ import io
 import json
 import math
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -121,6 +122,49 @@ class ImmutableEvidenceTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
+
+    def test_git_evidence_accepts_the_exact_different_owner_repository(self) -> None:
+        (self.repository / "evidence.txt").write_text("approved", encoding="utf-8")
+        commit = commit_all(self.repository, "add evidence")
+        wrapper_directory = self.root / "git-wrapper"
+        wrapper_directory.mkdir()
+        git_wrapper = wrapper_directory / "git"
+        git_path = shutil.which("git")
+        self.assertIsNotNone(git_path)
+        git_wrapper.write_text(
+            "#!/bin/sh\n"
+            "GIT_TEST_ASSUME_DIFFERENT_OWNER=1\n"
+            "export GIT_TEST_ASSUME_DIFFERENT_OWNER\n"
+            f"exec {shlex.quote(git_path)} \"$@\"\n",
+            encoding="utf-8",
+        )
+        git_wrapper.chmod(0o755)
+        empty_home = self.root / "home"
+        empty_home.mkdir()
+        environment = {
+            "HOME": str(empty_home),
+            "PATH": f"{wrapper_directory}{os.pathsep}{os.environ['PATH']}",
+        }
+        baseline_environment = os.environ.copy()
+        baseline_environment.update(environment)
+        baseline = subprocess.run(
+            (str(git_wrapper), "-C", str(self.repository), "status", "--short"),
+            check=False,
+            capture_output=True,
+            env=baseline_environment,
+            text=True,
+        )
+        self.assertNotEqual(0, baseline.returncode)
+        self.assertIn("dubious ownership", baseline.stderr)
+
+        with mock.patch.dict(
+            os.environ,
+            environment,
+            clear=False,
+        ):
+            resolved = evidence.resolve_head_commit(self.repository)
+
+        self.assertEqual(commit, resolved)
 
     def test_rejects_tracked_symlink_before_reading_outside_sentinel(self) -> None:
         sentinel = self.root / "outside-sentinel.txt"

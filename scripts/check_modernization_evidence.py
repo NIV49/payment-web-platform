@@ -55,6 +55,7 @@ class EvidenceError(ValueError):
 
 
 def _run_git(repository: Path, arguments: Sequence[str]) -> bytes:
+    repository = repository.resolve()
     inherited_environment = os.environ
     forbidden = set(
         FORBIDDEN_GIT_ENVIRONMENT.intersection(inherited_environment)
@@ -79,6 +80,8 @@ def _run_git(repository: Path, arguments: Sequence[str]) -> bytes:
     result = subprocess.run(
         [
             "git",
+            "-c",
+            f"safe.directory={repository}",
             "-c",
             "core.commitGraph=false",
             "-c",

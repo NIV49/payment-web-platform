@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1510,6 +1513,57 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.assertTrue(any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors), errors)
             self.assertNotIn("changed-secret", "\n".join(errors))
+
+    def test_git_scans_accept_only_the_exact_different_owner_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "source"
+            repository.mkdir()
+            self.initialize_git_repository(repository)
+            self.write_artifact(repository, "safe\n", "README.md")
+            base = self.commit_all(repository, "base")
+            self.write_artifact(repository, "still safe\n", "README.md")
+            commit = self.commit_all(repository, "change")
+
+            wrapper_directory = root / "git-wrapper"
+            wrapper_directory.mkdir()
+            git_wrapper = wrapper_directory / "git"
+            git_path = shutil.which("git")
+            self.assertIsNotNone(git_path)
+            git_wrapper.write_text(
+                "#!/bin/sh\n"
+                "GIT_TEST_ASSUME_DIFFERENT_OWNER=1\n"
+                "export GIT_TEST_ASSUME_DIFFERENT_OWNER\n"
+                f"exec {shlex.quote(git_path)} \"$@\"\n",
+                encoding="utf-8",
+            )
+            git_wrapper.chmod(0o755)
+            empty_home = root / "home"
+            empty_home.mkdir()
+            environment = {
+                "HOME": str(empty_home),
+                "PATH": f"{wrapper_directory}{os.pathsep}{os.environ['PATH']}",
+            }
+            baseline_environment = os.environ.copy()
+            baseline_environment.update(environment)
+            baseline = subprocess.run(
+                (str(git_wrapper), "-C", str(repository), "status", "--short"),
+                check=False,
+                capture_output=True,
+                env=baseline_environment,
+                text=True,
+            )
+            self.assertNotEqual(0, baseline.returncode)
+            self.assertIn("dubious ownership", baseline.stderr)
+
+            with mock.patch.dict(os.environ, environment, clear=False):
+                diff_errors = scan_git_diff(repository, base, commit)
+                _targets, discovery_errors = (
+                    sensitive_artifacts.discover_tracked_artifact_targets(repository)
+                )
+
+            self.assertEqual([], diff_errors)
+            self.assertEqual([], discovery_errors)
 
     def test_immutable_diff_scans_full_blob_when_gitattributes_disables_diff(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
