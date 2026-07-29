@@ -1514,6 +1514,241 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             self.assertTrue(any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors), errors)
             self.assertNotIn("changed-secret", "\n".join(errors))
 
+    def test_default_target_discovery_requires_the_exact_repository_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory).resolve()
+            nested = repository / "nested"
+            nested.mkdir()
+            environment = {"PATH": "/trusted/bin"}
+            isolated_environment = {
+                "PATH": environment["PATH"],
+                "HOME": os.devnull,
+                "LANG": "C",
+                "LC_ALL": "C",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_NO_REPLACE_OBJECTS": "1",
+                "GIT_LITERAL_PATHSPECS": "1",
+                "GIT_ALLOW_PROTOCOL": "",
+                "GIT_NO_LAZY_FETCH": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+            }
+            top_level = subprocess.CompletedProcess(
+                args=(),
+                returncode=0,
+                stdout=os.fsencode(repository) + b"\n",
+            )
+            expected_command = (
+                "git",
+                "-C",
+                str(nested),
+                "-c",
+                f"safe.directory={nested}",
+                "-c",
+                "core.fsmonitor=",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "core.commitGraph=false",
+                "-c",
+                "core.useReplaceRefs=false",
+                "-c",
+                "submodule.recurse=false",
+                "--no-replace-objects",
+                "--literal-pathspecs",
+                "rev-parse",
+                "--show-toplevel",
+            )
+
+            with (
+                mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch.object(
+                    sensitive_artifacts.subprocess,
+                    "run",
+                    return_value=top_level,
+                ) as run_git,
+            ):
+                targets, errors = (
+                    sensitive_artifacts.discover_tracked_artifact_targets(nested)
+                )
+
+            self.assertEqual((), targets)
+            self.assertEqual(
+                [
+                    "repository: GIT_REPOSITORY_MISMATCH: "
+                    "default scan requires the exact repository root"
+                ],
+                errors,
+            )
+            self.assertEqual(
+                [
+                    mock.call(
+                        expected_command,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        env=isolated_environment,
+                        check=False,
+                    )
+                ],
+                run_git.call_args_list,
+            )
+
+    def test_default_target_discovery_rejects_git_overrides_before_git_runs(
+        self,
+    ) -> None:
+        forbidden_variables = (
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_ATTR_NOSYSTEM",
+            "GIT_ATTR_SOURCE",
+            "GIT_CEILING_DIRECTORIES",
+            "GIT_COMMON_DIR",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_NOSYSTEM",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_CONFIG_SYSTEM",
+            "GIT_DIR",
+            "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+            "GIT_EXEC_PATH",
+            "GIT_GRAFT_FILE",
+            "GIT_INDEX_FILE",
+            "GIT_INTERNAL_SUPER_PREFIX",
+            "GIT_NAMESPACE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_PREFIX",
+            "GIT_QUARANTINE_PATH",
+            "GIT_REPLACE_REF_BASE",
+            "GIT_SHALLOW_FILE",
+            "GIT_WORK_TREE",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_27",
+        )
+        repository = Path("/expected/repository")
+
+        for variable in forbidden_variables:
+            with self.subTest(variable=variable):
+                environment = {"PATH": "/trusted/bin", variable: "hostile"}
+                with (
+                    mock.patch.dict(os.environ, environment, clear=True),
+                    mock.patch.object(
+                        sensitive_artifacts.subprocess,
+                        "run",
+                    ) as run_git,
+                ):
+                    targets, errors = (
+                        sensitive_artifacts.discover_tracked_artifact_targets(
+                            repository
+                        )
+                    )
+
+                self.assertEqual((), targets)
+                self.assertEqual(
+                    [
+                        "repository: GIT_ENVIRONMENT_OVERRIDE: "
+                        "Git environment overrides are not allowed"
+                    ],
+                    errors,
+                )
+                run_git.assert_not_called()
+
+    def test_default_target_discovery_uses_isolated_git_calls_in_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory).resolve()
+            environment = {"PATH": "/trusted/bin"}
+            isolated_environment = {
+                "PATH": environment["PATH"],
+                "HOME": os.devnull,
+                "LANG": "C",
+                "LC_ALL": "C",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_NO_REPLACE_OBJECTS": "1",
+                "GIT_LITERAL_PATHSPECS": "1",
+                "GIT_ALLOW_PROTOCOL": "",
+                "GIT_NO_LAZY_FETCH": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+            }
+
+            def git_command(*arguments: str) -> tuple[str, ...]:
+                return (
+                    "git",
+                    "-C",
+                    str(repository),
+                    "-c",
+                    f"safe.directory={repository}",
+                    "-c",
+                    "core.fsmonitor=",
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "-c",
+                    "core.commitGraph=false",
+                    "-c",
+                    "core.useReplaceRefs=false",
+                    "-c",
+                    "submodule.recurse=false",
+                    "--no-replace-objects",
+                    "--literal-pathspecs",
+                    *arguments,
+                )
+
+            top_level = subprocess.CompletedProcess(
+                args=(),
+                returncode=0,
+                stdout=os.fsencode(repository) + b"\n",
+            )
+            tracked = subprocess.CompletedProcess(
+                args=(),
+                returncode=0,
+                stdout=(
+                    b"scripts/tests/fixtures/capture.json\0"
+                    b"scripts/tests/test_source.py\0"
+                    b"docs/manual.md\0"
+                    b"src/test/resources/application.yaml\0"
+                    b"tests/output.snap\0"
+                ),
+            )
+
+            with (
+                mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch.object(
+                    sensitive_artifacts.subprocess,
+                    "run",
+                    side_effect=(top_level, tracked),
+                ) as run_git,
+            ):
+                targets, errors = (
+                    sensitive_artifacts.discover_tracked_artifact_targets(repository)
+                )
+
+            self.assertEqual(
+                (
+                    "scripts/tests/fixtures/capture.json",
+                    "src/test/resources/application.yaml",
+                    "tests/output.snap",
+                ),
+                targets,
+            )
+            self.assertEqual([], errors)
+            self.assertEqual(
+                [
+                    mock.call(
+                        git_command("rev-parse", "--show-toplevel"),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        env=isolated_environment,
+                        check=False,
+                    ),
+                    mock.call(
+                        git_command("ls-files", "-z", "--cached"),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        env=isolated_environment,
+                        check=False,
+                    ),
+                ],
+                run_git.call_args_list,
+            )
+
     def test_git_scans_accept_only_the_exact_different_owner_repository_without_running_repository_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

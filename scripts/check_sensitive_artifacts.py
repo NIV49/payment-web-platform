@@ -15,7 +15,7 @@ import sys
 import xml.parsers.expat as expat
 import xml.etree.ElementTree as ElementTree
 from bisect import bisect_right
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from heapq import merge
 from pathlib import Path
 from typing import NamedTuple
@@ -386,6 +386,33 @@ COMMON_WEAK_PASSWORDS = {
 }
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 JSON_UNICODE_ESCAPE_PATTERN = re.compile(r"\\u(?P<codepoint>[0-9A-Fa-f]{4})")
+FORBIDDEN_GIT_ENVIRONMENT = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_ATTR_NOSYSTEM",
+        "GIT_ATTR_SOURCE",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_DIR",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_EXEC_PATH",
+        "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_INTERNAL_SUPER_PREFIX",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_QUARANTINE_PATH",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+)
 
 
 class JsonObject(list[tuple[str, object]]):
@@ -796,43 +823,95 @@ def is_tracked_evidence_or_fixture(relative_path: str) -> bool:
     )
 
 
-def discover_tracked_artifact_targets(
-    repository: Path,
-) -> tuple[tuple[str, ...], list[str]]:
-    repository = repository.resolve()
-    inherited_environment = os.environ
-    environment = {
+def _isolated_git_environment(
+    inherited_environment: Mapping[str, str],
+) -> dict[str, str]:
+    forbidden = set(
+        FORBIDDEN_GIT_ENVIRONMENT.intersection(inherited_environment)
+    )
+    forbidden.update(
+        key
+        for key in inherited_environment
+        if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+    )
+    if forbidden:
+        raise ValueError("Git environment overrides are not allowed")
+    return {
         "PATH": inherited_environment.get("PATH", os.defpath),
         "HOME": os.devnull,
         "LANG": "C",
         "LC_ALL": "C",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_LITERAL_PATHSPECS": "1",
         "GIT_ALLOW_PROTOCOL": "",
         "GIT_NO_LAZY_FETCH": "1",
         "GIT_TERMINAL_PROMPT": "0",
     }
-    result = subprocess.run(
-        (
-            "git",
-            "-C",
-            str(repository),
-            "-c",
-            f"safe.directory={repository}",
-            "-c",
-            "core.fsmonitor=",
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "submodule.recurse=false",
-            "ls-files",
-            "-z",
-            "--cached",
-        ),
+
+
+def _discovery_git_command(repository: Path, *arguments: str) -> tuple[str, ...]:
+    return (
+        "git",
+        "-C",
+        str(repository),
+        "-c",
+        f"safe.directory={repository}",
+        "-c",
+        "core.fsmonitor=",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.commitGraph=false",
+        "-c",
+        "core.useReplaceRefs=false",
+        "-c",
+        "submodule.recurse=false",
+        "--no-replace-objects",
+        "--literal-pathspecs",
+        *arguments,
+    )
+
+
+def discover_tracked_artifact_targets(
+    repository: Path,
+) -> tuple[tuple[str, ...], list[str]]:
+    repository = repository.resolve()
+    try:
+        environment = _isolated_git_environment(os.environ)
+    except ValueError:
+        return (), [
+            "repository: GIT_ENVIRONMENT_OVERRIDE: "
+            "Git environment overrides are not allowed"
+        ]
+    top_level = subprocess.run(
+        _discovery_git_command(repository, "rev-parse", "--show-toplevel"),
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        check=False,
         env=environment,
+        check=False,
+    )
+    raw_top_level = top_level.stdout
+    if (
+        top_level.returncode != 0
+        or not raw_top_level.endswith(b"\n")
+        or any(
+            character in raw_top_level[:-1]
+            for character in (b"\x00", b"\r", b"\n")
+        )
+        or Path(os.fsdecode(raw_top_level[:-1])).resolve() != repository
+    ):
+        return (), [
+            "repository: GIT_REPOSITORY_MISMATCH: "
+            "default scan requires the exact repository root"
+        ]
+    result = subprocess.run(
+        _discovery_git_command(repository, "ls-files", "-z", "--cached"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env=environment,
+        check=False,
     )
     if result.returncode != 0:
         return (), [
@@ -4058,39 +4137,9 @@ def scan_file(path: Path, repository: Path) -> list[str]:
     return scan_text_content(label, content)
 
 
-FORBIDDEN_GIT_ENVIRONMENT = frozenset(
-    {
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_COMMON_DIR",
-        "GIT_DIR",
-        "GIT_GRAFT_FILE",
-        "GIT_NAMESPACE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_REPLACE_REF_BASE",
-        "GIT_SHALLOW_FILE",
-        "GIT_WORK_TREE",
-    }
-)
-
-
 def _run_immutable_git(repository: Path, arguments: tuple[str, ...]) -> bytes:
     repository = repository.resolve()
-    inherited_environment = os.environ
-    if FORBIDDEN_GIT_ENVIRONMENT.intersection(inherited_environment):
-        raise ValueError("immutable Git environment overrides are not allowed")
-    environment = {
-        "PATH": inherited_environment.get("PATH", os.defpath),
-        "HOME": os.devnull,
-        "LANG": "C",
-        "LC_ALL": "C",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_NO_REPLACE_OBJECTS": "1",
-        "GIT_LITERAL_PATHSPECS": "1",
-        "GIT_ALLOW_PROTOCOL": "",
-        "GIT_NO_LAZY_FETCH": "1",
-        "GIT_TERMINAL_PROMPT": "0",
-    }
+    environment = _isolated_git_environment(os.environ)
     result = subprocess.run(
         (
             "git",
