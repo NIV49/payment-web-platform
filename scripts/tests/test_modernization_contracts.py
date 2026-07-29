@@ -143,28 +143,104 @@ class ImmutableEvidenceTest(unittest.TestCase):
         empty_home.mkdir()
         environment = {
             "HOME": str(empty_home),
+            "LANG": "C",
+            "LC_ALL": "C",
             "PATH": f"{wrapper_directory}{os.pathsep}{os.environ['PATH']}",
         }
-        baseline_environment = os.environ.copy()
-        baseline_environment.update(environment)
+        probe_environment = os.environ.copy()
+        probe_environment.update(environment)
+        probe_environment.update(
+            {
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_SYSTEM": os.devnull,
+            }
+        )
+        control = subprocess.run(
+            (str(git_path), "-C", str(self.repository), "status", "--short"),
+            check=False,
+            capture_output=True,
+            env=probe_environment,
+            text=True,
+        )
+        self.assertEqual(0, control.returncode, control.stderr)
+
+        baseline_environment = probe_environment.copy()
+        baseline_environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
         baseline = subprocess.run(
-            (str(git_wrapper), "-C", str(self.repository), "status", "--short"),
+            (str(git_path), "-C", str(self.repository), "status", "--short"),
             check=False,
             capture_output=True,
             env=baseline_environment,
             text=True,
         )
-        self.assertNotEqual(0, baseline.returncode)
-        self.assertIn("dubious ownership", baseline.stderr)
+        if baseline.returncode == 0:
+            self.skipTest(
+                "Git does not enforce the different-owner test capability"
+            )
+
+        exact_override = subprocess.run(
+            (
+                str(git_path),
+                "-c",
+                f"safe.directory={self.repository.resolve()}",
+                "-C",
+                str(self.repository),
+                "status",
+                "--short",
+            ),
+            check=False,
+            capture_output=True,
+            env=baseline_environment,
+            text=True,
+        )
+        if exact_override.returncode != 0:
+            self.skipTest(
+                "Git does not accept a command-scoped safe.directory override"
+            )
 
         with mock.patch.dict(
             os.environ,
             environment,
-            clear=False,
+            clear=True,
         ):
             resolved = evidence.resolve_head_commit(self.repository)
 
         self.assertEqual(commit, resolved)
+
+    def test_git_evidence_disables_lazy_fetch_and_all_transports(self) -> None:
+        (self.repository / "evidence.txt").write_text("approved", encoding="utf-8")
+        commit = commit_all(self.repository, "add evidence")
+        wrapper_directory = self.root / "git-wrapper"
+        wrapper_directory.mkdir()
+        git_wrapper = wrapper_directory / "git"
+        git_path = shutil.which("git")
+        self.assertIsNotNone(git_path)
+        transport_sentinel = self.root / "git-transport-enabled"
+        git_wrapper.write_text(
+            "#!/bin/sh\n"
+            "if [ \"${GIT_NO_LAZY_FETCH:-}\" != 1 ] ||\n"
+            "   [ \"${GIT_ALLOW_PROTOCOL+x}\" != x ] ||\n"
+            "   [ -n \"${GIT_ALLOW_PROTOCOL:-}\" ] ||\n"
+            "   [ \"${GIT_TERMINAL_PROMPT:-}\" != 0 ]; then\n"
+            f"  : > {shlex.quote(str(transport_sentinel))}\n"
+            "fi\n"
+            f"exec {shlex.quote(git_path)} \"$@\"\n",
+            encoding="utf-8",
+        )
+        git_wrapper.chmod(0o755)
+        environment = {
+            "HOME": str(self.root / "home"),
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": f"{wrapper_directory}{os.pathsep}{os.environ['PATH']}",
+        }
+
+        with mock.patch.dict(os.environ, environment, clear=True):
+            resolved = evidence.resolve_head_commit(self.repository)
+
+        self.assertEqual(commit, resolved)
+        self.assertFalse(transport_sentinel.exists())
 
     def test_rejects_tracked_symlink_before_reading_outside_sentinel(self) -> None:
         sentinel = self.root / "outside-sentinel.txt"
@@ -369,14 +445,20 @@ class ImmutableEvidenceTest(unittest.TestCase):
                 for command in commands:
                     joined = "\0".join(command)
                     self.assertIn("core.commitGraph=false", joined)
+                    self.assertIn("core.fsmonitor=", joined)
+                    self.assertIn("core.hooksPath=/dev/null", joined)
                     self.assertIn("core.useReplaceRefs=false", joined)
+                    self.assertIn("submodule.recurse=false", joined)
                 for environment in environments:
                     self.assertEqual(
                         {
+                            "GIT_ALLOW_PROTOCOL",
                             "GIT_CONFIG_GLOBAL",
                             "GIT_CONFIG_NOSYSTEM",
                             "GIT_LITERAL_PATHSPECS",
+                            "GIT_NO_LAZY_FETCH",
                             "GIT_NO_REPLACE_OBJECTS",
+                            "GIT_TERMINAL_PROMPT",
                             "HOME",
                             "LANG",
                             "LC_ALL",
@@ -384,6 +466,9 @@ class ImmutableEvidenceTest(unittest.TestCase):
                         },
                         set(environment),
                     )
+                    self.assertEqual("", environment["GIT_ALLOW_PROTOCOL"])
+                    self.assertEqual("1", environment["GIT_NO_LAZY_FETCH"])
+                    self.assertEqual("0", environment["GIT_TERMINAL_PROMPT"])
 
     def test_path_history_includes_treesame_side_branch_commits(self) -> None:
         path = self.repository / "governance.json"

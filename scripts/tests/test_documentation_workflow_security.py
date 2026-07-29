@@ -446,9 +446,15 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
             '--git-dir="$CI_EXPECTED_GIT_DIR"',
             '--work-tree="$CI_EXPECTED_WORK_TREE"',
             "core.commitGraph=false",
+            "core.fsmonitor=",
+            "core.hooksPath=/dev/null",
             "core.useReplaceRefs=false",
+            "GIT_ALLOW_PROTOCOL=",
             "GIT_CONFIG_NOSYSTEM=1",
             "GIT_CONFIG_GLOBAL=/dev/null",
+            "GIT_NO_LAZY_FETCH=1",
+            "GIT_TERMINAL_PROMPT=0",
+            "--no-textconv",
             "CI_EXPECTED_LOCAL_CONFIG_FINGERPRINT",
             "CI_EXPECTED_CONFIG_FILES_FINGERPRINT",
             "CI_EXPECTED_TOOLCHAIN_FINGERPRINT",
@@ -468,11 +474,96 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fixture_root = Path(directory)
             repository, commit = self.create_guarded_repository(fixture_root)
+            probe_environment = self.fixture_git_environment(repository)
+            control = self.run_fixture_git(
+                repository,
+                "status",
+                "--short",
+                check=False,
+                capture_output=True,
+                env=probe_environment,
+                text=True,
+            )
+            self.assertEqual(0, control.returncode, control.stderr)
+
+            different_owner_environment = probe_environment.copy()
+            different_owner_environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+            baseline = self.run_fixture_git(
+                repository,
+                "status",
+                "--short",
+                check=False,
+                capture_output=True,
+                env=different_owner_environment,
+                text=True,
+            )
+            version = ".".join(str(part) for part in self.local_git_version)
+            if baseline.returncode == 0:
+                self.skipTest(
+                    f"Git {version} does not enforce the different-owner test capability"
+                )
+
+            exact_override = self.run_fixture_git(
+                repository,
+                "-c",
+                f"safe.directory={repository.resolve()}",
+                "status",
+                "--short",
+                check=False,
+                capture_output=True,
+                env=different_owner_environment,
+                text=True,
+            )
+            if exact_override.returncode != 0:
+                self.skipTest(
+                    f"Git {version} does not accept a command-scoped safe.directory override"
+                )
+
+            fsmonitor_sentinel = fixture_root / "fsmonitor-ran"
+            fsmonitor_hook = fixture_root / "hostile-fsmonitor"
+            fsmonitor_hook.write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(fsmonitor_sentinel))}\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            fsmonitor_hook.chmod(0o755)
+            self.run_fixture_git(
+                repository,
+                "config",
+                "core.fsmonitor",
+                str(fsmonitor_hook),
+            )
+            hooks_directory = fixture_root / "hostile-hooks"
+            hooks_directory.mkdir()
+            hook_sentinel = fixture_root / "post-index-change-ran"
+            post_index_change = hooks_directory / "post-index-change"
+            post_index_change.write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(hook_sentinel))}\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            post_index_change.chmod(0o755)
+            self.run_fixture_git(
+                repository,
+                "config",
+                "core.hooksPath",
+                str(hooks_directory),
+            )
+
             wrapper_directory = fixture_root / "git-wrapper"
             wrapper_directory.mkdir()
             git_wrapper = wrapper_directory / "git"
+            transport_sentinel = fixture_root / "git-transport-enabled"
             git_wrapper.write_text(
                 "#!/bin/sh\n"
+                "if [ \"${GIT_NO_LAZY_FETCH:-}\" != 1 ] ||\n"
+                "   [ \"${GIT_ALLOW_PROTOCOL+x}\" != x ] ||\n"
+                "   [ -n \"${GIT_ALLOW_PROTOCOL:-}\" ] ||\n"
+                "   [ \"${GIT_TERMINAL_PROMPT:-}\" != 0 ]; then\n"
+                f"  : > {shlex.quote(str(transport_sentinel))}\n"
+                "fi\n"
                 "GIT_TEST_ASSUME_DIFFERENT_OWNER=1\n"
                 "export GIT_TEST_ASSUME_DIFFERENT_OWNER\n"
                 f"exec {shlex.quote(self.local_tools['git'])} \"$@\"\n",
@@ -496,6 +587,9 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
             )
 
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertFalse(fsmonitor_sentinel.exists())
+            self.assertFalse(hook_sentinel.exists())
+            self.assertFalse(transport_sentinel.exists())
             self.assertFalse(fixture_root.joinpath("home", ".gitconfig").exists())
             guard = REPOSITORY_GUARD.read_text(encoding="utf-8")
             discovery = re.search(
@@ -508,8 +602,14 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
                 guard,
                 re.MULTILINE | re.DOTALL,
             )
+            indexed = re.search(
+                r"^ci_git_with_index\(\) \{\n(?P<body>.*?)^\}\n",
+                guard,
+                re.MULTILINE | re.DOTALL,
+            )
             self.assertIsNotNone(discovery)
             self.assertIsNotNone(bound)
+            self.assertIsNotNone(indexed)
             self.assertIn(
                 '-c safe.directory="$workspace"',
                 discovery.group("body"),
@@ -518,7 +618,95 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
                 '-c safe.directory="$CI_EXPECTED_WORKSPACE"',
                 bound.group("body"),
             )
+            self.assertIn(
+                '-c safe.directory="$CI_EXPECTED_WORKSPACE"',
+                indexed.group("body"),
+            )
             self.assertNotIn("safe.directory=*", guard)
+
+    def test_repository_guard_rejects_external_filter_commands_without_execution(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_root = Path(directory)
+            repository, commit = self.create_guarded_repository(fixture_root)
+            filter_sentinel = fixture_root / "external-filter-ran"
+            filter_command = fixture_root / "hostile-filter"
+            filter_command.write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(filter_sentinel))}\n"
+                "cat\n",
+                encoding="utf-8",
+            )
+            filter_command.chmod(0o755)
+            self.run_fixture_git(
+                repository,
+                "config",
+                "filter.hostile.clean",
+                str(filter_command),
+            )
+            script = (
+                "set -euo pipefail\n"
+                "source scripts/ci_repository_guard.sh\n"
+                'ci_capture_repository_state "$GITHUB_SHA"\n'
+            )
+
+            result = self.run_workflow_shell(
+                fixture_root,
+                repository,
+                script,
+                commit,
+            )
+
+            self.assert_guard_diagnostic(
+                result,
+                "external Git filter commands are forbidden",
+            )
+            self.assertFalse(filter_sentinel.exists())
+
+    def test_repository_guard_rejects_gitlinks_before_worktree_comparison(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_root = Path(directory)
+            repository, seed_commit = self.create_guarded_repository(fixture_root)
+            self.run_fixture_git(
+                repository,
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                f"160000,{seed_commit},external-module",
+            )
+            self.run_fixture_git(
+                repository,
+                "commit",
+                "-m",
+                "add gitlink",
+                capture_output=True,
+                text=True,
+            )
+            commit = self.run_fixture_git(
+                repository,
+                "rev-parse",
+                "HEAD",
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            script = (
+                "set -euo pipefail\n"
+                "source scripts/ci_repository_guard.sh\n"
+                'ci_capture_repository_state "$GITHUB_SHA"\n'
+                "ci_verify_repository_state\n"
+            )
+
+            result = self.run_workflow_shell(
+                fixture_root,
+                repository,
+                script,
+                commit,
+            )
+
+            self.assert_guard_diagnostic(result, "Git gitlinks are forbidden")
 
     def test_python_toolchain_capture_uses_native_identity_before_python_output(
         self,
@@ -1678,6 +1866,52 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
                 self.assert_guard_diagnostic(
                     result,
                     "exclude controls changed after controlled scripts",
+                )
+                self.assertNotIn(str(control_path), result.stderr)
+
+    def test_guard_rejects_attributes_control_file_drift(self) -> None:
+        for control_name in ("info-attributes", "core-attributes-file"):
+            with (
+                self.subTest(control=control_name),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                fixture_root = Path(directory)
+                _, linked, commit = self.create_linked_guarded_repository(
+                    fixture_root,
+                    {
+                        ".gitattributes": "tracked.txt text\n",
+                        "tracked.txt": "tracked\n",
+                    },
+                )
+                if control_name == "info-attributes":
+                    control_path = self.resolve_git_path(linked, "info/attributes")
+                else:
+                    control_path = fixture_root / "user-attributes"
+                    self.run_fixture_git(
+                        linked,
+                        "config",
+                        "core.attributesFile",
+                        str(control_path),
+                    )
+                control_path.write_text("*.txt text\n", encoding="utf-8")
+                script = (
+                    "set -euo pipefail\n"
+                    "source scripts/ci_repository_guard.sh\n"
+                    'ci_capture_repository_state "$GITHUB_SHA"\n'
+                    f"printf '%s\\n' '*.txt -text' > {shlex.quote(str(control_path))}\n"
+                    "ci_verify_repository_state\n"
+                )
+
+                result = self.run_workflow_shell(
+                    fixture_root,
+                    linked,
+                    script,
+                    commit,
+                )
+
+                self.assert_guard_diagnostic(
+                    result,
+                    "attributes controls changed after controlled scripts",
                 )
                 self.assertNotIn(str(control_path), result.stderr)
 

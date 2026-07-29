@@ -1514,7 +1514,7 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             self.assertTrue(any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors), errors)
             self.assertNotIn("changed-secret", "\n".join(errors))
 
-    def test_git_scans_accept_only_the_exact_different_owner_repository(self) -> None:
+    def test_git_scans_accept_only_the_exact_different_owner_repository_without_running_repository_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repository = root / "source"
@@ -1542,21 +1542,79 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             empty_home.mkdir()
             environment = {
                 "HOME": str(empty_home),
+                "LANG": "C",
+                "LC_ALL": "C",
                 "PATH": f"{wrapper_directory}{os.pathsep}{os.environ['PATH']}",
             }
-            baseline_environment = os.environ.copy()
-            baseline_environment.update(environment)
+            probe_environment = os.environ.copy()
+            probe_environment.update(environment)
+            probe_environment.update(
+                {
+                    "GIT_CONFIG_GLOBAL": os.devnull,
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_CONFIG_SYSTEM": os.devnull,
+                }
+            )
+            control = subprocess.run(
+                (str(git_path), "-C", str(repository), "status", "--short"),
+                check=False,
+                capture_output=True,
+                env=probe_environment,
+                text=True,
+            )
+            self.assertEqual(0, control.returncode, control.stderr)
+
+            baseline_environment = probe_environment.copy()
+            baseline_environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
             baseline = subprocess.run(
-                (str(git_wrapper), "-C", str(repository), "status", "--short"),
+                (str(git_path), "-C", str(repository), "status", "--short"),
                 check=False,
                 capture_output=True,
                 env=baseline_environment,
                 text=True,
             )
-            self.assertNotEqual(0, baseline.returncode)
-            self.assertIn("dubious ownership", baseline.stderr)
+            if baseline.returncode == 0:
+                self.skipTest(
+                    "Git does not enforce the different-owner test capability"
+                )
 
-            with mock.patch.dict(os.environ, environment, clear=False):
+            exact_override = subprocess.run(
+                (
+                    str(git_path),
+                    "-c",
+                    f"safe.directory={repository.resolve()}",
+                    "-C",
+                    str(repository),
+                    "status",
+                    "--short",
+                ),
+                check=False,
+                capture_output=True,
+                env=baseline_environment,
+                text=True,
+            )
+            if exact_override.returncode != 0:
+                self.skipTest(
+                    "Git does not accept a command-scoped safe.directory override"
+                )
+
+            fsmonitor_sentinel = root / "fsmonitor-ran"
+            fsmonitor_hook = root / "hostile-fsmonitor"
+            fsmonitor_hook.write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(fsmonitor_sentinel))}\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            fsmonitor_hook.chmod(0o755)
+            subprocess.run(
+                ("git", "config", "core.fsmonitor", str(fsmonitor_hook)),
+                cwd=repository,
+                check=True,
+            )
+            self.assertFalse(fsmonitor_sentinel.exists())
+
+            with mock.patch.dict(os.environ, environment, clear=True):
                 diff_errors = scan_git_diff(repository, base, commit)
                 _targets, discovery_errors = (
                     sensitive_artifacts.discover_tracked_artifact_targets(repository)
@@ -1564,6 +1622,53 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.assertEqual([], diff_errors)
             self.assertEqual([], discovery_errors)
+            self.assertFalse(fsmonitor_sentinel.exists())
+
+    def test_git_scans_disable_lazy_fetch_and_all_transports(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "source"
+            repository.mkdir()
+            self.initialize_git_repository(repository)
+            self.write_artifact(repository, "safe\n", "README.md")
+            base = self.commit_all(repository, "base")
+            self.write_artifact(repository, "still safe\n", "README.md")
+            commit = self.commit_all(repository, "change")
+
+            wrapper_directory = root / "git-wrapper"
+            wrapper_directory.mkdir()
+            git_wrapper = wrapper_directory / "git"
+            git_path = shutil.which("git")
+            self.assertIsNotNone(git_path)
+            transport_sentinel = root / "git-transport-enabled"
+            git_wrapper.write_text(
+                "#!/bin/sh\n"
+                "if [ \"${GIT_NO_LAZY_FETCH:-}\" != 1 ] ||\n"
+                "   [ \"${GIT_ALLOW_PROTOCOL+x}\" != x ] ||\n"
+                "   [ -n \"${GIT_ALLOW_PROTOCOL:-}\" ] ||\n"
+                "   [ \"${GIT_TERMINAL_PROMPT:-}\" != 0 ]; then\n"
+                f"  : > {shlex.quote(str(transport_sentinel))}\n"
+                "fi\n"
+                f"exec {shlex.quote(git_path)} \"$@\"\n",
+                encoding="utf-8",
+            )
+            git_wrapper.chmod(0o755)
+            environment = {
+                "HOME": str(root / "home"),
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": f"{wrapper_directory}{os.pathsep}{os.environ['PATH']}",
+            }
+
+            with mock.patch.dict(os.environ, environment, clear=True):
+                diff_errors = scan_git_diff(repository, base, commit)
+                _targets, discovery_errors = (
+                    sensitive_artifacts.discover_tracked_artifact_targets(repository)
+                )
+
+            self.assertEqual([], diff_errors)
+            self.assertEqual([], discovery_errors)
+            self.assertFalse(transport_sentinel.exists())
 
     def test_immutable_diff_scans_full_blob_when_gitattributes_disables_diff(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

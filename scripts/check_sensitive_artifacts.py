@@ -800,6 +800,18 @@ def discover_tracked_artifact_targets(
     repository: Path,
 ) -> tuple[tuple[str, ...], list[str]]:
     repository = repository.resolve()
+    inherited_environment = os.environ
+    environment = {
+        "PATH": inherited_environment.get("PATH", os.defpath),
+        "HOME": os.devnull,
+        "LANG": "C",
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_ALLOW_PROTOCOL": "",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
     result = subprocess.run(
         (
             "git",
@@ -807,6 +819,12 @@ def discover_tracked_artifact_targets(
             str(repository),
             "-c",
             f"safe.directory={repository}",
+            "-c",
+            "core.fsmonitor=",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "submodule.recurse=false",
             "ls-files",
             "-z",
             "--cached",
@@ -814,6 +832,7 @@ def discover_tracked_artifact_targets(
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,
+        env=environment,
     )
     if result.returncode != 0:
         return (), [
@@ -4056,16 +4075,37 @@ FORBIDDEN_GIT_ENVIRONMENT = frozenset(
 
 def _run_immutable_git(repository: Path, arguments: tuple[str, ...]) -> bytes:
     repository = repository.resolve()
-    environment = os.environ.copy()
-    if FORBIDDEN_GIT_ENVIRONMENT.intersection(environment):
+    inherited_environment = os.environ
+    if FORBIDDEN_GIT_ENVIRONMENT.intersection(inherited_environment):
         raise ValueError("immutable Git environment overrides are not allowed")
-    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
-    environment["GIT_LITERAL_PATHSPECS"] = "1"
+    environment = {
+        "PATH": inherited_environment.get("PATH", os.defpath),
+        "HOME": os.devnull,
+        "LANG": "C",
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_LITERAL_PATHSPECS": "1",
+        "GIT_ALLOW_PROTOCOL": "",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
     result = subprocess.run(
         (
             "git",
             "-c",
             f"safe.directory={repository}",
+            "-c",
+            "core.fsmonitor=",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.commitGraph=false",
+            "-c",
+            "core.useReplaceRefs=false",
+            "-c",
+            "submodule.recurse=false",
             "--no-replace-objects",
             "--literal-pathspecs",
             *arguments,

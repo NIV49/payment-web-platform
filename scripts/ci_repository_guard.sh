@@ -967,6 +967,7 @@ ci_assert_clean_environment() {
     ENV
     GLOBIGNORE
     GIT_ALTERNATE_OBJECT_DIRECTORIES
+    GIT_ALLOW_PROTOCOL
     GIT_ATTR_NOSYSTEM
     GIT_ATTR_SOURCE
     GIT_CEILING_DIRECTORIES
@@ -983,11 +984,13 @@ ci_assert_clean_environment() {
     GIT_INDEX_FILE
     GIT_INTERNAL_SUPER_PREFIX
     GIT_NAMESPACE
+    GIT_NO_LAZY_FETCH
     GIT_OBJECT_DIRECTORY
     GIT_PREFIX
     GIT_QUARANTINE_PATH
     GIT_REPLACE_REF_BASE
     GIT_SHALLOW_FILE
+    GIT_TERMINAL_PROMPT
     GIT_WORK_TREE
   )
   for name in "${forbidden[@]}"; do
@@ -1016,9 +1019,15 @@ ci_discovery_git() {
     LC_ALL=C \
     GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_ALLOW_PROTOCOL= \
+    GIT_NO_LAZY_FETCH=1 \
+    GIT_TERMINAL_PROMPT=0 \
     "$CI_TOOL_GIT" \
       -C "$workspace" \
       -c safe.directory="$workspace" \
+      -c core.fsmonitor= \
+      -c core.hooksPath=/dev/null \
+      -c submodule.recurse=false \
       -c core.commitGraph=false \
       -c core.useReplaceRefs=false \
       --no-replace-objects \
@@ -1038,11 +1047,17 @@ ci_bound_git() {
     LC_ALL=C \
     GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_ALLOW_PROTOCOL= \
+    GIT_NO_LAZY_FETCH=1 \
+    GIT_TERMINAL_PROMPT=0 \
     "$CI_TOOL_GIT" \
       -C "$CI_EXPECTED_WORKSPACE" \
       --git-dir="$CI_EXPECTED_GIT_DIR" \
       --work-tree="$CI_EXPECTED_WORK_TREE" \
       -c safe.directory="$CI_EXPECTED_WORKSPACE" \
+      -c core.fsmonitor= \
+      -c core.hooksPath=/dev/null \
+      -c submodule.recurse=false \
       -c core.commitGraph=false \
       -c core.useReplaceRefs=false \
       --no-replace-objects \
@@ -1085,10 +1100,16 @@ ci_archive_captured_tree() {
     GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL=/dev/null \
     GIT_ATTR_NOSYSTEM=1 \
+    GIT_ALLOW_PROTOCOL= \
+    GIT_NO_LAZY_FETCH=1 \
+    GIT_TERMINAL_PROMPT=0 \
     GIT_DIR="$archive_git_dir" \
     GIT_OBJECT_DIRECTORY="$CI_EXPECTED_OBJECT_DIRECTORY" \
     "$CI_TOOL_GIT" \
       -c core.attributesFile=/dev/null \
+      -c core.fsmonitor= \
+      -c core.hooksPath=/dev/null \
+      -c submodule.recurse=false \
       -c core.commitGraph=false \
       -c core.useReplaceRefs=false \
       --no-replace-objects \
@@ -1342,13 +1363,22 @@ with tarfile.open(archive_path, mode="r:") as archive:
         "LC_ALL": "C",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_ALLOW_PROTOCOL": "",
+        "GIT_NO_LAZY_FETCH": "1",
         "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
     }
     blob_reader = subprocess.Popen(
         [
             git_path,
             f"--git-dir={git_dir}",
             f"--work-tree={work_tree}",
+            "-c",
+            "core.fsmonitor=",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "submodule.recurse=false",
             "-c",
             "core.commitGraph=false",
             "-c",
@@ -1474,11 +1504,18 @@ ci_git_with_index() {
     LC_ALL=C \
     GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_ALLOW_PROTOCOL= \
+    GIT_NO_LAZY_FETCH=1 \
+    GIT_TERMINAL_PROMPT=0 \
     GIT_INDEX_FILE="$index_file" \
     "$CI_TOOL_GIT" \
       -C "$CI_EXPECTED_WORKSPACE" \
       --git-dir="$CI_EXPECTED_GIT_DIR" \
       --work-tree="$CI_EXPECTED_WORK_TREE" \
+      -c safe.directory="$CI_EXPECTED_WORKSPACE" \
+      -c core.fsmonitor= \
+      -c core.hooksPath=/dev/null \
+      -c submodule.recurse=false \
       -c core.commitGraph=false \
       -c core.useReplaceRefs=false \
       --no-replace-objects \
@@ -1567,7 +1604,7 @@ for raw_path in sys.argv[1:]:
         digest.update(b"A")
         continue
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-        raise SystemExit("repository exclude control is not a regular file")
+        raise SystemExit("repository control is not a regular file")
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     try:
         opened = os.fstat(descriptor)
@@ -1582,7 +1619,7 @@ for raw_path in sys.argv[1:]:
             metadata.st_dev,
             metadata.st_ino,
         ):
-            raise SystemExit("repository exclude control changed while opening")
+            raise SystemExit("repository control changed while opening")
         content_digest = hashlib.sha256()
         size = 0
         while True:
@@ -1592,7 +1629,7 @@ for raw_path in sys.argv[1:]:
             size += len(chunk)
             content_digest.update(chunk)
         if size != opened.st_size:
-            raise SystemExit("repository exclude control changed while reading")
+            raise SystemExit("repository control changed while reading")
         final = os.fstat(descriptor)
         if identity != (
             final.st_dev,
@@ -1601,7 +1638,7 @@ for raw_path in sys.argv[1:]:
             final.st_mtime_ns,
             final.st_ctime_ns,
         ):
-            raise SystemExit("repository exclude control changed while reading")
+            raise SystemExit("repository control changed while reading")
     finally:
         os.close(descriptor)
     digest.update(b"F")
@@ -1635,6 +1672,48 @@ ci_effective_core_excludes_file() {
     return 1
   fi
   printf '%s\n' "$CI_SAFE_HOME/.config/git/ignore"
+}
+
+ci_effective_core_attributes_file() {
+  local configured
+  local status
+
+  if configured="$(
+    ci_git config --path --get core.attributesFile 2>/dev/null
+  )"; then
+    if [[ -z "$configured" || "$configured" == *$'\n'* ]]; then
+      ci_guard_fail "core attributes file path is invalid"
+      return 1
+    fi
+    if [[ "$configured" != /* ]]; then
+      configured="$CI_EXPECTED_WORKSPACE/$configured"
+    fi
+    printf '%s\n' "$configured"
+    return
+  else
+    status=$?
+  fi
+  if (( status != 1 )); then
+    ci_guard_fail "core attributes file could not be resolved"
+    return 1
+  fi
+  printf '%s\n' "$CI_SAFE_HOME/.config/git/attributes"
+}
+
+ci_assert_no_external_filters() {
+  local status
+
+  if ci_git config --includes --name-only --get-regexp \
+    '^filter\..*\.(clean|smudge|process)$' >/dev/null 2>&1; then
+    ci_guard_fail "external Git filter commands are forbidden"
+    return 1
+  else
+    status=$?
+  fi
+  if (( status != 1 )); then
+    ci_guard_fail "external Git filter configuration could not be inspected"
+    return 1
+  fi
 }
 
 ci_dot_git_fingerprint() {
@@ -1699,14 +1778,19 @@ ci_capture_repository_state() {
   local common_dir
   local object_directory
   local info_exclude
+  local info_attributes
   local core_excludes_file
   local core_excludes_file_after
+  local core_attributes_file
+  local core_attributes_file_after
   local config_files_before
   local config_files_after
   local local_config_before
   local local_config_after
   local exclude_controls_before
   local exclude_controls_after
+  local attributes_controls_before
+  local attributes_controls_after
 
   ci_assert_clean_environment || return 1
   if [[ ! "$declared_sha" =~ ^[0-9a-f]{40}$ ]]; then
@@ -1742,7 +1826,11 @@ ci_capture_repository_state() {
   info_exclude="$(
     ci_git rev-parse --path-format=absolute --git-path info/exclude
   )"
+  info_attributes="$(
+    ci_git rev-parse --path-format=absolute --git-path info/attributes
+  )"
   CI_EXPECTED_INFO_EXCLUDE="$info_exclude"
+  CI_EXPECTED_INFO_ATTRIBUTES="$info_attributes"
   CI_EXPECTED_DOT_GIT_FINGERPRINT="$(
     ci_dot_git_fingerprint "$workspace/.git" "$git_dir"
   )"
@@ -1752,12 +1840,20 @@ ci_capture_repository_state() {
       "$CI_EXPECTED_WORKTREE_CONFIG"
   )"
   local_config_before="$(ci_local_config_fingerprint)"
+  ci_assert_no_external_filters || return 1
   core_excludes_file="$(ci_effective_core_excludes_file)"
+  core_attributes_file="$(ci_effective_core_attributes_file)"
   CI_EXPECTED_CORE_EXCLUDES_FILE="$core_excludes_file"
+  CI_EXPECTED_CORE_ATTRIBUTES_FILE="$core_attributes_file"
   exclude_controls_before="$(
     ci_repository_control_fingerprint \
       "$CI_EXPECTED_INFO_EXCLUDE" \
       "$CI_EXPECTED_CORE_EXCLUDES_FILE"
+  )"
+  attributes_controls_before="$(
+    ci_repository_control_fingerprint \
+      "$CI_EXPECTED_INFO_ATTRIBUTES" \
+      "$CI_EXPECTED_CORE_ATTRIBUTES_FILE"
   )"
   config_files_after="$(
     ci_config_files_fingerprint \
@@ -1766,12 +1862,14 @@ ci_capture_repository_state() {
   )"
   local_config_after="$(ci_local_config_fingerprint)"
   core_excludes_file_after="$(ci_effective_core_excludes_file)"
+  core_attributes_file_after="$(ci_effective_core_attributes_file)"
   if [[ "$config_files_before" != "$config_files_after" ]]; then
     ci_guard_fail "local Git configuration changed during startup capture"
     return 1
   fi
   if [[ "$local_config_before" != "$local_config_after" ]] ||
-    [[ "$core_excludes_file" != "$core_excludes_file_after" ]]; then
+    [[ "$core_excludes_file" != "$core_excludes_file_after" ]] ||
+    [[ "$core_attributes_file" != "$core_attributes_file_after" ]]; then
     ci_guard_fail "effective local Git configuration changed during startup capture"
     return 1
   fi
@@ -1784,9 +1882,19 @@ ci_capture_repository_state() {
     ci_guard_fail "exclude controls changed during startup capture"
     return 1
   fi
+  attributes_controls_after="$(
+    ci_repository_control_fingerprint \
+      "$CI_EXPECTED_INFO_ATTRIBUTES" \
+      "$CI_EXPECTED_CORE_ATTRIBUTES_FILE"
+  )"
+  if [[ "$attributes_controls_before" != "$attributes_controls_after" ]]; then
+    ci_guard_fail "attributes controls changed during startup capture"
+    return 1
+  fi
   CI_EXPECTED_CONFIG_FILES_FINGERPRINT="$config_files_before"
   CI_EXPECTED_LOCAL_CONFIG_FINGERPRINT="$local_config_before"
   CI_EXPECTED_EXCLUDE_CONTROLS_FINGERPRINT="$exclude_controls_before"
+  CI_EXPECTED_ATTRIBUTES_CONTROLS_FINGERPRINT="$attributes_controls_before"
   CI_EXPECTED_COMMIT="$(
     ci_git rev-parse --verify 'HEAD^{commit}'
   )"
@@ -1833,11 +1941,14 @@ ci_capture_repository_state() {
     CI_EXPECTED_COMMON_CONFIG \
     CI_EXPECTED_WORKTREE_CONFIG \
     CI_EXPECTED_INFO_EXCLUDE \
+    CI_EXPECTED_INFO_ATTRIBUTES \
     CI_EXPECTED_CORE_EXCLUDES_FILE \
+    CI_EXPECTED_CORE_ATTRIBUTES_FILE \
     CI_EXPECTED_DOT_GIT_FINGERPRINT \
     CI_EXPECTED_LOCAL_CONFIG_FINGERPRINT \
     CI_EXPECTED_CONFIG_FILES_FINGERPRINT \
     CI_EXPECTED_EXCLUDE_CONTROLS_FINGERPRINT \
+    CI_EXPECTED_ATTRIBUTES_CONTROLS_FINGERPRINT \
     CI_EXPECTED_COMMIT \
     CI_EXPECTED_TREE
 }
@@ -1847,6 +1958,8 @@ ci_verify_repository_identity_and_config() {
   local config_files_after
   local exclude_controls_before
   local exclude_controls_after
+  local attributes_controls_before
+  local attributes_controls_after
   local actual
 
   ci_assert_clean_environment || return 1
@@ -1883,6 +1996,18 @@ ci_verify_repository_identity_and_config() {
     ci_guard_fail "exclude controls changed after controlled scripts"
     return 1
   fi
+  attributes_controls_before="$(
+    ci_repository_control_fingerprint \
+      "$CI_EXPECTED_INFO_ATTRIBUTES" \
+      "$CI_EXPECTED_CORE_ATTRIBUTES_FILE"
+  )"
+  if [[
+    "$attributes_controls_before" != \
+      "$CI_EXPECTED_ATTRIBUTES_CONTROLS_FINGERPRINT"
+  ]]; then
+    ci_guard_fail "attributes controls changed after controlled scripts"
+    return 1
+  fi
 
   actual="$(ci_git rev-parse --show-toplevel)"
   if [[ "$actual" != "$CI_EXPECTED_WORKSPACE" ]]; then
@@ -1909,6 +2034,7 @@ ci_verify_repository_identity_and_config() {
     ci_guard_fail "effective local Git configuration changed after controlled scripts"
     return 1
   fi
+  ci_assert_no_external_filters || return 1
   config_files_after="$(
     ci_config_files_fingerprint \
       "$CI_EXPECTED_COMMON_CONFIG" \
@@ -1929,10 +2055,23 @@ ci_verify_repository_identity_and_config() {
     ci_guard_fail "exclude controls changed during verification"
     return 1
   fi
+  attributes_controls_after="$(
+    ci_repository_control_fingerprint \
+      "$CI_EXPECTED_INFO_ATTRIBUTES" \
+      "$CI_EXPECTED_CORE_ATTRIBUTES_FILE"
+  )"
+  if [[
+    "$attributes_controls_after" != \
+      "$CI_EXPECTED_ATTRIBUTES_CONTROLS_FINGERPRINT"
+  ]]; then
+    ci_guard_fail "attributes controls changed during verification"
+    return 1
+  fi
 }
 
 ci_verify_index_and_worktree() {
   local tracked_flags
+  local tracked_entries
   local snapshot_index
 
   if [[ "$(ci_git write-tree)" != "$CI_EXPECTED_TREE" ]]; then
@@ -1944,6 +2083,11 @@ ci_verify_index_and_worktree() {
     ci_guard_fail "index contains hidden tracked-file flags"
     return 1
   fi
+  tracked_entries="$(ci_git ls-files --stage)"
+  if "$CI_TOOL_GREP" -E '^160000 ' <<<"$tracked_entries" >/dev/null; then
+    ci_guard_fail "Git gitlinks are forbidden"
+    return 1
+  fi
   if ! snapshot_index="$(
     "$CI_TOOL_MKTEMP" "${TMPDIR:-/tmp}/documentation-index.XXXXXX"
   )"; then
@@ -1951,18 +2095,20 @@ ci_verify_index_and_worktree() {
     return 1
   fi
   "$CI_TOOL_RM" -f "$snapshot_index"
-  if ! ci_git_with_index "$snapshot_index" read-tree "$CI_EXPECTED_TREE"; then
+  if ! ci_git_with_index "$snapshot_index" read-tree \
+    --no-recurse-submodules "$CI_EXPECTED_TREE"; then
     "$CI_TOOL_RM" -f "$snapshot_index"
     ci_guard_fail "temporary index could not read the captured tree"
     return 1
   fi
-  if ! ci_git_with_index "$snapshot_index" update-index --refresh; then
+  if ! ci_git_with_index "$snapshot_index" update-index \
+    --ignore-submodules --refresh; then
     "$CI_TOOL_RM" -f "$snapshot_index"
     ci_guard_fail "worktree content could not refresh against the captured tree"
     return 1
   fi
   if ! ci_git_with_index "$snapshot_index" diff-files \
-    --quiet --no-ext-diff --ignore-submodules=none; then
+    --quiet --no-ext-diff --no-textconv --ignore-submodules=all; then
     "$CI_TOOL_RM" -f "$snapshot_index"
     ci_guard_fail "worktree content differs from the captured tree"
     return 1
@@ -2026,7 +2172,8 @@ ci_verify_repository_state() {
     return 1
   fi
   ci_verify_index_and_worktree || return 1
-  if ! ci_git diff --no-ext-diff --exit-code "$CI_EXPECTED_COMMIT" --; then
+  if ! ci_git diff --no-ext-diff --no-textconv \
+    --exit-code "$CI_EXPECTED_COMMIT" --; then
     ci_guard_fail "tracked worktree content changed after controlled scripts"
     return 1
   fi
