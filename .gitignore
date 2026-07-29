@@ -1,5 +1,16 @@
 .DS_Store
 
+# Python tooling caches
+__pycache__/
+*.py[cod]
+
+# Local upstream projects used only for design/reference analysis
+/sourceRepository/
+/resultRepository/
+
+# Java build output in any backend/reference module
+**/target/
+
 # Backend build output and local configuration
 /backend/.env
 /backend/.env.*

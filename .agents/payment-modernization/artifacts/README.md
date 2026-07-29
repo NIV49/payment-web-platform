@@ -1,0 +1,55 @@
+# Payment Modernization Artifacts
+
+Place machine-verifiable v2 artifact bundles in this directory as JSON files.
+Policy, Rule payloads, registries, bundles, signatures, and digests use strict
+UTF-8 JSON: duplicate object members, `NaN`, `Infinity`, `-Infinity`, and any
+non-finite canonical serialization are rejected at every nesting depth.
+The repository checker recursively validates every `*.json` file here and
+rejects symbolic links. This `README.md` and regular `*.json` files are the only
+tracked entries allowed under the canonical artifact root.
+
+Every bundle declares `lifecycleStatus` as either `draft` or `closed`. Explicit
+positional preflight accepts drafts. The canonical repository gate accepts only
+closed bundles, and each closed bundle must carry exactly two independent,
+trusted, valid signed `PASS` reviews bound to the same evaluated snapshot.
+
+Approval uses a detached two-commit flow to avoid a Git self-reference:
+
+1. Commit B contains the immutable Rule payload with `status: approved`; the
+   repository gate still fails because approval is pending.
+2. Two trusted reviewers sign Rule-approval results that bind commit B, its
+   evaluated manifests, and the exact Rule subject.
+3. A single-parent descendant commit C records only regular JSON signed bundles
+   and approval envelopes here; its full tree delta may not contain another path.
+   The gate accepts C only when the current registered payload still equals the
+   payload reviewed at B and B is an ancestor of C.
+
+Never put a bundle that names commit B inside commit B itself.
+
+The authoritative repository gate must also receive an immutable trust root via
+`--trusted-policy-commit <full-sha>`. Reviewer keys, repository identity, and
+canonical location are taken from that anchored policy, not from the pull
+request. A repository introducing this policy for the first time may anchor the
+pre-policy parent only while `trustedReviewers` remains empty; reviewer bootstrap
+or key rotation requires a separately trusted policy commit. The checker also
+replays the complete merge DAG from the anchor against each commit's real
+parents so sibling approvals cannot authorize each other and Queue state cannot
+be flattened into a false linear history. Divergent Queue parents require a
+subsequent single-parent, newly evaluated signed reconciliation. An approved
+Rule cannot be silently downgraded, removed, or made unapproved by deleting its
+bundle. A malformed historical envelope or policy remains a blocking error
+after deletion.
+
+A Queue bootstrap with any non-current `initialStateHistory` key must retain
+exact `queueHistoryEvidence` for that key: its immutable evaluated snapshot,
+matching Queue state, and two independent trusted signed PASS implementation
+reviews. A current-only one-state history may omit the field. Arbitrary legacy
+64-hex placeholders are invalid; they are not migrated by length checks or an
+allowlist.
+
+Bundles with non-empty `sourceSnapshots` additionally require a trusted runner
+that can map the legacy workspace and resolve every declared source commit and
+evidence path. Generic cloud CI intentionally fails closed when those source
+repositories are unavailable. Use `--trusted-legacy-workspace` only for a
+pre-authorized workspace whose repositories are direct, owned child clones;
+never map it to an untrusted checkout supplied by a bundle.

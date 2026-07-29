@@ -16,6 +16,19 @@ import {
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+const isValidTimezone = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return false;
+  }
+
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 describe('dateUtils', () => {
   const sampleISO = '2024-10-30T12:34:56Z';
   const sampleTimestamp = Date.parse(sampleISO);
@@ -111,10 +124,22 @@ describe('dateUtils', () => {
   // getSystemTimezone
   // ===============================
   describe('getSystemTimezone', () => {
-    it('should return a valid IANA timezone string', () => {
-      const tz = getSystemTimezone();
-      expect(typeof tz).toBe('string');
-      expect(tz).toMatch(/^[A-Z]+\/[A-Z_]+/i);
+    it.each(['UTC', 'Asia/Shanghai'])(
+      'should accept the supported IANA timezone %s',
+      (value) => {
+        expect(isValidTimezone(value)).toBe(true);
+      },
+    );
+
+    it.each([undefined, null, 42, '', '   ', 'not-a-timezone'])(
+      'should reject the invalid timezone value %s',
+      (value) => {
+        expect(isValidTimezone(value)).toBe(false);
+      },
+    );
+
+    it('should return a supported IANA timezone', () => {
+      expect(isValidTimezone(getSystemTimezone())).toBe(true);
     });
   });
 

@@ -1,0 +1,11 @@
+# These paths define the repository's governance and trust boundary. Enable
+# "Require review from Code Owners" for the protected default branch/ruleset;
+# this file alone does not enforce approval.
+/.github/CODEOWNERS @NIV49
+**/.gitattributes @NIV49
+/.github/workflows/ @NIV49
+/.agents/ @NIV49
+/AGENTS.md @NIV49
+/README.md @NIV49
+/docs/ @NIV49
+/scripts/ @NIV49

@@ -18,6 +18,8 @@ import { message } from 'antdv-next';
 import { useAuthStore } from '#/store';
 
 import { refreshTokenApi } from './core';
+import { resolveApiErrorMessage } from './error-contract';
+import { COOKIE_SESSION_MARKER, formatSessionAuthorization } from './session';
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 
@@ -25,6 +27,7 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   const client = new RequestClient({
     ...options,
     baseURL,
+    withCredentials: true,
   });
 
   /**
@@ -52,12 +55,11 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
     const accessStore = useAccessStore();
     const resp = await refreshTokenApi();
     const newToken = resp.data;
-    accessStore.setAccessToken(newToken);
-    return newToken;
-  }
-
-  function formatToken(token: null | string) {
-    return token ? `Bearer ${token}` : null;
+    if (newToken !== COOKIE_SESSION_MARKER) {
+      throw new Error('Invalid cookie-session refresh response');
+    }
+    accessStore.setAccessToken(COOKIE_SESSION_MARKER);
+    return COOKIE_SESSION_MARKER;
   }
 
   // 请求头处理
@@ -65,7 +67,12 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
     fulfilled: async (config) => {
       const accessStore = useAccessStore();
 
-      config.headers.Authorization = formatToken(accessStore.accessToken);
+      const authorization = formatSessionAuthorization(accessStore.accessToken);
+      if (authorization) {
+        config.headers.Authorization = authorization;
+      } else {
+        delete config.headers.Authorization;
+      }
       config.headers['Accept-Language'] = preferences.app.locale;
       return config;
     },
@@ -87,7 +94,7 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
       doReAuthenticate,
       doRefreshToken,
       enableRefreshToken: preferences.app.enableRefreshToken,
-      formatToken,
+      formatToken: formatSessionAuthorization,
     }),
   );
 
@@ -95,11 +102,9 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   client.addResponseInterceptor(
     errorMessageResponseInterceptor((msg: string, error) => {
       // 这里可以根据业务进行定制,你可以拿到 error 内的信息进行定制化处理，根据不同的 code 做不同的提示，而不是直接使用 message.error 提示 msg
-      // 当前mock接口返回的错误字段是 error 或者 message
-      const responseData = error?.response?.data ?? {};
-      const errorMessage = responseData?.error ?? responseData?.message ?? '';
-      // 如果没有错误信息，则会根据状态码进行提示
-      message.error(errorMessage || msg);
+      const responseData = error?.response?.data;
+      // 优先展示服务端的可读消息；error 是供程序分支判断的稳定机器码。
+      message.error(resolveApiErrorMessage(responseData, msg));
     }),
   );
 
@@ -110,4 +115,7 @@ export const requestClient = createRequestClient(apiURL, {
   responseReturn: 'data',
 });
 
-export const baseRequestClient = new RequestClient({ baseURL: apiURL });
+export const baseRequestClient = new RequestClient({
+  baseURL: apiURL,
+  withCredentials: true,
+});

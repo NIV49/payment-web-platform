@@ -1,0 +1,7 @@
+interface:
+  display_name: "Payment Modernization"
+  short_description: "用 Judge 门禁治理支付平台重构、迁移与对抗复审"
+  default_prompt: "Use $payment-modernization to plan and execute a Judge-governed payment-platform modernization slice."
+
+policy:
+  allow_implicit_invocation: true

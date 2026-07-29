@@ -1,0 +1,105 @@
+package com.niv.payment.permission;
+
+import com.niv.payment.permission.application.DefaultAuthorizationService;
+import com.niv.payment.permission.application.DefaultScopeMatcher;
+import com.niv.payment.permission.datascope.DataScopePlan;
+import com.niv.payment.permission.datascope.GrantPredicate;
+import com.niv.payment.permission.datascope.StructuredPredicateCompiler;
+import com.niv.payment.permission.datascope.WhitelistedColumns;
+import com.niv.payment.permission.domain.*;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class AuthorizationPolicyHardeningTest {
+
+    @Test
+    void stalePermissionVersionIsDenied() {
+        PermissionGrant grant = new PermissionGrant(1L, 2L, PermissionCode.of("order:view"), RiskLevel.NORMAL,
+            Set.of(), List.of(), false, false, true);
+        var service = new DefaultAuthorizationService(
+            ignored -> new GrantSnapshot(20L, 30L, 8L, List.of(grant)),
+            new DefaultScopeMatcher((ancestor, child) -> false, (subject, scope, resource) -> false));
+        AuthorizationSubject subject = new AuthorizationSubject(10L, 20L, 30L, 40L, 7L, 1L, false);
+
+        AuthorizationDecision decision = service.authorize(new AuthorizationRequest(subject,
+            PermissionCode.of("order:view"), new ResourceContext(30L, 20L, null, null, null, null, null), null));
+
+        assertFalse(decision.allowed());
+        assertEquals(DecisionReason.PERMISSION_VERSION_STALE, decision.reason());
+    }
+
+    @Test
+    void wildcardPermissionAndEmptySpecifiedScopeAreRejected() {
+        assertThrows(IllegalArgumentException.class, () -> PermissionCode.of("*:*:*"));
+        assertThrows(IllegalArgumentException.class, () -> PermissionCode.of("system:user:create"));
+        assertThrows(IllegalArgumentException.class, () ->
+            new DimensionScope(ScopeDimension.MERCHANT, ScopeMode.SPECIFIED, Set.of()));
+    }
+
+    @Test
+    void fundPermissionMetadataCannotEnableCrossTenantAccess() {
+        assertThrows(IllegalArgumentException.class, () ->
+            new PermissionDefinition(PermissionCode.of("payout:approve"), RiskLevel.FUND,
+                CrossTenantMode.RELATED_PARTY_READ, Set.of(), true, true, true));
+        assertThrows(IllegalArgumentException.class, () ->
+            new PermissionGrant(1L, 2L, PermissionCode.of("payout:approve"), RiskLevel.FUND,
+                CrossTenantMode.RELATED_PARTY_READ, Set.of(), List.of(), true, true, true));
+    }
+
+    @Test
+    void relatedPartyReadCatalogMetadataRejectsMutatingAndUnknownActions() {
+        assertThrows(IllegalArgumentException.class, () ->
+            new PermissionDefinition(PermissionCode.of("order:update"), RiskLevel.NORMAL,
+                CrossTenantMode.RELATED_PARTY_READ, Set.of(), false, false, true));
+        assertThrows(IllegalArgumentException.class, () ->
+            new PermissionDefinition(PermissionCode.of("order:preview"), RiskLevel.NORMAL,
+                CrossTenantMode.RELATED_PARTY_READ, Set.of(), false, false, true));
+
+        assertTrue(PermissionCode.of("order:view").action().readOnly());
+        assertTrue(PermissionCode.of("order:read").action().readOnly());
+        assertFalse(PermissionCode.of("order:update").action().readOnly());
+        assertEquals(PermissionAction.UNKNOWN, PermissionCode.of("order:preview").action());
+    }
+
+    @Test
+    void noMatchingGrantCompilesToTenantBoundDenyPredicate() {
+        AuthorizationSubject subject = new AuthorizationSubject(10L, 20L, 30L, 40L, 1L, 1L, false);
+        DataScopePlan plan = new DataScopePlan(30L, 20L, PermissionCode.of("order:view"), 1L, List.of());
+
+        var predicate = new StructuredPredicateCompiler().compile(subject, plan,
+            new WhitelistedColumns("o.tenant_id", Map.of()));
+
+        assertEquals("o.tenant_id = ? AND 1 = 0", predicate.sql());
+        assertEquals(List.of(30L), predicate.parameters());
+    }
+
+    @Test
+    void assignedScopeCannotCompileAsAStaticTargetPredicate() {
+        AuthorizationSubject subject = new AuthorizationSubject(10L, 20L, 30L, 40L, 1L, 1L, false);
+        DimensionScope assignedMerchant = new DimensionScope(
+            ScopeDimension.MERCHANT, ScopeMode.ASSIGNED, Set.of("M1"));
+        DataScopePlan plan = new DataScopePlan(
+            30L,
+            20L,
+            PermissionCode.of("order:view"),
+            1L,
+            List.of(new GrantPredicate(1L, List.of(assignedMerchant))));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, () ->
+            new StructuredPredicateCompiler().compile(subject, plan,
+                new WhitelistedColumns("o.tenant_id", Map.of(ScopeDimension.MERCHANT, "o.merchant_id"))));
+
+        assertTrue(error.getMessage().contains("ASSIGNED"));
+    }
+
+    @Test
+    void dynamicSqlColumnNamesAreRejected() {
+        assertThrows(IllegalArgumentException.class, () ->
+            new WhitelistedColumns("o.tenant_id OR 1=1", Map.of()));
+    }
+}

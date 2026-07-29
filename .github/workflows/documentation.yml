@@ -1,0 +1,157 @@
+name: Documentation verification
+
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: documentation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    container:
+      image: python:3.13.14-bookworm@sha256:b4d62b6602fd5b284f82cb9b733cc550f237f847c065b84cbb54dfe28ce837a2
+      options: --platform linux/amd64 --read-only --cap-drop ALL --cap-add DAC_OVERRIDE --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777
+    timeout-minutes: 20
+
+    steps:
+      - name: Verify checkout workspace access
+        shell: /bin/sh -eu {0}
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          exec /usr/bin/env -i \
+            PATH=/usr/bin:/bin \
+            HOME=/tmp/documentation-ci-home \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            /bin/bash --noprofile --norc -e -u -o pipefail <<'DOCUMENTATION_CI_SCRIPT'
+          probe="$GITHUB_WORKSPACE/.ci-checkout-write-probe-$$"
+          /usr/bin/mkdir -- "$probe"
+          /usr/bin/rmdir -- "$probe"
+          DOCUMENTATION_CI_SCRIPT
+
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Capture Python runtime and prepare pinned documentation dependencies
+        shell: /bin/sh -eu {0}
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          exec /usr/bin/env -i \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            HOME=/tmp/documentation-ci-home \
+            LANG=C \
+            LC_ALL=C \
+            CI_PYTHON_DEPENDENCY_ROOT=/tmp/documentation-python-dependencies \
+            CI_REQUIRE_IMMUTABLE_PYTHON_RUNTIME=1 \
+            GITHUB_SHA="$GITHUB_SHA" \
+            /bin/bash --noprofile --norc -e -u -o pipefail <<'DOCUMENTATION_CI_SCRIPT'
+          set -u
+          source scripts/ci_repository_guard.sh
+          ci_capture_repository_state "$GITHUB_SHA"
+          ci_verify_python_runtime_immutability
+          ci_prepare_python_dependencies --require-hashes \
+            "$CI_EXPECTED_WORKSPACE/scripts/requirements-documentation.txt"
+          ci_verify_python_execution_environment
+          ci_verify_repository_state
+          DOCUMENTATION_CI_SCRIPT
+
+      - name: Verify and test documentation governance without snapshot drift
+        shell: /bin/sh -eu {0}
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          TRUSTED_POLICY_COMMIT: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          exec /usr/bin/env -i \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            HOME=/tmp/documentation-ci-home \
+            LANG=C \
+            LC_ALL=C \
+            CI_PYTHON_DEPENDENCY_ROOT=/tmp/documentation-python-dependencies \
+            CI_REQUIRE_IMMUTABLE_PYTHON_RUNTIME=1 \
+            GITHUB_SHA="$GITHUB_SHA" \
+            TRUSTED_POLICY_COMMIT="$TRUSTED_POLICY_COMMIT" \
+            /bin/bash --noprofile --norc -e -u -o pipefail <<'DOCUMENTATION_CI_SCRIPT'
+          set -u
+          source scripts/ci_repository_guard.sh
+          ci_capture_repository_state "$GITHUB_SHA"
+          ci_verify_python_runtime_immutability
+          ci_capture_python_dependency_state
+          ci_verify_python_execution_environment
+          set +e
+          (
+            set -e
+            ci_python scripts/check-doc-decisions.py
+            ci_python scripts/check_project_skills.py
+            ci_python scripts/check_sensitive_artifacts.py \
+              --repository-root "$CI_EXPECTED_WORKSPACE" \
+              --base-commit "$TRUSTED_POLICY_COMMIT" \
+              --commit "$CI_EXPECTED_COMMIT"
+            ci_python scripts/check_modernization_artifacts.py \
+              --repository-root "$CI_EXPECTED_WORKSPACE" \
+              --commit "$CI_EXPECTED_COMMIT" \
+              --trusted-policy-commit "$TRUSTED_POLICY_COMMIT"
+            ci_verify_repository_state
+            snapshot="$("$CI_TOOL_MKTEMP" -d)"
+            trap '"$CI_TOOL_RM" -rf "$snapshot"' EXIT
+            set +e
+            ci_git archive "$CI_EXPECTED_COMMIT" |
+              "$CI_TOOL_TAR" -x -C "$snapshot"
+            archive_pipeline_status=("${PIPESTATUS[@]}")
+            set -e
+            archive_status="${archive_pipeline_status[0]}"
+            tar_status="${archive_pipeline_status[1]}"
+            if (( archive_status != 0 )); then
+              printf 'Archive pipeline failed: archive_status=%d tar_status=%d\n' \
+                "$archive_status" "$tar_status" >&2
+              exit "$archive_status"
+            fi
+            if (( tar_status != 0 )); then
+              printf 'Archive pipeline failed: archive_status=%d tar_status=%d\n' \
+                "$archive_status" "$tar_status" >&2
+              exit "$tar_status"
+            fi
+            ci_verify_archive_manifest "$snapshot"
+            (
+              cd "$snapshot"
+              ci_python scripts/check-doc-decisions.py
+              ci_python scripts/check_project_skills.py
+            )
+            ci_python \
+              "$snapshot/scripts/check_sensitive_artifacts.py" \
+              --repository-root "$CI_EXPECTED_WORKSPACE" \
+              --base-commit "$TRUSTED_POLICY_COMMIT" \
+              --commit "$CI_EXPECTED_COMMIT"
+            ci_python \
+              "$snapshot/scripts/check_modernization_artifacts.py" \
+              --repository-root "$CI_EXPECTED_WORKSPACE" \
+              --commit "$CI_EXPECTED_COMMIT" \
+              --trusted-policy-commit "$TRUSTED_POLICY_COMMIT"
+            (
+              cd "$snapshot"
+              ci_python -m unittest discover -s scripts/tests -p "test_*.py"
+            )
+          )
+          controlled_status=$?
+          (
+            set -e
+            ci_verify_repository_state
+          )
+          verification_status=$?
+          set -e
+          if (( controlled_status != 0 )); then
+            exit "$controlled_status"
+          fi
+          exit "$verification_status"
+          DOCUMENTATION_CI_SCRIPT
