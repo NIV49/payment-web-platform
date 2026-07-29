@@ -559,7 +559,15 @@ class ImmutableEvidenceTest(unittest.TestCase):
         diff_tree_command = next(
             command for command in commands if "diff-tree" in command
         )
-        self.assertIn("--no-textconv", diff_tree_command)
+        self.assertEqual(1, diff_tree_command.count("--no-textconv"))
+        self.assertLess(
+            diff_tree_command.index("diff-tree"),
+            diff_tree_command.index("--no-textconv"),
+        )
+        self.assertLess(
+            diff_tree_command.index("--no-textconv"),
+            diff_tree_command.index(target),
+        )
         self.assertIn("evidence.txt", changed_paths)
         self.assertFalse(callback_sentinel.exists())
 
