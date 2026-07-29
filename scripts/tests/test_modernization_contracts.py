@@ -523,6 +523,46 @@ class ImmutableEvidenceTest(unittest.TestCase):
             evidence.changed_paths_for_commit(self.repository, target),
         )
 
+    def test_changed_paths_explicitly_disables_textconv_callback(self) -> None:
+        callback_sentinel = self.root / "textconv-callback-ran"
+        textconv = self.root / "textconv-callback"
+        textconv.write_text(
+            "#!/bin/sh\n"
+            f": > {shlex.quote(str(callback_sentinel))}\n"
+            "exec /bin/cat \"$1\"\n",
+            encoding="utf-8",
+        )
+        textconv.chmod(0o755)
+        git(self.repository, "config", "diff.untrusted.textconv", str(textconv))
+        (self.repository / ".gitattributes").write_text(
+            "*.txt diff=untrusted\n", encoding="utf-8"
+        )
+        evidence_path = self.repository / "evidence.txt"
+        evidence_path.write_text("base\n", encoding="utf-8")
+        commit_all(self.repository, "register textconv driver")
+        evidence_path.write_text("changed\n", encoding="utf-8")
+        target = commit_all(self.repository, "change attributed evidence")
+        commands: list[list[str]] = []
+        real_run = evidence.subprocess.run
+
+        def record_run(command, *args, **kwargs):
+            commands.append(list(command))
+            return real_run(command, *args, **kwargs)
+
+        with mock.patch.object(
+            evidence.subprocess, "run", side_effect=record_run
+        ):
+            changed_paths = evidence.changed_paths_for_commit(
+                self.repository, target
+            )
+
+        diff_tree_command = next(
+            command for command in commands if "diff-tree" in command
+        )
+        self.assertIn("--no-textconv", diff_tree_command)
+        self.assertIn("evidence.txt", changed_paths)
+        self.assertFalse(callback_sentinel.exists())
+
     def test_rejects_git_blob_and_materialized_file_over_size_limit(self) -> None:
         oversized = b"x" * (evidence.DEFAULT_MAX_EVIDENCE_BYTES + 1)
         (self.repository / "oversized.bin").write_bytes(oversized)

@@ -288,6 +288,7 @@ def changed_paths_for_commit(
             "--root",
             "-m",
             "--no-ext-diff",
+            "--no-textconv",
             "--ignore-submodules=none",
             "--no-commit-id",
             "--name-only",
