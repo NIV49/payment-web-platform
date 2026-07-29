@@ -1018,6 +1018,7 @@ ci_discovery_git() {
     GIT_CONFIG_GLOBAL=/dev/null \
     "$CI_TOOL_GIT" \
       -C "$workspace" \
+      -c safe.directory="$workspace" \
       -c core.commitGraph=false \
       -c core.useReplaceRefs=false \
       --no-replace-objects \
@@ -1041,6 +1042,7 @@ ci_bound_git() {
       -C "$CI_EXPECTED_WORKSPACE" \
       --git-dir="$CI_EXPECTED_GIT_DIR" \
       --work-tree="$CI_EXPECTED_WORK_TREE" \
+      -c safe.directory="$CI_EXPECTED_WORKSPACE" \
       -c core.commitGraph=false \
       -c core.useReplaceRefs=false \
       --no-replace-objects \

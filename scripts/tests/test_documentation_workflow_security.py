@@ -464,6 +464,62 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
         ):
             self.assertIn(required, content)
 
+    def test_repository_guard_accepts_checkout_with_different_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_root = Path(directory)
+            repository, commit = self.create_guarded_repository(fixture_root)
+            wrapper_directory = fixture_root / "git-wrapper"
+            wrapper_directory.mkdir()
+            git_wrapper = wrapper_directory / "git"
+            git_wrapper.write_text(
+                "#!/bin/sh\n"
+                "GIT_TEST_ASSUME_DIFFERENT_OWNER=1\n"
+                "export GIT_TEST_ASSUME_DIFFERENT_OWNER\n"
+                f"exec {shlex.quote(self.local_tools['git'])} \"$@\"\n",
+                encoding="utf-8",
+            )
+            git_wrapper.chmod(0o755)
+            script = (
+                "set -euo pipefail\n"
+                f"CI_SAFE_PATH={shlex.quote(str(wrapper_directory))}:"
+                f"{shlex.quote(self.local_safe_path)}\n"
+                "source scripts/ci_repository_guard.sh\n"
+                'ci_capture_repository_state "$GITHUB_SHA"\n'
+                "ci_verify_repository_state\n"
+            )
+
+            result = self.run_workflow_shell(
+                fixture_root,
+                repository,
+                script,
+                commit,
+            )
+
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertFalse(fixture_root.joinpath("home", ".gitconfig").exists())
+            guard = REPOSITORY_GUARD.read_text(encoding="utf-8")
+            discovery = re.search(
+                r"^ci_discovery_git\(\) \{\n(?P<body>.*?)^\}\n",
+                guard,
+                re.MULTILINE | re.DOTALL,
+            )
+            bound = re.search(
+                r"^ci_bound_git\(\) \{\n(?P<body>.*?)^\}\n",
+                guard,
+                re.MULTILINE | re.DOTALL,
+            )
+            self.assertIsNotNone(discovery)
+            self.assertIsNotNone(bound)
+            self.assertIn(
+                '-c safe.directory="$workspace"',
+                discovery.group("body"),
+            )
+            self.assertIn(
+                '-c safe.directory="$CI_EXPECTED_WORKSPACE"',
+                bound.group("body"),
+            )
+            self.assertNotIn("safe.directory=*", guard)
+
     def test_python_toolchain_capture_uses_native_identity_before_python_output(
         self,
     ) -> None:
