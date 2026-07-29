@@ -857,6 +857,8 @@ def _discovery_git_command(repository: Path, *arguments: str) -> tuple[str, ...]
         "-C",
         str(repository),
         "-c",
+        "safe.directory=",
+        "-c",
         f"safe.directory={repository}",
         "-c",
         "core.fsmonitor=",
@@ -878,6 +880,11 @@ def discover_tracked_artifact_targets(
     repository: Path,
 ) -> tuple[tuple[str, ...], list[str]]:
     repository = repository.resolve()
+    if repository.name == "*":
+        return (), [
+            "repository: GIT_REPOSITORY_MISMATCH: "
+            "default scan requires the exact repository root"
+        ]
     try:
         environment = _isolated_git_environment(os.environ)
     except ValueError:
@@ -4139,10 +4146,14 @@ def scan_file(path: Path, repository: Path) -> list[str]:
 
 def _run_immutable_git(repository: Path, arguments: tuple[str, ...]) -> bytes:
     repository = repository.resolve()
+    if repository.name == "*":
+        raise ValueError("immutable Git repository path cannot end in a wildcard")
     environment = _isolated_git_environment(os.environ)
     result = subprocess.run(
         (
             "git",
+            "-c",
+            "safe.directory=",
             "-c",
             f"safe.directory={repository}",
             "-c",
@@ -4269,6 +4280,7 @@ def scan_git_diff(repository: Path, base_commit: str, commit: str) -> list[str]:
                             "--diff-filter=ACMRT",
                             "--no-renames",
                             "--no-ext-diff",
+                            "--no-textconv",
                             "--ignore-submodules=none",
                             "-r",
                             child_commit,
@@ -4284,6 +4296,7 @@ def scan_git_diff(repository: Path, base_commit: str, commit: str) -> list[str]:
                             "--diff-filter=ACMRT",
                             "--no-renames",
                             "--no-ext-diff",
+                            "--no-textconv",
                             "--ignore-submodules=none",
                             parent_commit,
                             child_commit,

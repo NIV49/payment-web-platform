@@ -1543,6 +1543,8 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
                 "-C",
                 str(nested),
                 "-c",
+                "safe.directory=",
+                "-c",
                 f"safe.directory={nested}",
                 "-c",
                 "core.fsmonitor=",
@@ -1675,6 +1677,8 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
                     "-C",
                     str(repository),
                     "-c",
+                    "safe.directory=",
+                    "-c",
                     f"safe.directory={repository}",
                     "-c",
                     "core.fsmonitor=",
@@ -1748,6 +1752,97 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
                 ],
                 run_git.call_args_list,
             )
+
+    def test_immutable_git_preserves_isolation_and_resets_exact_trust(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory).resolve()
+            environment = {"PATH": "/trusted/bin"}
+            completed = subprocess.CompletedProcess(
+                args=(),
+                returncode=0,
+                stdout=b"ok\n",
+                stderr=b"",
+            )
+
+            with (
+                mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch.object(
+                    sensitive_artifacts.subprocess,
+                    "run",
+                    return_value=completed,
+                ) as run_git,
+            ):
+                output = sensitive_artifacts._run_immutable_git(
+                    repository,
+                    ("status", "--short"),
+                )
+
+            self.assertEqual(b"ok\n", output)
+            self.assertEqual(
+                (
+                    "git",
+                    "-c",
+                    "safe.directory=",
+                    "-c",
+                    f"safe.directory={repository}",
+                    "-c",
+                    "core.fsmonitor=",
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "-c",
+                    "core.commitGraph=false",
+                    "-c",
+                    "core.useReplaceRefs=false",
+                    "-c",
+                    "submodule.recurse=false",
+                    "--no-replace-objects",
+                    "--literal-pathspecs",
+                    "status",
+                    "--short",
+                ),
+                run_git.call_args.args[0],
+            )
+            self.assertEqual(
+                sensitive_artifacts._isolated_git_environment(environment),
+                run_git.call_args.kwargs["env"],
+            )
+
+    def test_git_scans_reject_literal_star_before_any_git_subprocess(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory, "*")
+            repository.mkdir()
+            with mock.patch.object(
+                sensitive_artifacts.subprocess,
+                "run",
+            ) as run_git:
+                targets, discovery_errors = (
+                    sensitive_artifacts.discover_tracked_artifact_targets(
+                        repository
+                    )
+                )
+                diff_errors = scan_git_diff(
+                    repository,
+                    "0" * 40,
+                    "1" * 40,
+                )
+
+            self.assertEqual((), targets)
+            self.assertEqual(
+                [
+                    "repository: GIT_REPOSITORY_MISMATCH: "
+                    "default scan requires the exact repository root"
+                ],
+                discovery_errors,
+            )
+            self.assertTrue(
+                any("wildcard" in error for error in diff_errors),
+                diff_errors,
+            )
+            run_git.assert_not_called()
 
     def test_git_scans_accept_only_the_exact_different_owner_repository_without_running_repository_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1927,6 +2022,71 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.assertTrue(any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors), errors)
             self.assertNotIn("hidden-by-gitattributes", "\n".join(errors))
+
+    def test_immutable_diff_disables_textconv_for_root_and_parent_edges(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory).resolve()
+            grafts = repository / "missing-grafts"
+            base = "0" * 40
+            target = "1" * 40
+
+            for edge_command, parents in (
+                ("diff-tree", ()),
+                ("diff", (base,)),
+            ):
+                with self.subTest(edge_command=edge_command):
+                    calls: list[tuple[str, ...]] = []
+
+                    def run_git(
+                        _repository: Path,
+                        arguments: tuple[str, ...],
+                    ) -> bytes:
+                        calls.append(arguments)
+                        if arguments == (
+                            "rev-parse",
+                            "--is-shallow-repository",
+                        ):
+                            return b"false\n"
+                        if arguments == (
+                            "rev-parse",
+                            "--git-path",
+                            "info/grafts",
+                        ):
+                            return os.fsencode(grafts) + b"\n"
+                        if arguments[:2] == (
+                            "merge-base",
+                            "--is-ancestor",
+                        ):
+                            return b""
+                        if arguments[0] == "rev-list":
+                            history = " ".join((target, *parents))
+                            return os.fsencode(history) + b"\n"
+                        if arguments[:2] == ("cat-file", "commit"):
+                            parent_headers = b"".join(
+                                b"parent " + os.fsencode(parent) + b"\n"
+                                for parent in parents
+                            )
+                            return b"tree " + b"2" * 40 + b"\n" + parent_headers + b"\n"
+                        if arguments[0] == edge_command:
+                            return b""
+                        raise AssertionError(f"unexpected Git call: {arguments}")
+
+                    with mock.patch.object(
+                        sensitive_artifacts,
+                        "_run_immutable_git",
+                        side_effect=run_git,
+                    ):
+                        errors = scan_git_diff(repository, base, target)
+
+                    self.assertEqual([], errors)
+                    edge_arguments = next(
+                        arguments
+                        for arguments in calls
+                        if arguments[0] == edge_command
+                    )
+                    self.assertIn("--no-textconv", edge_arguments)
 
     def test_immutable_diff_scans_secrets_removed_before_the_target_commit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
