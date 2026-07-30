@@ -110,7 +110,7 @@ apps/web-antdv-next
 | `router/access.ts` | pageMap/layoutMap、后端菜单加载和合并前校验 | `generateAccess` |
 | `router/guard.ts` | token、用户信息、动态路由注入 | `setupAccessGuard` |
 | `store/auth.ts` | 登录、用户/权限码加载、退出 | `useAuthStore` |
-| `views/_core` | 登录、错误、关于、个人页 | 框架页面 |
+| `views/_core` | 登录、错误、关于、个人页 | Profile 只读展示 `/user/info` 的会话身份字段；不暴露未接后端的密码、MFA 或通知设置 |
 | `views/dashboard` | Dashboard 页面 | 后端 V3 菜单映射 |
 | `views/system` | 用户、角色、菜单、部门页面 | 当前 IAM 管理 UI |
 

@@ -2,11 +2,16 @@
 
 ## Identity
 
-- Decision/base SHA: `60b31f74dd0f1506ab6f0e3449dcd176f93880da`
+- Decision source SHA: `60b31f74dd0f1506ab6f0e3449dcd176f93880da`
 - Original source SHA: `3afbd5b2e120df4ecc49c99038650914985a0427`
-- Branch: `codex/playground-decisions-3afbd5`
+- Source branch: `codex/playground-decisions-3afbd5`
+- Integration branch: `codex/main-convergence-final-20260730`
+- Integrated decision SHA: `996ccfcbe3f4b475ffa0de06258530ecbc205ec2`
+- Reviewed implementation SHA: `c968722d78f704980a04f4ccf3318f316af4a480`
+- Review repair SHA: `dbb0dc733d8e0f2a2bb086f7e5ad29f16f9e837e`
 - Accepted decisions: `docs: record accepted playground decisions` at the
-  decision/base SHA above
+  decision source SHA above; the integration commit preserves its source
+  mapping in the commit trailer
 - Scope: existing product configuration and additive API response correction
 
 ## Governance Classification
@@ -14,8 +19,9 @@
 This is not a legacy modernization Capability Slice. It has no source snapshot,
 Rule Card, migration, or claim of formal Judge closure. The modernization
 policy currently has no trusted reviewer keys or Judge checks, so this task may
-produce only a local draft candidate and independent technical review. It must
-not be reported as formally Judge closed.
+produce an independently reviewed technical candidate and, when explicitly
+authorized by the repository owner, push that candidate. It must not be
+reported as formally Judge closed.
 
 ## Acceptance Criteria
 
@@ -32,8 +38,8 @@ not be reported as formally Judge closed.
    A backend route colliding on either dimension fails route generation before
    merge, including a different-name/same-path collision.
 5. Demo and Vben reference source remains in the repository but is not
-   registered as a product route. Direct navigation reaches existing not-found
-   handling.
+   registered as a product route. Product quick navigation contains no demo
+   links, and direct demo navigation reaches existing not-found handling.
 6. `/user/info` satisfies the framework `UserInfo` shape with `userId`,
    `avatar`, `desc`, and `token`. The Web DTO supplies an empty description and
    the fixed non-secret cookie-session marker; Core and persistence do not gain
@@ -60,8 +66,8 @@ not be reported as formally Judge closed.
    to implemented current fact. Do not rewrite unrelated Playground reference
    material.
 7. Run focused RED/GREEN checks, project gates, browser checks, and immutable
-   diff scans. Commit an immutable local draft candidate only after they pass
-   or record the exact unavailable gate.
+   diff scans. Commit an immutable technical candidate only after they pass or
+   record the exact unavailable gate.
 8. Obtain an independent read-only review of the exact final SHA and fix every
    BLOCKER; handle each SHOULD_FIX or record evidence-based disposition.
 
@@ -101,7 +107,9 @@ not be reported as formally Judge closed.
 - Backend: affected Admin API test, then `./mvnw -s maven-settings.xml clean verify`.
 - Repository: `git diff --check`; documentation decision/link checks;
   `scripts/check_sensitive_artifacts.py` for the immutable base/candidate diff.
-- Runtime: `/system/menu` remains backend-provided; `/profile` resolves;
+- Runtime: `/system/menu` remains backend-provided; `/profile` resolves as a
+  read-only projection of validated `/user/info` fields without demo security,
+  password, contact, MFA, or notification controls;
   `/demos` and `/vben-admin` are not registered; a synthetic backend `/profile`
   collision fails closed.
 - Modernization authoritative gate is not applicable to this non-modernization

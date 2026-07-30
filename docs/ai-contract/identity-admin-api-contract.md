@@ -321,7 +321,7 @@ Response data：
 
 ### GET `/menu/all`
 
-返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。后端若返回 route name `Profile` 或 canonical path `/profile`，前端在合并前 fail closed。
+返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。该 Profile 仅只读展示 `/user/info` 已校验的姓名、登录账号、用户 ID 和角色；密码修改、MFA、手机号、邮箱和通知偏好尚无后端契约，页面不得展示演示状态或伪成功操作。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。后端若返回 route name `Profile` 或 canonical path `/profile`，前端在合并前 fail closed。
 
 当前动态菜单来源是 Role -> role_menu -> Menu；按钮权限仍由 `/auth/codes` 决定。菜单展示关系不等于业务授权。
 
