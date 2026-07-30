@@ -63,7 +63,7 @@ public class AuthUserMenuController {
         AuthorizationSubject subject = subject(request);
         IdentityModels.CurrentUser user = identities.currentUser(subject.tenantId(), subject.membershipId());
         return ApiResponse.success(new UserInfoResponse(Long.toString(user.id()), user.username(), user.realName(),
-            user.avatar(), user.roles(), user.homePath()));
+            user.avatar(), user.roles(), user.homePath(), "", "cookie-session"));
     }
 
     @GetMapping("/auth/codes")
@@ -146,7 +146,7 @@ public class AuthUserMenuController {
                         @Pattern(regexp = "[1-9][0-9]{0,18}") String tenantId) { }
     record LoginResponse(String accessToken) { }
     record UserInfoResponse(String userId, String username, String realName, String avatar,
-                            List<String> roles, String homePath) { }
+                            List<String> roles, String homePath, String desc, String token) { }
     record MenuResponse(String id, String pid, String name, String path, String component, String redirect,
                         String authCode, String type, Map<String, Object> meta, int status,
                         List<MenuResponse> children) { }

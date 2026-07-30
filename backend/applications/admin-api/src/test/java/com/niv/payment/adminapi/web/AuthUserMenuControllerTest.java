@@ -51,6 +51,24 @@ class AuthUserMenuControllerTest {
             .containsExactly("SafePage");
     }
 
+    @Test
+    void currentUserAddsOnlyTheApprovedWebCompatibilityFields() {
+        IdentityModels.CurrentUser currentUser = new IdentityModels.CurrentUser(
+            100, "admin", "Platform Administrator", "", List.of("platform-admin"), "/dashboard");
+        AuthUserMenuController controller = new AuthUserMenuController(
+            authentication(), identities(List.of(), Optional.of(currentUser)),
+            new ObjectMapper(), new VbenMenuContract(""));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(AuthorizationSubject.class.getName(),
+            new AuthorizationSubject(100, 1_000, 1, 10L, 0, 0, false));
+
+        ApiResponse<AuthUserMenuController.UserInfoResponse> response = controller.currentUser(request);
+
+        assertThat(response.data()).isEqualTo(new AuthUserMenuController.UserInfoResponse(
+            "100", "admin", "Platform Administrator", "", List.of("platform-admin"),
+            "/dashboard", "", "cookie-session"));
+    }
+
     private static IdentityModels.Menu menu(long id, Long parentId, String type, String name, String metaJson) {
         return new IdentityModels.Menu(id, parentId, type, name, "/" + name.toLowerCase(), null,
             null, null, metaJson, 1, 0);
@@ -69,10 +87,17 @@ class AuthUserMenuControllerTest {
     }
 
     private static IdentityAdministrationService identities(List<IdentityModels.Menu> menus) {
+        return identities(menus, Optional.empty());
+    }
+
+    private static IdentityAdministrationService identities(
+        List<IdentityModels.Menu> menus,
+        Optional<IdentityModels.CurrentUser> currentUser
+    ) {
         IdentityQueryPort queries = new IdentityQueryPort() {
             @Override
             public Optional<IdentityModels.CurrentUser> findCurrentUser(long tenantId, long membershipId) {
-                return Optional.empty();
+                return currentUser;
             }
 
             @Override

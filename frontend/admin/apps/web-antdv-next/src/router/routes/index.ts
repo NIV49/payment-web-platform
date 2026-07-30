@@ -6,7 +6,7 @@ import { MENU_PAGE_COMPONENTS } from '#/api/system/menu-contract';
 
 import { coreRoutes, fallbackNotFoundRoute } from './core';
 
-const dynamicRouteFiles = import.meta.glob('./modules/**/*.ts', {
+const dynamicRouteFiles = import.meta.glob('./modules/profile.ts', {
   eager: true,
 });
 

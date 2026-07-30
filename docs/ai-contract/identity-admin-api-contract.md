@@ -35,7 +35,7 @@ web-antdv-next
 - `backend/applications/admin-api` 是可启动 Spring Boot composition root；
 - 默认端口为 `8080`；
 - `web-antdv-next` 已迁入用户、角色、菜单、部门页面和对应 API；
-- 前端 `accessMode` 已设置为 `backend`，登录后使用 `/menu/all` 生成动态菜单；
+- 产品路由模式已由应用常量固定为 `mixed`，登录后使用 `/menu/all` 生成业务路由，本地只合并隐藏的 `Profile`；缓存偏好不决定路由模式；
 - 当前用户首页为 `/dashboard`，动态 Dashboard 路由将其重定向到 `/dashboard/analytics`；
 - 后端已有 Testcontainers/MockMvc 契约集成测试覆盖 Cookie、14 个权限码、菜单、列表、状态 PATCH 和部分租户隔离场景。
 
@@ -301,11 +301,13 @@ Response data：
   "realName": "Platform Administrator",
   "avatar": "",
   "roles": ["platform-admin"],
-  "homePath": "/dashboard"
+  "homePath": "/dashboard",
+  "desc": "",
+  "token": "cookie-session"
 }
 ```
 
-不返回完整 RoleGrant、商户、市场或渠道数据范围。
+`token` 只是前端 `UserInfo` 兼容所需的固定非秘密 marker，不是 Sa-Token 或 refresh credential。前端运行时校验完整响应，并忽略未知附加字段。不返回完整 RoleGrant、商户、市场或渠道数据范围。
 
 ### GET `/auth/codes`
 
@@ -319,7 +321,7 @@ Response data：
 
 ### GET `/menu/all`
 
-返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用 backend access mode。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。
+返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。后端若返回 route name `Profile` 或 canonical path `/profile`，前端在合并前 fail closed。
 
 当前动态菜单来源是 Role -> role_menu -> Menu；按钮权限仍由 `/auth/codes` 决定。菜单展示关系不等于业务授权。
 
@@ -767,7 +769,7 @@ V13__enforce_login_credential_hash_safety.sql
 13. local Flyway 不推断 baseline，缺少 history 的旧手工开发卷必须重建；
 14. 原型不连接任何资金写链路；
 15. 管理写操作必须携带可信 Session 捕获的 actor 身份与两个版本，并在写锁后复核；有限过期 Grant 在事务内重验完成前不得用于管理写授权。
-16. 产品目标访问模式为 `mixed`；后端 `/menu/all` 继续拥有业务路由，本地只允许显式白名单路由参与合并。
+16. 产品访问模式为 `mixed`；后端 `/menu/all` 继续拥有业务路由，本地只允许显式白名单路由参与合并。
 17. 框架侧 `UserInfo` 必须包含 `userId/avatar/desc/token`；`token` 只能是固定非秘密 `cookie-session` marker，不能返回 Sa-Token 或 refresh credential。
 18. refresh credential 的目标传输方式是独立 HttpOnly Cookie，禁止 body/header 和 JavaScript 可读存储；rotation、重放检测、并发、TTL、撤销、退出联动和 IdP 兼容批准前不得开启 `/auth/refresh`。
 19. 当前阶段不增加用户详情接口；编辑继续使用列表快照，`40902` 后关闭旧表单并刷新列表。
@@ -781,7 +783,7 @@ V13__enforce_login_credential_hash_safety.sql
 | RBAC management | 用户/角色/菜单/部门已实现 | 仅平台租户、本轮 14 个普通权限 |
 | Permission load | HTTP PEP + 版本化 Redis GrantSnapshot 已接通 | 没有 RoleGrant 管理 UI/API |
 | Cross-tenant model | `SAME_TENANT_ONLY` 默认；只有受控 `READ/VIEW` action 可使用 `RELATED_PARTY_READ`，Core 与 V12 CHECK 双重约束 | 没有 Party/Relationship adapter，运行时仍 fail closed |
-| Dynamic menu | backend mode、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
+| Dynamic menu | 固定 mixed mode、仅本地 Profile、保留路由冲突即拒绝、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
 | Flyway | V1→V13 fresh/upgrade 可运行；V8 fixture 隔离、V9-V13 拒绝式约束已落迁移 | 生产 migration 审批和备份恢复演练未完成 |
 
@@ -815,7 +817,7 @@ V13__enforce_login_credential_hash_safety.sql
 - 用户状态改用 `PATCH /system/user/{id}/status`；
 - 角色状态改用 `PATCH /system/role/{id}/status`；
 - `activePath` 进入 `meta`；
-- access mode 切为 backend；
+- 产品 access mode 固定为 mixed，业务路由由后端提供，本地只保留 Profile；
 - Cookie marker 不再进入 Authorization。
 
 ## 3.2 下一阶段兼容工作
@@ -927,7 +929,8 @@ RoleGrant(permissionCode + dimensions + constraints)
 - 登录在查账号/BCrypt 前原子预留 15 分钟 client 30 和 client/username 5 双桶，Redis key 同 hash slot；
 - 登录响应只返回 `cookie-session` marker；
 - 前端所有请求 `withCredentials=true` 且不发送 Authorization marker；
-- `/user/info` 返回 `/dashboard`；
+- `/user/info` 返回 `/dashboard`、空 `desc` 和固定非秘密 `cookie-session` marker；
+- mixed 路由只注册本地 `Profile`，后端与其 name/path 冲突时拒绝合并；
 - `/auth/codes` 返回且仅返回本轮 14 个码；
 - 用户/角色/菜单/部门接口受后端权限拦截；
 - 未登记的 API method/path 默认返回 403；

@@ -95,18 +95,19 @@ apps/web-antdv-next
 | `main.ts` | 偏好命名空间初始化与延迟 bootstrap | `initApplication` |
 | `bootstrap.ts` | Vue App 组合根 | `bootstrap` |
 | `app.vue` | Antdv Next ConfigProvider、主题、RouterView | 根组件 |
-| `preferences.ts` | 应用覆盖配置 | 当前 backend access mode |
+| `preferences.ts` | 应用覆盖配置 | 保留 backend 按钮权限码语义，不决定产品路由模式 |
 | `adapter/component` | Antdv Next 控件注册、ApiComponent、全局共享组件 | `initComponentAdapter` |
 | `adapter/form.ts` | VbenForm model/rule 适配 | `initSetupVbenForm` |
 | `adapter/vxe-table.ts` | VxeTable 分页/Cell/权限操作适配 | `setupVbenVxeTable` |
 | `api/request.ts` | baseURL、Cookie、envelope、401 和错误拦截 | `requestClient` |
-| `api/core` | 登录、用户、菜单、上传契约 | `/auth/*`, `/user/info`, `/menu/all` |
+| `api/core` | 登录、用户、菜单、上传契约；当前用户响应显式校验后映射 | `/auth/*`, `/user/info`, `/menu/all` |
 | `api/system` | 用户、角色、菜单、部门管理契约 | `/system/*` |
 | `layouts` | Auth、Basic、IFrame 布局应用封装 | Router component |
 | `locales` | 应用语言包与 Antdv/Day.js locale | `setupI18n`, `$t` |
 | `router/routes/core.ts` | 登录、错误页等无业务核心路由 | 永久注册 |
-| `router/routes/modules` | frontend/mixed 模式的访问路由 | Playground/静态参考 |
-| `router/access.ts` | pageMap/layoutMap 和后端菜单加载 | `generateAccess` |
+| `router/routes/modules` | mixed 模式本地 allowlist 与未注册参考源码 | 产品只注册 `profile.ts` |
+| `router/product-access.ts` | 固定 mixed 模式和本地 Profile name/path 冲突保护 | `PRODUCT_ACCESS_MODE` |
+| `router/access.ts` | pageMap/layoutMap、后端菜单加载和合并前校验 | `generateAccess` |
 | `router/guard.ts` | token、用户信息、动态路由注入 | `setupAccessGuard` |
 | `store/auth.ts` | 登录、用户/权限码加载、退出 | `useAuthStore` |
 | `views/_core` | 登录、错误、关于、个人页 | 框架页面 |
@@ -125,11 +126,12 @@ login.vue
   -> GET /user/info + GET /auth/codes
   -> router guard
   -> GET /menu/all
-  -> backend route conversion
+  -> reject reserved Profile name/path collisions
+  -> backend route conversion + local Profile
   -> accessStore menus/routes
 ```
 
-前端 store 保存的是 `cookie-session` 非敏感状态标记，真正会话由 `PAYMENT_SESSION` HttpOnly Cookie 持有。请求设置 `withCredentials: true`。这个方案与 Vben 默认 Bearer token 示例不同，修改认证代码时必须同时核对 `api/session.ts`、`api/request.ts`、Auth Store 和后端 Sa-Token Cookie 配置。
+前端 store 保存的是 `cookie-session` 非敏感状态标记，真正会话由 `PAYMENT_SESSION` HttpOnly Cookie 持有。`api/core/user-contract.ts` 对 `/user/info` 做显式运行时映射：`userId/avatar/desc/homePath/roles` 等字段必须满足契约，`token` 必须精确等于 `cookie-session`，未知附加字段会被忽略；该字段不会在获取用户信息时写回 access-token store。请求设置 `withCredentials: true`。这个方案与 Vben 默认 Bearer token 示例不同，修改认证代码时必须同时核对 `api/session.ts`、`api/request.ts`、Auth Store 和后端 Sa-Token Cookie 配置。
 
 ### 列表与表单
 
@@ -148,6 +150,7 @@ views/system/*/list.vue
 - 普通接口经 `defaultResponseInterceptor` 解包：成功码 `0`，数据字段 `data`。
 - 页面列表返回 `{ items, total }`，对应 VxeTable adapter 的响应映射。
 - Long ID 使用字符串，避免 JavaScript 精度丢失。
+- 产品路由模式由 `router/product-access.ts` 固定为 `mixed`；缓存偏好、偏好重置和框架切换控件不能改变该模式。
 - Role、Department、Menu 列表项必须保留后端 `rowVersion`；更新/状态切换用 body `expectedVersion`，删除用 query `expectedVersion`。User 删除把 `userVersion` 作为 expectedVersion。
 - 40902 `OPTIMISTIC_LOCK_CONFLICT` 表示当前表单快照已过期：错误拦截器展示后端可读 message，页面关闭旧编辑态并刷新列表。40901 `DATA_CONFLICT` 是唯一键、树依赖等业务冲突，不能自动按 stale reload 处理。
 - 登录返回 `{ accessToken: 'cookie-session' }`；这只是前端状态协议。

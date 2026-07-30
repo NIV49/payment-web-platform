@@ -14,7 +14,7 @@
 - 本地 Mock：`apps/backend-mock`；
 - 示例知识库：`playground`；
 - UI 组件库：`antdv-next`，不是 `ant-design-vue`；
-- 权限模式：`preferences.app.accessMode = 'backend'`；
+- 产品路由模式：`src/router/product-access.ts` 固定为 `mixed`，不受缓存偏好或切换控件影响；`preferences.app.accessMode = 'backend'` 只保留按钮权限码兼容语义，不再决定路由生成；
 - 后端路由协议：标题传 i18n key，组件传视图路径；
 - Playground 保留用于查模式，但产品功能只进入 `web-antdv-next`。
 
@@ -95,7 +95,9 @@ flowchart LR
 
 - `apps/web-antdv-next/src/main.ts`：先初始化命名空间偏好，再异步加载 bootstrap，最后移除全局 Loading。
 - `apps/web-antdv-next/src/bootstrap.ts`：注册组件适配、表单、i18n、Pinia、权限指令、Router 和 Motion。
-- `apps/web-antdv-next/src/preferences.ts`：当前覆盖 `accessMode: 'backend'`。
+- `apps/web-antdv-next/src/preferences.ts`：保留 `accessMode: 'backend'`，使权限指令继续按 code 判断；它不是产品路由模式的事实来源。
+- `apps/web-antdv-next/src/router/product-access.ts`：固定产品 `mixed` 路由模式，并保留本地 `Profile` 的 name/path。
+- `apps/web-antdv-next/src/router/routes/index.ts`：只注册 `modules/profile.ts`；其他模块源码仅作为参考保留。
 - `apps/web-antdv-next/src/app.vue`：Antdv Next 的 `ConfigProvider`、locale 和主题 token 入口。
 
 顺序是约束。组件适配和 i18n 未完成前，不应提前挂载应用。
@@ -104,13 +106,14 @@ flowchart LR
 
 ### 4.1 为什么必须返回 key
 
-backend 模式在登录后调用：
+mixed 模式在登录后调用：
 
 ```text
 router guard
   -> generateAccess
   -> getAllMenusApi
-  -> generateAccessible('backend')
+  -> assertNoReservedBackendRoutes
+  -> generateAccessible('mixed')
   -> generateRoutesByBackend
   -> router.addRoute / generateMenus
 ```
@@ -134,7 +137,7 @@ router guard
 
 父子路由应分别使用 `system.title`、`system.user.title`、`system.role.title`、`system.menu.title`、`system.dept.title`。
 
-静态路由示例 `src/router/routes/modules/system.ts` 已使用 `$t('system.title')`，但 backend 模式的路由来源是 `/menu/all`，不能指望静态文件覆盖错误的数据库值。
+静态路由示例 `src/router/routes/modules/system.ts` 已使用 `$t('system.title')`，但它没有进入产品本地路由 allowlist；System 等业务路由仍来自 `/menu/all`，不能指望静态文件覆盖错误的数据库值。本地 allowlist 目前只有隐藏的 `Profile`，后端若返回同名路由或 canonical `/profile` 路径，前端会在合并前失败，避免后端元数据静默覆盖本地账户页。
 
 ### 4.2 语言包加载
 

@@ -95,7 +95,7 @@ Admin CRUD 的 HTTP PEP 已接入 `DefaultAuthorizationService` 和版本化 Gra
 
 ### HTTP 层
 
-- `AuthUserMenuController`：`/api/auth/login`、logout、当前用户、权限码和运行时菜单。
+- `AuthUserMenuController`：`/api/auth/login`、logout、当前用户、权限码和运行时菜单；`/user/info` 的 Web DTO 补齐空 `desc` 和固定非秘密 `cookie-session` marker，不把这些展示/适配字段下沉到 Core。
 - `SystemAdministrationController`：`/api/system/user|role|dept|menu` 管理接口。
 - `ApiResponse`：`{ code, data, error, message, traceId }`。
 - `ApiExceptionHandler`：校验、认证、授权、冲突和内部异常转换。
@@ -157,7 +157,7 @@ GET /api/menu/all
   -> jOOQ query by tenant/membership/role
   -> Controller 组树 + 解析 meta_json
   -> RouteRecordStringComponent[]
-  -> Vben generateRoutesByBackend
+  -> 前端拒绝本地 Profile name/path 冲突 -> Vben mixed route generation
 ```
 
 `/menu/all` 只返回 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，BUTTON 不进入动态路由。直接授权节点只在同 tenant 且 ACTIVE 的显式祖先链完整时返回，缺少的祖先会补齐但不带 sibling；祖先缺失、禁用、不是可路由类型或成环时整支 fail closed。
@@ -323,6 +323,7 @@ local 默认仅本机访问，Admin API 为 `http://127.0.0.1:8080/api`；local 
 - Redis adapter：权限快照缓存；
 - Sa-Token adapter：可信 session 属性和 stale session；
 - Admin API：Testcontainers 下的登录、菜单和管理接口契约集成测试；覆盖 Role/Department/Menu stale update/delete、User stale delete、40902 与 404 区分，以及管理列表 rowVersion。
+- `/user/info` 契约：返回字符串 `userId`、空 `desc` 和固定 `cookie-session` marker；marker 不是 Sa-Token，也不是 refresh credential。
 
 最低全量命令：
 
