@@ -111,7 +111,7 @@ apps/web-antdv-next
 | `router/guard.ts` | token、用户信息、动态路由注入 | `setupAccessGuard` |
 | `store/auth.ts` | 登录、用户/权限码加载、退出 | `useAuthStore` |
 | `views/_core` | 登录、错误、关于、个人页 | Profile 只读展示 `/user/info` 的会话身份字段；不暴露未接后端的密码、MFA 或通知设置 |
-| `views/dashboard` | Dashboard 页面 | 后端 V3 菜单映射 |
+| `views/dashboard` | Dashboard 页面 | 后端 V3 菜单映射；Workspace 快捷导航按当前已注册 route name 过滤 |
 | `views/system` | 用户、角色、菜单、部门页面 | 当前 IAM 管理 UI |
 
 ## 5. 关键运行数据流
@@ -132,6 +132,8 @@ login.vue
 ```
 
 前端 store 保存的是 `cookie-session` 非敏感状态标记，真正会话由 `PAYMENT_SESSION` HttpOnly Cookie 持有。`api/core/user-contract.ts` 对 `/user/info` 做显式运行时映射：`userId/avatar/desc/homePath/roles` 等字段必须满足契约，`token` 必须精确等于 `cookie-session`，未知附加字段会被忽略；该字段不会在获取用户信息时写回 access-token store。请求设置 `withCredentials: true`。这个方案与 Vben 默认 Bearer token 示例不同，修改认证代码时必须同时核对 `api/session.ts`、`api/request.ts`、Auth Store 和后端 Sa-Token Cookie 配置。
+
+Workspace 的快捷导航不是独立授权来源。`views/dashboard/workspace/workspace-navigation.ts` 为每个入口绑定后端菜单契约使用的 route name，页面通过 `router.hasRoute` 过滤未被当前动态菜单注册的入口；新增快捷入口必须继续满足该约束。
 
 ### 列表与表单
 

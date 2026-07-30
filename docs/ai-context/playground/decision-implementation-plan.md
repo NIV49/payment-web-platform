@@ -9,6 +9,7 @@
 - Integrated decision SHA: `996ccfcbe3f4b475ffa0de06258530ecbc205ec2`
 - Reviewed implementation SHA: `c968722d78f704980a04f4ccf3318f316af4a480`
 - Review repair SHA: `dbb0dc733d8e0f2a2bb086f7e5ad29f16f9e837e`
+- Authorization landing repair SHA: `b7d1d5f82874a57724033fdb442c7a9d1dccdf20`
 - Accepted decisions: `docs: record accepted playground decisions` at the
   decision source SHA above; the integration commit preserves its source
   mapping in the commit trailer
@@ -49,6 +50,10 @@ reported as formally Judge closed.
    token store. Unknown additive response fields are ignored.
 8. Existing role assignment, `meta.activePath`, `authCode`, backend dynamic
    menu, and no-direct-user-menu-grant behavior remain unchanged.
+9. Stored menu redirects, the returned user `homePath`, and Workspace quick
+   navigation cannot land on a route omitted from the current safe menu tree.
+   Missing targets fall back to the first accessible child/leaf, or the local
+   `/profile` route when no business menu exists.
 
 ## Ordered Work
 
@@ -111,7 +116,8 @@ reported as formally Judge closed.
   read-only projection of validated `/user/info` fields without demo security,
   password, contact, MFA, or notification controls;
   `/demos` and `/vben-admin` are not registered; a synthetic backend `/profile`
-  collision fails closed.
+  collision fails closed; stale stored redirects and home paths cannot restore
+  an omitted route, and Workspace quick navigation hides unregistered routes.
 - Modernization authoritative gate is not applicable to this non-modernization
   task. Empty trusted-reviewer/Judge registries remain a formal-closure limit,
   not a reason to fabricate artifacts.

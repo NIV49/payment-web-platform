@@ -36,7 +36,7 @@ web-antdv-next
 - 默认端口为 `8080`；
 - `web-antdv-next` 已迁入用户、角色、菜单、部门页面和对应 API；
 - 产品路由模式已由应用常量固定为 `mixed`，登录后使用 `/menu/all` 生成业务路由，本地只合并隐藏的 `Profile`；缓存偏好不决定路由模式；
-- 当前用户首页为 `/dashboard`，动态 Dashboard 路由将其重定向到 `/dashboard/analytics`；
+- 本地 bootstrap 管理员的首选首页为 `/dashboard`；`/user/info` 只返回当前安全菜单树中存在的首选路径，否则回退到第一个可访问叶子，无业务菜单时回退到本地 `/profile`；
 - 后端已有 Testcontainers/MockMvc 契约集成测试覆盖 Cookie、14 个权限码、菜单、列表、状态 PATCH 和部分租户隔离场景。
 
 ## 1.2 Base URL、CORS 与可信 Origin
@@ -309,6 +309,8 @@ Response data：
 
 `token` 只是前端 `UserInfo` 兼容所需的固定非秘密 marker，不是 Sa-Token 或 refresh credential。前端运行时校验完整响应，并忽略未知附加字段。不返回完整 RoleGrant、商户、市场或渠道数据范围。
 
+`homePath` 是服务端根据当前 Membership 的安全菜单树解析后的落点，不直接透传持久化首选值。首选路径不在安全树中时返回第一个可访问叶子；没有任何业务菜单时返回本地保留路由 `/profile`。
+
 ### GET `/auth/codes`
 
 返回当前 Membership 的有效权限码 `string[]`。查询要求：
@@ -321,7 +323,7 @@ Response data：
 
 ### GET `/menu/all`
 
-返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。该 Profile 仅只读展示 `/user/info` 已校验的姓名、登录账号、用户 ID 和角色；密码修改、MFA、手机号、邮箱和通知偏好尚无后端契约，页面不得展示演示状态或伪成功操作。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。后端若返回 route name `Profile` 或 canonical path `/profile`，前端在合并前 fail closed。
+返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。该 Profile 仅只读展示 `/user/info` 已校验的姓名、登录账号、用户 ID 和角色；密码修改、MFA、手机号、邮箱和通知偏好尚无后端契约，页面不得展示演示状态或伪成功操作。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。存储的 redirect 只有在目标仍存在于本次安全菜单树时才保留，否则父节点改为重定向到第一个可访问子节点；没有可访问子节点则不返回 redirect。后端若返回 route name `Profile` 或 canonical path `/profile`，前端在合并前 fail closed。
 
 当前动态菜单来源是 Role -> role_menu -> Menu；按钮权限仍由 `/auth/codes` 决定。菜单展示关系不等于业务授权。
 
@@ -331,6 +333,7 @@ Vben 路由不变量：
 - PAGE component 必须来自当前应用维护的显式页面清单，格式不含 `views/` 和 `.vue`；
 - 一级 catalog 不返回 `BasicLayout`，因为根路由已经统一提供布局；
 - route path 与 redirect 必须是单 `/` 开头的内部路径，拒绝 `//evil.example/path` 这类 protocol-relative URL；
+- 响应中的 redirect 目标必须属于当前安全菜单树；工作台快捷导航只显示本次已注册的动态路由，不得通过静态快捷入口重新暴露无权限页面；
 - `iframeSrc` 只允许 EMBEDDED 持有，`link` 只允许 LINK 持有；都必须是带 host 的绝对 `http/https` 地址，字段互换或者 catalog/menu/button 持有任一外链字段都拒绝；
 - 写菜单时前端和后端都会校验，但后端是最终完整性边界。
 
