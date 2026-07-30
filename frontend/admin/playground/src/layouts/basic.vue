@@ -239,15 +239,18 @@ onBeforeMount(() => {
 
 <template>
   <BasicLayout
+    :avatar
+    :text="userStore.userInfo?.realName"
     @clear-preferences-and-logout="handleLogout"
     @click-logo="handleClickLogo"
+    @logout="handleLogout"
   >
     <template #user-dropdown>
       <UserDropdown
         :avatar
         :menus
         :text="userStore.userInfo?.realName"
-        description="ann.vben@gmail.com"
+        description="ann.vben@example.invalid"
         tag-text="Pro"
         trigger="both"
         @logout="handleLogout"

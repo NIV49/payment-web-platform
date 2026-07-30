@@ -17,7 +17,7 @@
 | Schema 模型 | 手写 Row/Map | Flyway -> jOOQ | PG18 执行完整迁移后生成并提交；CI 拒绝 drift |
 | Redis 协议实现 | 浮动 Redis 7 | 明确产品边界 | Valkey 7.2.13，精确 digest；只承载会话、限流、缓存 |
 
-前端工程的当前事实基线也已统一：`.node-version` 与产品构建镜像固定 Node.js 24.16.0，`engines.node` 只接受 `>=24.11.0 <25`；`packageManager`/`engines.pnpm` 固定 pnpm 11.7.0；工作区版本为 Vben 5.7.0，锁文件解析 Vue 3.5.38 和产品 UI `antdv-next` 1.3.6。产品 Docker 构建只包含 `web-antdv-next`，Playground 仍保留为本地参考但不进入生产镜像。
+截至该审计完成时，前端工程事实基线也已统一：`.node-version` 与产品构建镜像固定 Node.js 24.16.0，`engines.node` 只接受 `>=24.11.0 <25`；`packageManager`/`engines.pnpm` 固定 pnpm 11.7.0；当时工作区版本为 Vben 5.7.0，锁文件解析 Vue 3.5.38 和产品 UI `antdv-next` 1.3.6。产品 Docker 构建只包含 `web-antdv-next`，Playground 仍保留为本地参考但不进入生产镜像。当前前端版本事实以 `docs/ai-context/frontend/README.md` 为准。
 
 ## 2. 审计问题关闭矩阵
 

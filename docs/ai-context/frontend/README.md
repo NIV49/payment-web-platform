@@ -1,9 +1,9 @@
 # Admin 前端工程上下文
 
 > 适用目录：`frontend/admin/**`
-> 当前基线：Node.js 24.16.0 / Vben 5.7.0 / Vue 3.5.38 / Vite 8.0.16 / pnpm 11.7.0 / Antdv Next 1.3.6
+> 当前基线：Node.js 24.16.0 / Vben 5.7.0 / Vue 3.5.40 / Vite 8.1.5 / pnpm 11.7.0 / Antdv Next 1.4.5
 
-版本事实来源：`.node-version` 与产品 Docker builder 固定 Node.js 24.16.0，`engines.node` 允许同一 major 内的 `>=24.11.0 <25`；`packageManager` 与 `engines.pnpm` 固定 pnpm 11.7.0；工作区 package version 为 Vben 5.7.0，当前锁文件解析 Vue 3.5.38 和 `antdv-next` 1.3.6。不能再用本机偶然安装的 Node 版本或上游最新版本描述本项目。
+版本事实来源：`.node-version` 与产品 Docker builder 固定 Node.js 24.16.0，`engines.node` 允许同一 major 内的 `>=24.11.0 <25`；`packageManager` 与 `engines.pnpm` 固定 pnpm 11.7.0；工作区 package version 为 Vben 5.7.0，当前锁文件解析 Vue 3.5.40 和 `antdv-next` 1.4.5。2026-07-30 已把 Vben 框架增量同步至官方 `main` 的 `418c16e0939262b3d0037fbd0c378c3ce34c7642`，但项目工具链、裁剪边界和业务适配仍以本仓库为准。不能再用本机偶然安装的版本或未同步的上游最新版本描述本项目。
 
 ## 1. 工程定位
 

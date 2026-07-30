@@ -295,7 +295,7 @@ async function previewImage(
         return h(
           PreviewGroupComponent,
           {
-            class: 'hidden',
+            classes: { popup: { root: '!z-2000' } },
             preview: {
               open: open.value,
               current: currentIndex,
@@ -379,6 +379,7 @@ function cropImage(file: File, aspectRatio: string | undefined) {
               ]),
               centered: true,
               width: 548,
+              zIndex: 9999,
               keyboard: false,
               maskClosable: false,
               closable: false,
@@ -453,7 +454,7 @@ function withPreviewUpload() {
         originFileList: Array<File>,
       ) {
         // 文件大小限制
-        if (maxSize.value && (file.size || 0) / 1024 / 1024 > maxSize.value) {
+        if (maxSize.value && (file.size || 0) > maxSize.value * 1024 ** 2) {
           message.error($t('ui.formRules.sizeLimit', [maxSize.value]));
           file.status = 'removed';
           return false;
@@ -725,9 +726,7 @@ async function initComponentAdapter() {
       modelValueProp: 'value',
     }),
     Input: withDefaultPlaceholder(Input, 'input'),
-    InputNumber: withDefaultPlaceholder(InputNumber, 'input', {
-      style: { width: '100%' },
-    }),
+    InputNumber: withDefaultPlaceholder(InputNumber, 'input'),
     InputPassword: withDefaultPlaceholder(InputPassword, 'input'),
     Mentions: withDefaultPlaceholder(Mentions, 'input'),
     // 自定义主要按钮

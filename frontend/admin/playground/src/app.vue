@@ -4,7 +4,7 @@ import { computed, watch } from 'vue';
 import { useAntdDesignTokens } from '@vben/hooks';
 import { preferences, usePreferences } from '@vben/preferences';
 
-import { App, ConfigProvider, theme } from 'antdv-next';
+import { App, ConfigProvider, StyleProvider, theme } from 'antdv-next';
 
 import { antdLocale } from '#/locales';
 
@@ -23,10 +23,9 @@ const tokenTheme = computed(() => {
     algorithm.push(theme.compactAlgorithm);
   }
 
-  return {
-    algorithm,
-    token: tokens,
-  };
+  const themeConfig = { algorithm };
+  Reflect.set(themeConfig, 'token', tokens);
+  return themeConfig;
 });
 
 watch(
@@ -39,9 +38,12 @@ watch(
 </script>
 
 <template>
-  <ConfigProvider :locale="antdLocale" :theme="tokenTheme">
-    <App>
-      <RouterView />
-    </App>
-  </ConfigProvider>
+  <!-- layer: antd 组件样式注入 @layer antd，让 Tailwind 工具类可以覆盖组件样式 -->
+  <StyleProvider layer>
+    <ConfigProvider :locale="antdLocale" :theme="tokenTheme">
+      <App>
+        <RouterView />
+      </App>
+    </ConfigProvider>
+  </StyleProvider>
 </template>

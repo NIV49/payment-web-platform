@@ -40,7 +40,7 @@ const formSchema = computed((): VbenFormSchema[] => {
       //       );
       //       if (findItem) {
       //         form.setValues({
-      //           password: '123456',
+      //           password: 'disabled',
       //           username: findItem.label,
       //         });
       //       }
@@ -74,7 +74,7 @@ const formSchema = computed((): VbenFormSchema[] => {
             );
             if (findUser) {
               form.setValues({
-                password: '123456',
+                password: 'disabled',
                 username: findUser.value,
               });
             }

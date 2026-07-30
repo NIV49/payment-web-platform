@@ -15,14 +15,15 @@ export interface TimezoneOption {
 export const MOCK_USERS: UserInfo[] = [
   {
     id: 0,
-    password: '123456',
+    password: 'disabled',
     realName: 'Vben',
     roles: ['super'],
     username: 'vben',
+    homePath: '/dashboard/workspace',
   },
   {
     id: 1,
-    password: '123456',
+    password: 'disabled',
     realName: 'Admin',
     roles: ['admin'],
     username: 'admin',
@@ -30,7 +31,7 @@ export const MOCK_USERS: UserInfo[] = [
   },
   {
     id: 2,
-    password: '123456',
+    password: 'disabled',
     realName: 'Jack',
     roles: ['user'],
     username: 'jack',
@@ -194,18 +195,46 @@ export const MOCK_MENUS = [
 export const MOCK_MENU_LIST = [
   {
     id: 1,
-    name: 'Workspace',
+    name: 'Dashboard',
     status: 1,
-    type: 'menu',
-    icon: 'mdi:dashboard',
-    path: '/workspace',
-    component: '/dashboard/workspace/index',
+    type: 'catalog',
+    icon: 'lucide:layout-dashboard',
+    path: '/dashboard',
     meta: {
-      icon: 'carbon:workspace',
-      title: 'page.dashboard.workspace',
-      affixTab: true,
-      order: 0,
+      icon: 'lucide:layout-dashboard',
+      order: -1,
+      title: 'page.dashboard.title',
     },
+    children: [
+      {
+        id: 101,
+        pid: 1,
+        status: 1,
+        type: 'menu',
+        name: 'Analytics',
+        path: 'analytics',
+        component: '/dashboard/analytics/index',
+        meta: {
+          affixTab: true,
+          icon: 'lucide:area-chart',
+          title: 'page.dashboard.analytics',
+          keepAlive: true,
+        },
+      },
+      {
+        id: 102,
+        pid: 1,
+        status: 1,
+        type: 'menu',
+        name: 'Workspace',
+        path: 'workspace',
+        component: '/views/dashboard/workspace/index',
+        meta: {
+          icon: 'carbon:workspace',
+          title: 'page.dashboard.workspace',
+        },
+      },
+    ],
   },
   {
     id: 2,

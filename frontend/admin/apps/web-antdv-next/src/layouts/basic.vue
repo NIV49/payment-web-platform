@@ -217,16 +217,21 @@ watch(
 </script>
 
 <template>
-  <BasicLayout @clear-preferences-and-logout="handleLogout">
+  <BasicLayout
+    :avatar
+    :text="userStore.userInfo?.realName"
+    @clear-preferences-and-logout="handleLogout"
+    @logout="handleLogout"
+  >
     <template #user-dropdown>
       <UserDropdown
         :avatar
         :menus
         :text="userStore.userInfo?.realName"
-        description="ann.vben@gmail.com"
+        description="ann.vben@example.invalid"
         tag-text="Pro"
-        @logout="handleLogout"
         @clear-preferences-and-logout="handleLogout"
+        @logout="handleLogout"
       />
     </template>
     <template #notification>

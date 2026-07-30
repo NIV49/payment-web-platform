@@ -60,6 +60,7 @@ vite.config.ts.*
 skills-lock.json
 .atomcode
 datalog
+.playwright-mcp
 
 # Upstream applications and docs intentionally removed from this thin fork.
 # These rules prevent accidental local reintroduction; tracked upstream changes

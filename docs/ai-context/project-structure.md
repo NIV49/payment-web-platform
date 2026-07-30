@@ -103,6 +103,7 @@ flowchart LR
 
 - `origin`：业务仓库 `NIV49/payment-web-platform`，用于业务开发；
 - `upstream`：Vben 官方仓库，只允许 fetch；push URL 已禁用。
+- Admin 当前 Vben 源码同步锚点：`418c16e0939262b3d0037fbd0c378c3ce34c7642`（官方 `main`，2026-07-30 拉取）。
 
 Vben 上游根目录与本仓库的 `frontend/admin` 存在目录位移。更新流程必须在独立分支完成：fetch upstream、评估版本差异、把需要的提交迁移到 `frontend/admin`、运行 Admin 全套验证。禁止在业务分支直接无审查 merge 上游根目录。
 

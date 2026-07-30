@@ -66,12 +66,13 @@ const schema: VbenFormSchema[] = [
         async (value: string) => {
           return !(await isMenuNameExists(value, formData.value?.id));
         },
-        (value) => ({
-          message: $t('ui.formRules.alreadyExists', [
-            $t('system.menu.menuName'),
-            value,
-          ]),
-        }),
+        {
+          error: (issue) =>
+            $t('ui.formRules.alreadyExists', [
+              $t('system.menu.menuName'),
+              issue.input,
+            ]),
+        },
       ),
   },
   {
@@ -98,7 +99,13 @@ const schema: VbenFormSchema[] = [
     label: $t('system.menu.parent'),
     renderComponentContent() {
       return {
-        title({ label, meta }: { label: string; meta: Recordable<any> }) {
+        treeTitleRender({
+          label,
+          meta,
+        }: {
+          label: string;
+          meta: Recordable<any>;
+        }) {
           const coms = [];
           if (!label) return '';
           if (meta?.icon) {
@@ -152,12 +159,13 @@ const schema: VbenFormSchema[] = [
         async (value: string) => {
           return !(await isMenuPathExists(value, formData.value?.id));
         },
-        (value) => ({
-          message: $t('ui.formRules.alreadyExists', [
-            $t('system.menu.path'),
-            value,
-          ]),
-        }),
+        {
+          error: (issue) =>
+            $t('ui.formRules.alreadyExists', [
+              $t('system.menu.path'),
+              issue.input,
+            ]),
+        },
       ),
   },
   {
@@ -308,18 +316,18 @@ const schema: VbenFormSchema[] = [
   },
   {
     component: 'Input',
-    componentProps: (values) => {
-      return {
-        allowClear: true,
-        class: 'w-full',
-        disabled: values.meta?.badgeType !== 'normal',
-      };
-    },
     dependencies: {
-      show: (values) => {
-        return values.type !== 'button';
+      resolve: ({ values }) => {
+        return {
+          componentProps: {
+            allowClear: true,
+            class: 'w-full',
+            disabled: values.meta?.badgeType !== 'normal',
+          },
+          show: values.type !== 'button',
+        };
       },
-      triggerFields: ['type'],
+      triggerFields: ['meta.badgeType', 'type'],
     },
     fieldName: 'meta.badge',
     label: $t('system.menu.badge'),

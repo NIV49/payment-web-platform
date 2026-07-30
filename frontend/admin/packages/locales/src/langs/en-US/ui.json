@@ -149,8 +149,7 @@
     },
     "lockScreen": {
       "title": "Lock Screen",
-      "screenButton": "Unlock",
-      "password": "Password",
+      "screenButton": "Lock",
       "placeholder": "Please enter password",
       "unlock": "Click to unlock",
       "errorPasswordTip": "Password error, please re-enter",
