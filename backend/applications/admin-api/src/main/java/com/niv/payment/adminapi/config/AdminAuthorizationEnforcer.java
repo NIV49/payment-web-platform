@@ -21,7 +21,7 @@ public final class AdminAuthorizationEnforcer {
     }
 
     public void requireTenantPermission(AuthorizationSubject subject, String permissionCode) {
-        ResourceContext resource = new ResourceContext(subject.tenantId(), null, subject.departmentId(),
+        ResourceContext resource = new ResourceContext(subject.tenantId(), null, null,
             null, null, null, null);
         AuthorizationDecision decision = authorization.authorize(new AuthorizationRequest(
             subject, PermissionCode.of(permissionCode), resource, null));
