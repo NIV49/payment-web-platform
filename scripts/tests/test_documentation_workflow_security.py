@@ -681,6 +681,10 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
             )
             self.run_fixture_git(
                 repository,
+                "-c",
+                "user.name=CI",
+                "-c",
+                "user.email=ci@example.invalid",
                 "commit",
                 "-m",
                 "add gitlink",
