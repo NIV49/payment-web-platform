@@ -142,9 +142,11 @@ Spring MVC 的 `NoResourceFoundException` 原先落入兜底异常处理，导�
 
 根 `package.json` 已删除 `preinstall: npx only-allow pnpm`。生产安全测试会扫描 npm lifecycle 脚本并禁止其调用 `npx` 或 `pnpm dlx`；手动维护脚本不等于依赖安装 lifecycle。根目录前端 GitHub Actions 现在依次执行 frozen install、全量 lint、产品 app typecheck、unit tests、production-safety 和 `web-antdv-next` product build。
 
-## P1：支付业务资源的数据范围尚未接入查询链路
+## P1：细粒度资源范围尚未接入查询链路
 
-IAM Admin 请求已经通过 `AdminAuthorizationEnforcer` 进入 `DefaultAuthorizationService`：它加载带版本的 Grant 快照，并对租户、Scope、step-up 和审批要求执行默认拒绝。当前 Admin PEP 构造的资源上下文仍以工作区租户和部门为主，尚未把市场、商户、渠道、客户和资金对象绑定到真实支付资源，也没有把结构化数据范围计划接入支付业务查询。后续支付查询和资金操作必须传入可信资源归属并应用对应 SQL predicate，不能退回 URL + 权限码集合检查。
+IAM Admin 请求已经通过 `AdminAuthorizationEnforcer` 进入 `DefaultAuthorizationService`：它加载带版本的 Grant 快照，并对租户、Scope、step-up 和审批要求执行默认拒绝。当前 IAM Admin 列表和写操作只有租户级查询语义；Admin PEP 因此只传入可信工作区租户，不再把操作者所属部门伪装成目标资源部门。在详情操作解析真实目标、列表查询应用 `DataScopePlan`/SQL predicate 并补齐跨部门拒绝测试之前，当前 Admin 权限码的任何非 `TENANT/TENANT_ALL` Grant 都会 fail closed。
+
+本修复发布前必须盘点现有 Admin 权限码的有效 RoleGrant；发现任何非 `TENANT/TENANT_ALL` 维度必须停止发布，先收窄数据或完成目标感知授权。支付业务仍尚未把市场、商户、渠道、客户和资金对象绑定到真实资源，也没有把结构化数据范围计划接入业务查询。后续支付查询和资金操作必须传入可信资源归属并应用对应 SQL predicate，不能退回 URL + 权限码集合检查。
 
 ## P1：生产用户激活流程尚未实现
 
