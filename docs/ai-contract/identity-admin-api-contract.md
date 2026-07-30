@@ -2,7 +2,7 @@
 
 > 状态：已实现的本地原型契约，非生产认证与资金权限方案<br>
 > 适用应用：`frontend/admin/apps/web-antdv-next`、`backend/applications/admin-api`<br>
-> 复核日期：2026-07-21
+> 复核日期：2026-07-30
 > 事实优先级：已接受 ADR / 已批准契约 > 实现；集成测试证明实现现状，但无权把偶然实现升级为架构决策
 
 本文分三层记录：
@@ -767,6 +767,10 @@ V13__enforce_login_credential_hash_safety.sql
 13. local Flyway 不推断 baseline，缺少 history 的旧手工开发卷必须重建；
 14. 原型不连接任何资金写链路；
 15. 管理写操作必须携带可信 Session 捕获的 actor 身份与两个版本，并在写锁后复核；有限过期 Grant 在事务内重验完成前不得用于管理写授权。
+16. 产品目标访问模式为 `mixed`；后端 `/menu/all` 继续拥有业务路由，本地只允许显式白名单路由参与合并。
+17. 框架侧 `UserInfo` 必须包含 `userId/avatar/desc/token`；`token` 只能是固定非秘密 `cookie-session` marker，不能返回 Sa-Token 或 refresh credential。
+18. refresh credential 的目标传输方式是独立 HttpOnly Cookie，禁止 body/header 和 JavaScript 可读存储；rotation、重放检测、并发、TTL、撤销、退出联动和 IdP 兼容批准前不得开启 `/auth/refresh`。
+19. 当前阶段不增加用户详情接口；编辑继续使用列表快照，`40902` 后关闭旧表单并刷新列表。
 
 ## 2.2 本轮已实现、但不代表生产完成
 
@@ -816,7 +820,7 @@ V13__enforce_login_credential_hash_safety.sql
 
 ## 3.2 下一阶段兼容工作
 
-1. 增加用户详情接口，编辑前重新加载最新 roleIds/userVersion，避免仅使用列表行快照；
+1. 用户详情接口暂缓；当前继续使用列表快照并在 `40902` 后关闭旧表单、刷新列表。未来重新启动详情接口时，必须在编辑前加载最新 roleIds/userVersion；
 2. 用户创建流程拆成“创建身份/成员”与“邀请、激活、设置密码、绑定 MFA”；
 3. 给用户状态 PATCH 增加 reason，并补正式审计 before/after；
 4. 为非平台租户设计独立的成员管理用例和权限目录；当前继续明确拒绝写入；

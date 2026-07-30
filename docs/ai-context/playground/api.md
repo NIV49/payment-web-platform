@@ -1105,9 +1105,9 @@ interface SystemMenu {
 | `sys_role_menu` | 角色-菜单/按钮节点 |
 | `sys_dept` | 部门树 |
 
-## 不确定项
+## 已确认项目决策
 
-- `/auth/refresh` 是否采用 cookie refresh token 或 body refresh token，当前 mock 只用 cookie `jwt`。
-- 系统用户接口是否应支持角色分配，当前页面没做。
-- 菜单按钮权限最终用菜单 ID 还是 `authCode`，当前角色表单用菜单 ID，按钮权限判断用 `accessCodes` 字符串。
-- 真实后端是否要支持后端动态路由。如果不支持，可保持 `frontend` 权限模式，只实现 `/auth/codes` 和用户角色。
+- refresh credential 只能通过独立 HttpOnly Cookie 传输，不放在 request body 或 JavaScript 可读存储中。rotation、重放检测、并发刷新、TTL、撤销和 IdP 兼容仍需单独安全契约；当前不得开启 `/auth/refresh`。
+- 系统用户接口支持角色分配，使用 `roleIds` 最终全集；当前产品前后端已经实现。
+- 按钮运行时展示判断使用稳定 `authCode`。角色和菜单的关系仍保存 menu ID，不能由 menu ID 自动推导业务 RoleGrant。
+- 后端必须支持动态路由；产品采用 `mixed`，后端业务路由与显式本地补充路由共同生成最终路由。

@@ -303,9 +303,9 @@ mock 服务在 `apps/backend-mock`：
 4. `/auth/refresh` 是特殊接口，mock 直接返回 token 字符串，前端也按这个读；如果后端想返回统一 envelope，需要同步改前端。
 5. 系统管理页面的数据模型只是雏形，用户-角色、角色-菜单、用户-部门关系有 UI 痕迹，但当前 mock 数据并不完整。
 
-## 不确定项
+## 已确认项目决策
 
-- 真实项目是否要采用 `frontend`、`backend` 还是 `mixed` 权限模式，当前代码没有业务定论。
-- 用户实体最终是否必须包含 `userId/avatar/desc/token`，类型里有要求，但 mock 只返回 `id/username/realName/roles/homePath`。
-- 菜单管理表单里的 `activePath` 字段提交在顶层，但路由 meta 类型里通常是 `meta.activePath`，是否为设计疏漏未确认。
-- 系统用户表单组件加载了菜单权限树，但表单 schema 没有 `permissions` 字段，用户是否直接分配菜单权限未确认。
+- 产品采用 `mixed` 权限模式，后端 `/menu/all` 仍是业务菜单事实源；本地路由只能通过显式白名单补充，不能把后端未返回的业务路由重新合入。
+- 框架侧用户实体需要包含 `userId/avatar/desc/token`。真实凭证只存在于 HttpOnly Cookie，`token` 只能是非秘密 `cookie-session` marker。
+- 表单可以在交互层使用 `activePath`，保存和生成路由时必须映射为 `meta.activePath`。
+- 系统用户只分配角色，不直接分配菜单或权限；业务授权仍由后端 RoleGrant 决定。
