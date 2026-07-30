@@ -6,7 +6,7 @@ import type {
   WorkbenchTrendItem,
 } from '@vben/common-ui';
 
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import {
@@ -22,9 +22,16 @@ import { useUserStore } from '@vben/stores';
 import { openWindow } from '@vben/utils';
 
 import AnalyticsVisitsSource from '../analytics/analytics-visits-source.vue';
-import { WORKSPACE_QUICK_NAV_ITEMS } from './workspace-navigation';
+import { getAccessibleWorkspaceQuickNavItems } from './workspace-navigation';
 
 const userStore = useUserStore();
+const router = useRouter();
+
+const quickNavItems = computed(() =>
+  getAccessibleWorkspaceQuickNavItems((routeName) =>
+    router.hasRoute(routeName),
+  ),
+);
 
 // 这是一个示例数据，实际项目中需要根据实际情况进行调整
 // url 也可以是内部路由，在 navTo 方法中识别处理，进行内部跳转
@@ -175,8 +182,6 @@ const trendItems: WorkbenchTrendItem[] = [
   },
 ];
 
-const router = useRouter();
-
 // 这是一个示例方法，实际项目中需要根据实际情况进行调整
 // This is a sample method, adjust according to the actual project requirements
 function navTo(nav: WorkbenchProjectItem | WorkbenchQuickNavItem) {
@@ -212,7 +217,7 @@ function navTo(nav: WorkbenchProjectItem | WorkbenchQuickNavItem) {
       </div>
       <div class="w-full lg:w-2/5">
         <WorkbenchQuickNav
-          :items="WORKSPACE_QUICK_NAV_ITEMS"
+          :items="quickNavItems"
           class="mt-5 lg:mt-0"
           title="快捷导航"
           @click="navTo"

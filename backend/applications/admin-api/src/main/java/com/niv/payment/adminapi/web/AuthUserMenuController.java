@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 @RestController
@@ -62,8 +63,10 @@ public class AuthUserMenuController {
     ApiResponse<UserInfoResponse> currentUser(HttpServletRequest request) {
         AuthorizationSubject subject = subject(request);
         IdentityModels.CurrentUser user = identities.currentUser(subject.tenantId(), subject.membershipId());
+        List<MenuResponse> menus = menuTree(identities.accessibleMenus(subject.tenantId(), subject.membershipId()));
+        String homePath = resolveHomePath(user.homePath(), menus);
         return ApiResponse.success(new UserInfoResponse(Long.toString(user.id()), user.username(), user.realName(),
-            user.avatar(), user.roles(), user.homePath(), "", "cookie-session"));
+            user.avatar(), user.roles(), homePath, "", "cookie-session"));
     }
 
     @GetMapping("/auth/codes")
@@ -106,7 +109,12 @@ public class AuthUserMenuController {
         }
         List<StoredMenu> roots = safeMenus.values().stream()
             .filter(menu -> menu.source().parentId() == null).toList();
-        return roots.stream().map(item -> menu(item, children)).toList();
+        Set<String> accessiblePaths = safeMenus.values().stream()
+            .map(StoredMenu::source)
+            .map(IdentityModels.Menu::path)
+            .filter(path -> path != null)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        return roots.stream().map(item -> menu(item, children, accessiblePaths)).toList();
     }
 
     private static boolean hasCompleteAncestorChain(StoredMenu item, Map<Long, StoredMenu> candidates) {
@@ -121,14 +129,43 @@ public class AuthUserMenuController {
         return false;
     }
 
-    private MenuResponse menu(StoredMenu item, Map<Long, List<StoredMenu>> children) {
+    private MenuResponse menu(StoredMenu item, Map<Long, List<StoredMenu>> children,
+                              Set<String> accessiblePaths) {
         IdentityModels.Menu source = item.source();
         List<MenuResponse> nested = children.getOrDefault(source.id(), List.of()).stream()
-            .map(child -> menu(child, children)).toList();
+            .map(child -> menu(child, children, accessiblePaths)).toList();
+        String redirect = source.redirect() != null && accessiblePaths.contains(source.redirect())
+            ? source.redirect()
+            : nested.stream().findFirst().map(MenuResponse::path).orElse(null);
         return new MenuResponse(Long.toString(source.id()),
             source.parentId() == null ? "0" : source.parentId().toString(),
-            source.name(), source.path(), source.component(), source.redirect(), source.authCode(), source.type(),
+            source.name(), source.path(), source.component(), redirect, source.authCode(), source.type(),
             item.meta(), source.status(), nested);
+    }
+
+    private static String resolveHomePath(String preferred, List<MenuResponse> menus) {
+        if (containsPath(menus, preferred)) {
+            return preferred;
+        }
+        return firstLeafPath(menus).orElse("/profile");
+    }
+
+    private static boolean containsPath(List<MenuResponse> menus, String path) {
+        return path != null && menus.stream()
+            .anyMatch(menu -> path.equals(menu.path()) || containsPath(menu.children(), path));
+    }
+
+    private static Optional<String> firstLeafPath(List<MenuResponse> menus) {
+        for (MenuResponse menu : menus) {
+            Optional<String> childPath = firstLeafPath(menu.children());
+            if (childPath.isPresent()) {
+                return childPath;
+            }
+            if (menu.path() != null) {
+                return Optional.of(menu.path());
+            }
+        }
+        return Optional.empty();
     }
 
     private static Long parseOptionalId(String value) {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { WORKSPACE_QUICK_NAV_ITEMS } from './workspace-navigation';
+import {
+  getAccessibleWorkspaceQuickNavItems,
+  WORKSPACE_QUICK_NAV_ITEMS,
+} from './workspace-navigation';
 
 describe('workspace quick navigation', () => {
   it('targets only product routes provided by the current menu contract', () => {
@@ -17,5 +20,15 @@ describe('workspace quick navigation', () => {
     expect(
       WORKSPACE_QUICK_NAV_ITEMS.some(({ url }) => url?.startsWith('/demos')),
     ).toBe(false);
+  });
+
+  it('hides shortcuts whose dynamic routes were not registered', () => {
+    const accessibleRouteNames = new Set(['Dashboard', 'Workspace']);
+
+    expect(
+      getAccessibleWorkspaceQuickNavItems((name) =>
+        accessibleRouteNames.has(name),
+      ).map(({ url }) => url),
+    ).toEqual(['/', '/dashboard/workspace']);
   });
 });

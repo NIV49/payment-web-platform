@@ -52,6 +52,25 @@ class AuthUserMenuControllerTest {
     }
 
     @Test
+    void allMenusRedirectsToTheFirstAccessibleChildWhenStoredTargetWasFilteredOut() {
+        List<IdentityModels.Menu> storedMenus = List.of(
+            menu(1, null, "catalog", "Dashboard", "/dashboard", "/dashboard/analytics",
+                "{\"title\":\"page.dashboard.title\"}"),
+            menu(3, 1L, "menu", "Workspace", "/dashboard/workspace", null,
+                "{\"title\":\"page.dashboard.workspace\"}")
+        );
+        AuthUserMenuController controller = new AuthUserMenuController(
+            authentication(), identities(storedMenus), new ObjectMapper(), new VbenMenuContract(""));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(AuthorizationSubject.class.getName(),
+            new AuthorizationSubject(100, 1_000, 1, 10L, 0, 0, false));
+
+        ApiResponse<List<AuthUserMenuController.MenuResponse>> response = controller.allMenus(request);
+
+        assertThat(response.data().getFirst().redirect()).isEqualTo("/dashboard/workspace");
+    }
+
+    @Test
     void currentUserAddsOnlyTheApprovedWebCompatibilityFields() {
         IdentityModels.CurrentUser currentUser = new IdentityModels.CurrentUser(
             100, "admin", "Platform Administrator", "", List.of("platform-admin"), "/dashboard");
@@ -66,12 +85,39 @@ class AuthUserMenuControllerTest {
 
         assertThat(response.data()).isEqualTo(new AuthUserMenuController.UserInfoResponse(
             "100", "admin", "Platform Administrator", "", List.of("platform-admin"),
-            "/dashboard", "", "cookie-session"));
+            "/profile", "", "cookie-session"));
+    }
+
+    @Test
+    void currentUserUsesTheFirstAccessibleLeafWhenPreferredHomeIsMissing() {
+        IdentityModels.CurrentUser currentUser = new IdentityModels.CurrentUser(
+            100, "admin", "Platform Administrator", "", List.of("restricted"), "/dashboard");
+        List<IdentityModels.Menu> storedMenus = List.of(
+            menu(10, null, "catalog", "System", "/system", null,
+                "{\"title\":\"system.title\"}"),
+            menu(11, 10L, "menu", "SystemUser", "/system/user", null,
+                "{\"title\":\"system.user.title\"}")
+        );
+        AuthUserMenuController controller = new AuthUserMenuController(
+            authentication(), identities(storedMenus, Optional.of(currentUser)),
+            new ObjectMapper(), new VbenMenuContract(""));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(AuthorizationSubject.class.getName(),
+            new AuthorizationSubject(100, 1_000, 1, 10L, 0, 0, false));
+
+        ApiResponse<AuthUserMenuController.UserInfoResponse> response = controller.currentUser(request);
+
+        assertThat(response.data().homePath()).isEqualTo("/system/user");
     }
 
     private static IdentityModels.Menu menu(long id, Long parentId, String type, String name, String metaJson) {
-        return new IdentityModels.Menu(id, parentId, type, name, "/" + name.toLowerCase(), null,
-            null, null, metaJson, 1, 0);
+        return menu(id, parentId, type, name, "/" + name.toLowerCase(), null, metaJson);
+    }
+
+    private static IdentityModels.Menu menu(long id, Long parentId, String type, String name,
+                                            String path, String redirect, String metaJson) {
+        return new IdentityModels.Menu(id, parentId, type, name, path, null,
+            redirect, null, metaJson, 1, 0);
     }
 
     private static AuthenticationService authentication() {
