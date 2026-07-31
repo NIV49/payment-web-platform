@@ -94,6 +94,7 @@ async function loadGrants() {
   if (!role.value) return;
   loading.value = true;
   loadFailed.value = false;
+  drawerApi.setState({ showConfirmButton: false });
   try {
     const [permissions, detail] = await Promise.all([
       getGrantablePermissions(),
@@ -104,10 +105,12 @@ async function loadGrants() {
     selectedPermissionCodes.value = detail.grants.map(
       ({ permissionCode }) => permissionCode,
     );
+    drawerApi.setState({ showConfirmButton: detail.editable });
   } catch {
     loadFailed.value = true;
     grantablePermissions.value = [];
     grantDetail.value = undefined;
+    drawerApi.setState({ showConfirmButton: false });
   } finally {
     loading.value = false;
   }
