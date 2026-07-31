@@ -51,15 +51,6 @@ function canMutateRole(role: SystemRoleApi.SystemRole) {
   return role.assignable && !role.systemRole;
 }
 
-function canConfigureRoleGrants(
-  role: SystemRoleApi.SystemRole,
-  hasAccessByCodes: (codes: string[]) => boolean,
-) {
-  return (
-    canMutateRole(role) && hasAccessByCodes([PERMISSION_CODES.roleGrantUpdate])
-  );
-}
-
 function buildTenantRoleGrants(
   permissionCodes: readonly string[],
 ): IamRoleGrantApi.GrantIntent[] {
@@ -133,7 +124,6 @@ function findMissingPermissionDependencies(permissionCodes: readonly string[]) {
 
 export {
   buildTenantRoleGrants,
-  canConfigureRoleGrants,
   canMutateRole,
   findMissingPermissionDependencies,
   permissionDependencies,

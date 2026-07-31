@@ -8,9 +8,13 @@ import com.niv.payment.permission.domain.ScopeMode;
 import com.niv.payment.permission.service.RoleGrantAdministrationService;
 import com.niv.payment.permission.service.RoleGrantChangeCommand;
 import com.niv.payment.permission.service.RoleGrantModels;
+import com.niv.payment.permission.service.RoleConfigurationAdministrationService;
+import com.niv.payment.permission.service.RoleConfigurationCommand;
+import com.niv.payment.permission.service.RoleConfigurationModels;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -28,9 +32,13 @@ import java.util.List;
 @RequestMapping("/api/v1/iam")
 public final class RoleGrantAdministrationController {
     private final RoleGrantAdministrationService grants;
+    private final RoleConfigurationAdministrationService configurations;
 
-    public RoleGrantAdministrationController(RoleGrantAdministrationService grants) {
+    public RoleGrantAdministrationController(
+        RoleGrantAdministrationService grants,
+        RoleConfigurationAdministrationService configurations) {
         this.grants = grants;
+        this.configurations = configurations;
     }
 
     @GetMapping("/permissions/grantable")
@@ -59,6 +67,19 @@ public final class RoleGrantAdministrationController {
             subject.tenantId(), roleId, body.expectedVersion(), actor(subject),
             body.reason(), body.grants().stream().map(GrantRequest::selection).toList());
         return ApiResponse.success(RoleGrantsResponse.from(grants.replace(command)));
+    }
+
+    @PutMapping("/roles/{roleId}/configuration")
+    ApiResponse<RoleConfigurationResponse> replaceRoleConfiguration(
+        @PathVariable @Min(1) Long roleId,
+        @Valid @RequestBody ReplaceRoleConfigurationRequest body,
+        HttpServletRequest request) {
+        AuthorizationSubject subject = AuthUserMenuController.subject(request);
+        RoleConfigurationCommand command = new RoleConfigurationCommand(
+            subject.tenantId(), roleId, body.expectedVersion(), actor(subject), body.name(),
+            body.status(), body.remark(), body.menuIds().stream().map(Long::parseLong).toList(),
+            body.reason(), body.grants().stream().map(GrantRequest::selection).toList());
+        return ApiResponse.success(RoleConfigurationResponse.from(configurations.replace(command)));
     }
 
     private static AdministrationActor actor(AuthorizationSubject subject) {
@@ -96,9 +117,30 @@ public final class RoleGrantAdministrationController {
     record DimensionResponse(String code, String mode, List<String> targets) {
     }
 
+    record RoleConfigurationResponse(String roleId, long roleVersion, List<String> menuIds,
+                                     List<GrantResponse> grants, boolean editable) {
+        static RoleConfigurationResponse from(RoleConfigurationModels.RoleConfiguration source) {
+            return new RoleConfigurationResponse(
+                Long.toString(source.roleId()), source.roleVersion(),
+                source.menuIds().stream().map(String::valueOf).toList(),
+                source.grants().stream().map(GrantResponse::from).toList(), source.editable());
+        }
+    }
+
     record ReplaceRoleGrantsRequest(@NotNull @Min(0) Long expectedVersion,
                                     @NotBlank @Size(max = 500) String reason,
                                     @NotNull @Size(max = 18) List<@NotNull @Valid GrantRequest> grants) {
+    }
+
+    record ReplaceRoleConfigurationRequest(
+        @NotNull @Min(0) Long expectedVersion,
+        @NotBlank @Size(max = 128) String name,
+        @NotNull @Min(0) @Max(1) Integer status,
+        @Size(max = 500) String remark,
+        @NotNull @Size(max = 2048)
+        List<@Pattern(regexp = "[1-9][0-9]{0,18}") String> menuIds,
+        @NotBlank @Size(max = 500) String reason,
+        @NotNull @Size(max = 18) List<@NotNull @Valid GrantRequest> grants) {
     }
 
     record GrantRequest(

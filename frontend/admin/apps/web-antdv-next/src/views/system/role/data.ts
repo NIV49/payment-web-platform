@@ -80,7 +80,6 @@ export function useColumns<T = SystemRoleApi.SystemRole>(
   onStatusChange?: (newStatus: any, row: T) => PromiseLike<boolean | undefined>,
   canMutate: (row: T) => boolean = () => true,
   canEdit: (row: T) => boolean = () => true,
-  canGrant: (row: T) => boolean = () => true,
 ): VxeTableGridColumns {
   return [
     {
@@ -129,12 +128,6 @@ export function useColumns<T = SystemRoleApi.SystemRole>(
         name: 'CellOperation',
         options: [
           {
-            auth: PERMISSION_CODES.roleGrantUpdate,
-            code: 'grants',
-            show: canGrant,
-            text: $t('system.role.functionalPermissions'),
-          },
-          {
             auth: PERMISSION_CODES.roleUpdate,
             code: 'edit',
             show: canEdit,
@@ -149,7 +142,7 @@ export function useColumns<T = SystemRoleApi.SystemRole>(
       field: 'operation',
       fixed: 'right',
       title: $t('system.role.operation'),
-      width: 240,
+      width: 180,
     },
   ];
 }

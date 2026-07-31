@@ -6,6 +6,8 @@ import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.IdentityModels;
 import com.niv.payment.permission.service.RoleAssignmentPolicy;
 import org.jooq.DSLContext;
+import org.jooq.Field;
+import org.jooq.JSONB;
 import org.jooq.impl.DSL;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +21,8 @@ import java.util.function.Supplier;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP_ROLE;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MENU;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_AUDIT_EVENT;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_PERMISSION_CHANGE_OUTBOX;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_ROLE;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_ROLE_MENU;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.DISABLED;
@@ -33,12 +37,14 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
     private final DSLContext dsl;
     private final JooqIdentityQueryRepository queries;
     private final JooqAdministrationSupport support;
+    private final Supplier<String> traceIdSupplier;
 
     public JooqRoleAdministrationRepository(DSLContext dsl,
                                             JooqIdentityQueryRepository queries,
                                             Supplier<String> traceIdSupplier) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
         this.queries = Objects.requireNonNull(queries, "queries");
+        this.traceIdSupplier = Objects.requireNonNull(traceIdSupplier, "traceIdSupplier");
         this.support = new JooqAdministrationSupport(dsl, traceIdSupplier);
     }
 
@@ -88,7 +94,8 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
                 .and(IAM_ROLE.ID.eq(roleId))
                 .and(IAM_ROLE.ROW_VERSION.eq(expectedVersion))
                 .and(IAM_ROLE.SYSTEM_ROLE.isFalse())
-                .and(IAM_ROLE.ASSIGNABLE.isTrue()))
+                .and(IAM_ROLE.ASSIGNABLE.isTrue())
+                .and(IAM_ROLE.DELETED_AT.isNull()))
             .execute();
         requireSuccessfulMutation(updated);
         replaceMenus(tenantId, roleId, menuIds);
@@ -111,7 +118,8 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
                 .and(IAM_ROLE.ID.eq(roleId))
                 .and(IAM_ROLE.ROW_VERSION.eq(expectedVersion))
                 .and(IAM_ROLE.SYSTEM_ROLE.isFalse())
-                .and(IAM_ROLE.ASSIGNABLE.isTrue()))
+                .and(IAM_ROLE.ASSIGNABLE.isTrue())
+                .and(IAM_ROLE.DELETED_AT.isNull()))
             .execute();
         requireSuccessfulMutation(updated);
         bumpRoleMembers(tenantId, roleId);
@@ -124,19 +132,40 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
         support.requirePlatformTenant(tenantId);
         support.lockTenant(tenantId, actor);
         requireOrdinaryRoleVersion(tenantId, roleId, expectedVersion);
+        List<Long> affectedMembershipIds = dsl.select(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID)
+            .from(IAM_MEMBERSHIP_ROLE)
+            .where(IAM_MEMBERSHIP_ROLE.TENANT_ID.eq(tenantId)
+                .and(IAM_MEMBERSHIP_ROLE.ROLE_ID.eq(roleId)))
+            .orderBy(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID)
+            .forUpdate()
+            .fetch(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID);
         int updated = dsl.update(IAM_ROLE)
             .set(IAM_ROLE.STATUS, DISABLED)
+            .set(IAM_ROLE.DELETED_AT, DSL.currentOffsetDateTime())
             .set(IAM_ROLE.UPDATED_AT, DSL.currentOffsetDateTime())
             .set(IAM_ROLE.ROW_VERSION, IAM_ROLE.ROW_VERSION.plus(1L))
             .where(IAM_ROLE.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE.ID.eq(roleId))
                 .and(IAM_ROLE.ROW_VERSION.eq(expectedVersion))
                 .and(IAM_ROLE.SYSTEM_ROLE.isFalse())
-                .and(IAM_ROLE.ASSIGNABLE.isTrue()))
+                .and(IAM_ROLE.ASSIGNABLE.isTrue())
+                .and(IAM_ROLE.DELETED_AT.isNull()))
             .execute();
         requireSuccessfulMutation(updated);
-        bumpRoleMembers(tenantId, roleId);
-        support.audit(tenantId, actor.membershipId(), "ROLE", roleId, "DELETE", "role:delete");
+        if (!affectedMembershipIds.isEmpty()) {
+            dsl.update(IAM_MEMBERSHIP)
+                .set(IAM_MEMBERSHIP.PERMISSION_VERSION, IAM_MEMBERSHIP.PERMISSION_VERSION.plus(1L))
+                .set(IAM_MEMBERSHIP.UPDATED_AT, DSL.currentOffsetDateTime())
+                .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
+                    .and(IAM_MEMBERSHIP.ID.in(affectedMembershipIds)))
+                .execute();
+        }
+        dsl.deleteFrom(IAM_MEMBERSHIP_ROLE)
+            .where(IAM_MEMBERSHIP_ROLE.TENANT_ID.eq(tenantId)
+                .and(IAM_MEMBERSHIP_ROLE.ROLE_ID.eq(roleId)))
+            .execute();
+        appendDeleteAuditAndOutbox(
+            tenantId, actor.membershipId(), roleId, expectedVersion + 1L, affectedMembershipIds);
     }
 
     private void replaceMenus(long tenantId, long roleId, Set<Long> menuIds) {
@@ -159,7 +188,8 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
         var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.ASSIGNABLE)
             .from(IAM_ROLE)
             .where(IAM_ROLE.TENANT_ID.eq(tenantId)
-                .and(IAM_ROLE.ID.eq(roleId)))
+                .and(IAM_ROLE.ID.eq(roleId))
+                .and(IAM_ROLE.DELETED_AT.isNull()))
             .forUpdate()
             .fetchOne();
         if (role == null) {
@@ -187,7 +217,9 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
         }
         var menus = dsl.select(IAM_MENU.ID, IAM_MENU.MENU_TYPE, IAM_MENU.STATUS)
             .from(IAM_MENU)
-            .where(IAM_MENU.TENANT_ID.eq(tenantId).and(IAM_MENU.ID.in(menuIds)))
+            .where(IAM_MENU.TENANT_ID.eq(tenantId)
+                .and(IAM_MENU.ID.in(menuIds))
+                .and(IAM_MENU.DELETED_AT.isNull()))
             .forUpdate()
             .fetch();
         if (menus.size() != menuIds.size()) {
@@ -213,6 +245,42 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
                     .where(IAM_MEMBERSHIP_ROLE.TENANT_ID.eq(IAM_MEMBERSHIP.TENANT_ID)
                         .and(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID.eq(IAM_MEMBERSHIP.ID))
                         .and(IAM_MEMBERSHIP_ROLE.ROLE_ID.eq(roleId)))))
+            .execute();
+    }
+
+    private void appendDeleteAuditAndOutbox(long tenantId, long actorMembershipId,
+                                            long roleId, long roleVersion,
+                                            List<Long> affectedMembershipIds) {
+        String membershipIds = affectedMembershipIds.stream().map(String::valueOf)
+            .collect(java.util.stream.Collectors.joining(","));
+        Field<JSONB> payload = DSL.field(
+            "jsonb_build_object('roleVersion', {0}, 'membershipIds', {1})",
+            JSONB.class, DSL.val(roleVersion), DSL.val(membershipIds));
+        String traceId = traceIdSupplier.get();
+        dsl.insertInto(IAM_AUDIT_EVENT)
+            .set(IAM_AUDIT_EVENT.ID, support.nextId())
+            .set(IAM_AUDIT_EVENT.TENANT_ID, tenantId)
+            .set(IAM_AUDIT_EVENT.OPERATOR_MEMBERSHIP_ID, actorMembershipId)
+            .set(IAM_AUDIT_EVENT.TARGET_TYPE, "ROLE")
+            .set(IAM_AUDIT_EVENT.TARGET_REF, Long.toString(roleId))
+            .set(IAM_AUDIT_EVENT.ACTION_CODE, "DELETE")
+            .set(IAM_AUDIT_EVENT.DECISION, "ALLOW")
+            .set(IAM_AUDIT_EVENT.REASON_CODE, "AUTHORIZED")
+            .set(IAM_AUDIT_EVENT.PERMISSION_CODE, "role:delete")
+            .set(IAM_AUDIT_EVENT.AFTER_VALUE, payload)
+            .set(IAM_AUDIT_EVENT.TRACE_ID, traceId)
+            .execute();
+        dsl.insertInto(IAM_PERMISSION_CHANGE_OUTBOX)
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.ID, support.nextId())
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.TENANT_ID, tenantId)
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.AGGREGATE_TYPE, "ROLE")
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.AGGREGATE_REF, Long.toString(roleId))
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.EVENT_TYPE, "ROLE_DELETED")
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.PAYLOAD, payload)
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.AGGREGATE_VERSION, roleVersion)
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.SCHEMA_VERSION, 1)
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.PARTITION_KEY, tenantId + ":" + roleId)
+            .set(IAM_PERMISSION_CHANGE_OUTBOX.TRACE_ID, traceId)
             .execute();
     }
 

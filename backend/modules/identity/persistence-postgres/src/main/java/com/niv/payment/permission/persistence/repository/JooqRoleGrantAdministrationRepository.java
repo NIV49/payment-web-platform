@@ -95,14 +95,16 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.ASSIGNABLE)
             .from(IAM_ROLE)
             .where(IAM_ROLE.TENANT_ID.eq(command.tenantId())
-                .and(IAM_ROLE.ID.eq(command.roleId())))
+                .and(IAM_ROLE.ID.eq(command.roleId()))
+                .and(IAM_ROLE.DELETED_AT.isNull()))
             .forUpdate()
             .fetchOne();
         if (role == null) {
             throw notFound("Role");
         }
         requireSystemActor(command.tenantId(), command.actor().membershipId(), true);
-        requireTransactionalPermissions(command.tenantId(), command.actor().membershipId());
+        requireTransactionalPermissions(
+            command.tenantId(), command.actor().membershipId(), REQUIRED_TRANSACTIONAL_PERMISSIONS);
         if (Boolean.TRUE.equals(role.get(IAM_ROLE.SYSTEM_ROLE))) {
             throw new SecurityException("System roles cannot be edited");
         }
@@ -122,58 +124,9 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         Map<String, Long> permissionIds = requireCatalog(command.grants());
         Field<JSONB> before = auditValue(currentVersion, "existing", existing.grants(), command.reason());
 
-        dsl.update(IAM_ROLE_GRANT)
-            .set(IAM_ROLE_GRANT.STATUS, DISABLED)
-            .set(IAM_ROLE_GRANT.UPDATED_BY, command.actor().membershipId())
-            .set(IAM_ROLE_GRANT.UPDATED_AT, DSL.currentOffsetDateTime())
-            .set(IAM_ROLE_GRANT.ROW_VERSION, IAM_ROLE_GRANT.ROW_VERSION.plus(1L))
-            .where(IAM_ROLE_GRANT.TENANT_ID.eq(command.tenantId())
-                .and(IAM_ROLE_GRANT.ROLE_ID.eq(command.roleId()))
-                .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE)))
-            .execute();
-
-        for (RoleGrantModels.Selection selection : command.grants()) {
-            long permissionId = permissionIds.get(selection.permission().value());
-            Long grantId = dsl.select(IAM_ROLE_GRANT.ID)
-                .from(IAM_ROLE_GRANT)
-                .where(IAM_ROLE_GRANT.TENANT_ID.eq(command.tenantId())
-                    .and(IAM_ROLE_GRANT.ROLE_ID.eq(command.roleId()))
-                    .and(IAM_ROLE_GRANT.PERMISSION_ID.eq(permissionId))
-                    .and(IAM_ROLE_GRANT.GRANT_KEY.eq(selection.grantKey())))
-                .fetchOne(IAM_ROLE_GRANT.ID);
-            if (grantId == null) {
-                grantId = support.nextId();
-                dsl.insertInto(IAM_ROLE_GRANT)
-                    .set(IAM_ROLE_GRANT.ID, grantId)
-                    .set(IAM_ROLE_GRANT.TENANT_ID, command.tenantId())
-                    .set(IAM_ROLE_GRANT.ROLE_ID, command.roleId())
-                    .set(IAM_ROLE_GRANT.PERMISSION_ID, permissionId)
-                    .set(IAM_ROLE_GRANT.GRANT_KEY, selection.grantKey())
-                    .set(IAM_ROLE_GRANT.STATUS, ACTIVE)
-                    .set(IAM_ROLE_GRANT.CREATED_BY, command.actor().membershipId())
-                    .set(IAM_ROLE_GRANT.UPDATED_BY, command.actor().membershipId())
-                    .execute();
-            } else {
-                dsl.update(IAM_ROLE_GRANT)
-                    .set(IAM_ROLE_GRANT.STATUS, ACTIVE)
-                    .set(IAM_ROLE_GRANT.VALID_FROM, (java.time.OffsetDateTime) null)
-                    .set(IAM_ROLE_GRANT.VALID_UNTIL, (java.time.OffsetDateTime) null)
-                    .set(IAM_ROLE_GRANT.UPDATED_BY, command.actor().membershipId())
-                    .set(IAM_ROLE_GRANT.UPDATED_AT, DSL.currentOffsetDateTime())
-                    .set(IAM_ROLE_GRANT.ROW_VERSION, IAM_ROLE_GRANT.ROW_VERSION.plus(1L))
-                    .where(IAM_ROLE_GRANT.ID.eq(grantId))
-                    .execute();
-                dsl.deleteFrom(IAM_GRANT_DIMENSION)
-                    .where(IAM_GRANT_DIMENSION.GRANT_ID.eq(grantId))
-                    .execute();
-            }
-            dsl.insertInto(IAM_GRANT_DIMENSION)
-                .set(IAM_GRANT_DIMENSION.ID, support.nextId())
-                .set(IAM_GRANT_DIMENSION.GRANT_ID, grantId)
-                .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, ScopeDimension.TENANT.name())
-                .set(IAM_GRANT_DIMENSION.SCOPE_MODE, ScopeMode.TENANT_ALL.name())
-                .execute();
-        }
+        replaceGrantRows(
+            command.tenantId(), command.roleId(), command.actor().membershipId(),
+            command.grants(), permissionIds);
 
         long nextVersion = currentVersion + 1L;
         int roleUpdated = dsl.update(IAM_ROLE)
@@ -183,7 +136,8 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
                 .and(IAM_ROLE.ID.eq(command.roleId()))
                 .and(IAM_ROLE.ROW_VERSION.eq(currentVersion))
                 .and(IAM_ROLE.SYSTEM_ROLE.isFalse())
-                .and(IAM_ROLE.ASSIGNABLE.isTrue()))
+                .and(IAM_ROLE.ASSIGNABLE.isTrue())
+                .and(IAM_ROLE.DELETED_AT.isNull()))
             .execute();
         if (roleUpdated != 1) {
             throw new IdentityAdministrationService.OptimisticLockException();
@@ -232,10 +186,12 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             command.grants());
     }
 
-    private RoleGrantModels.RoleGrants loadRoleGrants(long tenantId, long roleId) {
+    RoleGrantModels.RoleGrants loadRoleGrants(long tenantId, long roleId) {
         var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.ASSIGNABLE)
             .from(IAM_ROLE)
-            .where(IAM_ROLE.TENANT_ID.eq(tenantId).and(IAM_ROLE.ID.eq(roleId)))
+            .where(IAM_ROLE.TENANT_ID.eq(tenantId)
+                .and(IAM_ROLE.ID.eq(roleId))
+                .and(IAM_ROLE.DELETED_AT.isNull()))
             .fetchOne();
         if (role == null) {
             throw notFound("Role");
@@ -304,7 +260,7 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         return new RoleGrantModels.RoleGrants(roleId, role.get(IAM_ROLE.ROW_VERSION), editable, selections);
     }
 
-    private Map<String, Long> requireCatalog(List<RoleGrantModels.Selection> requested) {
+    Map<String, Long> requireCatalog(List<RoleGrantModels.Selection> requested) {
         if (requested.isEmpty()) {
             return Map.of();
         }
@@ -326,7 +282,7 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         return result;
     }
 
-    private void requireSystemActor(long tenantId, long membershipId, boolean lock) {
+    void requireSystemActor(long tenantId, long membershipId, boolean lock) {
         var query = dsl.select(IAM_ROLE.ID)
             .from(IAM_MEMBERSHIP_ROLE)
             .join(IAM_ROLE).on(IAM_ROLE.TENANT_ID.eq(IAM_MEMBERSHIP_ROLE.TENANT_ID)
@@ -334,7 +290,8 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             .where(IAM_MEMBERSHIP_ROLE.TENANT_ID.eq(tenantId)
                 .and(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID.eq(membershipId))
                 .and(IAM_ROLE.SYSTEM_ROLE.isTrue())
-                .and(IAM_ROLE.STATUS.eq(ACTIVE)));
+                .and(IAM_ROLE.STATUS.eq(ACTIVE))
+                .and(IAM_ROLE.DELETED_AT.isNull()));
         boolean systemActor = lock
             ? query.forUpdate().of(IAM_ROLE).fetchAny() != null
             : query.fetchAny() != null;
@@ -343,7 +300,8 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         }
     }
 
-    private void requireTransactionalPermissions(long tenantId, long membershipId) {
+    void requireTransactionalPermissions(
+        long tenantId, long membershipId, Set<String> requiredPermissions) {
         var membershipRole = IAM_MEMBERSHIP_ROLE.as("authorization_membership_role");
         var role = IAM_ROLE.as("authorization_role");
         var grant = IAM_ROLE_GRANT.as("authorization_grant");
@@ -358,7 +316,8 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             .from(membershipRole)
             .join(role).on(role.TENANT_ID.eq(membershipRole.TENANT_ID)
                 .and(role.ID.eq(membershipRole.ROLE_ID))
-                .and(role.STATUS.eq(ACTIVE)))
+                .and(role.STATUS.eq(ACTIVE))
+                .and(role.DELETED_AT.isNull()))
             .join(grant).on(grant.TENANT_ID.eq(role.TENANT_ID)
                 .and(grant.ROLE_ID.eq(role.ID))
                 .and(grant.STATUS.eq(ACTIVE))
@@ -366,7 +325,7 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
                 .and(grant.VALID_UNTIL.isNull().or(grant.VALID_UNTIL.gt(evaluatedAt))))
             .join(permission).on(permission.ID.eq(grant.PERMISSION_ID)
                 .and(permission.STATUS.eq(ACTIVE))
-                .and(permission.PERMISSION_CODE.in(REQUIRED_TRANSACTIONAL_PERMISSIONS))
+                .and(permission.PERMISSION_CODE.in(requiredPermissions))
                 .and(permission.RISK_LEVEL.eq("NORMAL"))
                 .and(permission.CROSS_TENANT_MODE.eq("SAME_TENANT_ONLY"))
                 .and(permission.REQUIRED_DIMENSIONS.eq(new String[]{"TENANT"}))
@@ -385,9 +344,66 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
                     .from(target)
                     .where(target.DIMENSION_ID.eq(dimension.ID))))
             .fetchSet(permission.PERMISSION_CODE);
-        if (!effectivePermissions.equals(REQUIRED_TRANSACTIONAL_PERMISSIONS)) {
+        if (!effectivePermissions.equals(requiredPermissions)) {
             throw new SecurityException(
                 "Current role grant administration permissions are required");
+        }
+    }
+
+    void replaceGrantRows(long tenantId, long roleId, long actorMembershipId,
+                          List<RoleGrantModels.Selection> requested,
+                          Map<String, Long> permissionIds) {
+        dsl.update(IAM_ROLE_GRANT)
+            .set(IAM_ROLE_GRANT.STATUS, DISABLED)
+            .set(IAM_ROLE_GRANT.UPDATED_BY, actorMembershipId)
+            .set(IAM_ROLE_GRANT.UPDATED_AT, DSL.currentOffsetDateTime())
+            .set(IAM_ROLE_GRANT.ROW_VERSION, IAM_ROLE_GRANT.ROW_VERSION.plus(1L))
+            .where(IAM_ROLE_GRANT.TENANT_ID.eq(tenantId)
+                .and(IAM_ROLE_GRANT.ROLE_ID.eq(roleId))
+                .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE)))
+            .execute();
+
+        for (RoleGrantModels.Selection selection : requested) {
+            long permissionId = permissionIds.get(selection.permission().value());
+            Long grantId = dsl.select(IAM_ROLE_GRANT.ID)
+                .from(IAM_ROLE_GRANT)
+                .where(IAM_ROLE_GRANT.TENANT_ID.eq(tenantId)
+                    .and(IAM_ROLE_GRANT.ROLE_ID.eq(roleId))
+                    .and(IAM_ROLE_GRANT.PERMISSION_ID.eq(permissionId))
+                    .and(IAM_ROLE_GRANT.GRANT_KEY.eq(selection.grantKey())))
+                .fetchOne(IAM_ROLE_GRANT.ID);
+            if (grantId == null) {
+                grantId = support.nextId();
+                dsl.insertInto(IAM_ROLE_GRANT)
+                    .set(IAM_ROLE_GRANT.ID, grantId)
+                    .set(IAM_ROLE_GRANT.TENANT_ID, tenantId)
+                    .set(IAM_ROLE_GRANT.ROLE_ID, roleId)
+                    .set(IAM_ROLE_GRANT.PERMISSION_ID, permissionId)
+                    .set(IAM_ROLE_GRANT.GRANT_KEY, selection.grantKey())
+                    .set(IAM_ROLE_GRANT.STATUS, ACTIVE)
+                    .set(IAM_ROLE_GRANT.CREATED_BY, actorMembershipId)
+                    .set(IAM_ROLE_GRANT.UPDATED_BY, actorMembershipId)
+                    .execute();
+            } else {
+                dsl.update(IAM_ROLE_GRANT)
+                    .set(IAM_ROLE_GRANT.STATUS, ACTIVE)
+                    .set(IAM_ROLE_GRANT.VALID_FROM, (OffsetDateTime) null)
+                    .set(IAM_ROLE_GRANT.VALID_UNTIL, (OffsetDateTime) null)
+                    .set(IAM_ROLE_GRANT.UPDATED_BY, actorMembershipId)
+                    .set(IAM_ROLE_GRANT.UPDATED_AT, DSL.currentOffsetDateTime())
+                    .set(IAM_ROLE_GRANT.ROW_VERSION, IAM_ROLE_GRANT.ROW_VERSION.plus(1L))
+                    .where(IAM_ROLE_GRANT.ID.eq(grantId))
+                    .execute();
+                dsl.deleteFrom(IAM_GRANT_DIMENSION)
+                    .where(IAM_GRANT_DIMENSION.GRANT_ID.eq(grantId))
+                    .execute();
+            }
+            dsl.insertInto(IAM_GRANT_DIMENSION)
+                .set(IAM_GRANT_DIMENSION.ID, support.nextId())
+                .set(IAM_GRANT_DIMENSION.GRANT_ID, grantId)
+                .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, ScopeDimension.TENANT.name())
+                .set(IAM_GRANT_DIMENSION.SCOPE_MODE, ScopeMode.TENANT_ALL.name())
+                .execute();
         }
     }
 

@@ -7,6 +7,7 @@ import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.RoleAssignmentPolicy;
 import com.niv.payment.permission.service.RoleGrantAdministrationService;
+import com.niv.payment.permission.service.RoleConfigurationAdministrationService;
 import com.niv.payment.permission.security.InvalidSessionException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -106,7 +107,8 @@ public class ApiExceptionHandler {
             "The record has changed; reload and retry");
     }
 
-    @ExceptionHandler(RoleGrantAdministrationService.LegacyAdministrationCutoverRequiredException.class)
+    @ExceptionHandler({RoleGrantAdministrationService.LegacyAdministrationCutoverRequiredException.class,
+        RoleConfigurationAdministrationService.LegacyAdministrationCutoverRequiredException.class})
     ResponseEntity<ApiResponse<Void>> legacyAdministrationCutoverRequired() {
         return failure(HttpStatus.CONFLICT, 40903, "LEGACY_ADMINISTRATION_CUTOVER_REQUIRED",
             "Role grant editing is unavailable until the legacy administration cutover is complete");

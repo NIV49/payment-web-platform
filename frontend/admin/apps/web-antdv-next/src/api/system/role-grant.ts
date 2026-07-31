@@ -36,6 +36,24 @@ export namespace IamRoleGrantApi {
     grants: GrantIntent[];
     reason: string;
   }
+
+  export interface ReplaceRoleConfigurationParams {
+    expectedVersion: number;
+    grants: GrantIntent[];
+    menuIds: string[];
+    name: string;
+    reason: string;
+    remark?: string;
+    status: 0 | 1;
+  }
+
+  export interface RoleConfiguration {
+    editable: boolean;
+    grants: GrantIntent[];
+    menuIds: string[];
+    roleId: string;
+    roleVersion: number;
+  }
 }
 
 async function getGrantablePermissions() {
@@ -60,4 +78,19 @@ async function replaceRoleGrants(
   );
 }
 
-export { getGrantablePermissions, getRoleGrants, replaceRoleGrants };
+async function replaceRoleConfiguration(
+  roleId: string,
+  data: IamRoleGrantApi.ReplaceRoleConfigurationParams,
+) {
+  return requestClient.put<IamRoleGrantApi.RoleConfiguration>(
+    `/v1/iam/roles/${roleId}/configuration`,
+    data,
+  );
+}
+
+export {
+  getGrantablePermissions,
+  getRoleGrants,
+  replaceRoleConfiguration,
+  replaceRoleGrants,
+};

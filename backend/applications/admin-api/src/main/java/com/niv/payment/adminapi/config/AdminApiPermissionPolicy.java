@@ -16,6 +16,8 @@ public final class AdminApiPermissionPolicy {
     private static final Pattern MENU_ITEM = Pattern.compile("^/api/system/menu/[1-9][0-9]*$");
     private static final Pattern DEPARTMENT_ITEM = Pattern.compile("^/api/system/dept/[1-9][0-9]*$");
     private static final Pattern ROLE_GRANTS = Pattern.compile("^/api/v1/iam/roles/[1-9][0-9]*/grants$");
+    private static final Pattern ROLE_CONFIGURATION =
+        Pattern.compile("^/api/v1/iam/roles/[1-9][0-9]*/configuration$");
 
     public boolean isPublic(String method, String path) {
         return "POST".equals(method) && "/api/auth/login".equals(path);
@@ -44,6 +46,9 @@ public final class AdminApiPermissionPolicy {
         }
         if (("GET".equals(method) || "PUT".equals(method)) && ROLE_GRANTS.matcher(path).matches()) {
             return List.of("role:view", "role:grant-update");
+        }
+        if ("PUT".equals(method) && ROLE_CONFIGURATION.matcher(path).matches()) {
+            return List.of("role:view", "role:update", "menu:view", "role:grant-update");
         }
 
         if ("GET".equals(method) && ("/api/system/menu/list".equals(path)

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getGrantablePermissions,
   getRoleGrants,
+  replaceRoleConfiguration,
   replaceRoleGrants,
 } from './role-grant';
 
@@ -59,5 +60,24 @@ describe('role grant administration requests', () => {
     );
     expect(payload).not.toHaveProperty('riskLevel');
     expect(payload).not.toHaveProperty('approval');
+  });
+
+  it('submits the complete role configuration to one atomic endpoint', async () => {
+    const payload = {
+      expectedVersion: 7,
+      grants: [],
+      menuIds: ['6001'],
+      name: 'Support',
+      reason: 'Align role access',
+      remark: 'Limited support access',
+      status: 1 as const,
+    };
+
+    await replaceRoleConfiguration('2001', payload);
+
+    expect(requestClient.put).toHaveBeenCalledWith(
+      '/v1/iam/roles/2001/configuration',
+      payload,
+    );
   });
 });

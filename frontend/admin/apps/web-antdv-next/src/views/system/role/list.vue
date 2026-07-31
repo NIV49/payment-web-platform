@@ -25,22 +25,15 @@ import { $t } from '#/locales';
 
 import { useColumns, useGridFormSchema } from './data';
 import {
-  canConfigureRoleGrants,
   canMutateRole,
   ROLE_LIST_SEARCH_BEHAVIOR,
 } from './grant-contract';
 import Form from './modules/form.vue';
-import Grants from './modules/grants.vue';
 
 const { hasAccessByCodes } = useAccess();
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
-  destroyOnClose: true,
-});
-
-const [GrantDrawer, grantDrawerApi] = useVbenDrawer({
-  connectedComponent: Grants,
   destroyOnClose: true,
 });
 
@@ -53,8 +46,10 @@ const canCreateRole = computed(
 function canEditRole(row: SystemRoleApi.SystemRole) {
   return (
     canMutateRole(row) &&
+    hasAccessByCodes([PERMISSION_CODES.roleView]) &&
     hasAccessByCodes([PERMISSION_CODES.roleUpdate]) &&
-    hasAccessByCodes([PERMISSION_CODES.menuView])
+    hasAccessByCodes([PERMISSION_CODES.menuView]) &&
+    hasAccessByCodes([PERMISSION_CODES.roleGrantUpdate])
   );
 }
 
@@ -70,7 +65,6 @@ const [Grid, gridApi] = useVbenVxeGrid({
       onStatusChange,
       canMutateRole,
       canEditRole,
-      (row) => canConfigureRoleGrants(row, hasAccessByCodes),
     ),
     height: 'auto',
     keepSource: true,
@@ -107,10 +101,6 @@ function onActionClick(e: OnActionClickParams<SystemRoleApi.SystemRole>) {
     }
     case 'edit': {
       onEdit(e.row);
-      break;
-    }
-    case 'grants': {
-      onGrant(e.row);
       break;
     }
   }
@@ -173,11 +163,6 @@ function onEdit(row: SystemRoleApi.SystemRole) {
   formDrawerApi.setData(row).open();
 }
 
-function onGrant(row: SystemRoleApi.SystemRole) {
-  if (!canConfigureRoleGrants(row, hasAccessByCodes)) return;
-  grantDrawerApi.setData(row).open();
-}
-
 function onDelete(row: SystemRoleApi.SystemRole) {
   if (!canMutateRole(row)) return;
   const hideLoading = message.loading({
@@ -210,7 +195,6 @@ function onCreate() {
 <template>
   <Page auto-content-height>
     <FormDrawer @success="onRefresh" />
-    <GrantDrawer @success="onRefresh" />
     <Grid :table-title="$t('system.role.list')">
       <template #toolbar-tools>
         <Button v-if="canCreateRole" type="primary" @click="onCreate">

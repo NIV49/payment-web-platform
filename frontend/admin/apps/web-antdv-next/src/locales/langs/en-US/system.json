@@ -127,7 +127,8 @@
       "delete": "Delete Role",
       "grantUpdate": "Configure Functional Permissions"
     },
-    "navigationMenus": "Navigation menus",
+    "navigationMenus": "Navigation and functional permissions",
+    "configurationLoadFailed": "Role configuration failed to load",
     "navigationMenuLoadFailed": "Navigation menus failed to load",
     "navigationOnlyWarningTitle": "This only configures navigation visibility",
     "navigationOnlyWarningDescription": "Menu selection controls navigation and page visibility. Use Functional Permissions for button and API access.",

@@ -17,6 +17,7 @@ import com.niv.payment.permission.persistence.repository.JooqMenuAdministrationR
 import com.niv.payment.permission.persistence.repository.JooqPermissionGrantRepository;
 import com.niv.payment.permission.persistence.repository.JooqRoleAdministrationRepository;
 import com.niv.payment.permission.persistence.repository.JooqRoleGrantAdministrationRepository;
+import com.niv.payment.permission.persistence.repository.JooqRoleConfigurationRepository;
 import com.niv.payment.permission.persistence.repository.JooqUserAdministrationRepository;
 import com.niv.payment.permission.security.SaTokenSessionBridge;
 import com.niv.payment.permission.security.SaTokenSessionIssuer;
@@ -24,6 +25,7 @@ import com.niv.payment.permission.security.StpUtilSaTokenFacade;
 import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.RoleGrantAdministrationService;
+import com.niv.payment.permission.service.RoleConfigurationAdministrationService;
 import org.jooq.DSLContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -76,12 +78,27 @@ public class IdentityConfiguration {
     }
 
     @Bean
+    JooqRoleConfigurationRepository roleConfigurationRepository(
+        DSLContext dsl, JooqRoleGrantAdministrationRepository grants) {
+        return new JooqRoleConfigurationRepository(dsl, grants, RequestTrace::current);
+    }
+
+    @Bean
     RoleGrantAdministrationService roleGrantAdministrationService(
         JooqRoleGrantAdministrationRepository repository,
         @Value("${payment.permissions.legacy-administration-cutover-complete:false}")
         boolean legacyAdministrationCutoverComplete) {
         return new RoleGrantAdministrationService(
             repository, repository, legacyAdministrationCutoverComplete);
+    }
+
+    @Bean
+    RoleConfigurationAdministrationService roleConfigurationAdministrationService(
+        JooqRoleConfigurationRepository repository,
+        @Value("${payment.permissions.legacy-administration-cutover-complete:false}")
+        boolean legacyAdministrationCutoverComplete) {
+        return new RoleConfigurationAdministrationService(
+            repository, legacyAdministrationCutoverComplete);
     }
 
     @Bean

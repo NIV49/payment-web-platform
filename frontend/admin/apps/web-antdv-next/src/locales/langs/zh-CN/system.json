@@ -127,7 +127,8 @@
       "delete": "删除角色",
       "grantUpdate": "配置功能权限"
     },
-    "navigationMenus": "导航菜单",
+    "navigationMenus": "导航与功能权限",
+    "configurationLoadFailed": "角色配置加载失败",
     "navigationMenuLoadFailed": "导航菜单加载失败",
     "navigationOnlyWarningTitle": "这里只配置导航可见性",
     "navigationOnlyWarningDescription": "选择菜单只控制导航和页面可见性；按钮和 API 授权请使用“功能权限”。",

@@ -20,8 +20,10 @@ const harness = vi.hoisted(() => ({
     setValues: vi.fn(),
     validate: vi.fn(),
   },
+  getGrantablePermissions: vi.fn(),
   getMenuList: vi.fn(),
-  updateRole: vi.fn(),
+  getRoleGrants: vi.fn(),
+  replaceRoleConfiguration: vi.fn(),
 }));
 
 vi.mock('@vben/common-ui', () => ({
@@ -40,6 +42,14 @@ vi.mock('antdv-next', () => ({
     emits: ['click'],
     template: '<button @click="$emit(\'click\')"><slot /></button>',
   },
+  Input: {
+    TextArea: {
+      emits: ['update:value'],
+      props: ['value'],
+      template:
+        '<textarea :value="value" @input="$emit(\'update:value\', $event.target.value)" />',
+    },
+  },
   Spin: { template: '<div><slot /></div>' },
 }));
 
@@ -57,7 +67,11 @@ vi.mock('#/api/error-contract', () => ({
 vi.mock('#/api/system/menu', () => ({ getMenuList: harness.getMenuList }));
 vi.mock('#/api/system/role', () => ({
   createRole: harness.createRole,
-  updateRole: harness.updateRole,
+}));
+vi.mock('#/api/system/role-grant', () => ({
+  getGrantablePermissions: harness.getGrantablePermissions,
+  getRoleGrants: harness.getRoleGrants,
+  replaceRoleConfiguration: harness.replaceRoleConfiguration,
 }));
 vi.mock('#/locales', () => ({ $t: (key: string) => key }));
 vi.mock('../data', () => ({ useFormSchema: () => [] }));
@@ -72,7 +86,17 @@ function mountDrawer(onSuccess = vi.fn()) {
   const root = document.createElement('div');
   const app = createApp(RoleFormDrawer, { onSuccess });
   app.mount(root);
-  return { app, onSuccess };
+  return { app, onSuccess, root };
+}
+
+async function setReason(root: HTMLElement, value: string) {
+  const textarea = root.querySelector('textarea');
+  if (!(textarea instanceof HTMLTextAreaElement)) {
+    throw new TypeError('Expected the configuration reason textarea to be rendered');
+  }
+  textarea.value = value;
+  textarea.dispatchEvent(new Event('input'));
+  await nextTick();
 }
 
 const role = (id: string, rowVersion: number) => ({
@@ -100,7 +124,9 @@ describe('role form drawer request isolation', () => {
     vi.clearAllMocks();
     harness.drawerApi.getData.mockReset();
     harness.getMenuList.mockReset();
-    harness.updateRole.mockReset();
+    harness.getGrantablePermissions.mockReset();
+    harness.getRoleGrants.mockReset();
+    harness.replaceRoleConfiguration.mockReset();
     harness.formApi.getValues.mockReset();
     harness.formApi.setValues.mockReset().mockResolvedValue(undefined);
     harness.formApi.validate.mockReset().mockResolvedValue({ valid: true });
@@ -109,10 +135,20 @@ describe('role form drawer request isolation', () => {
   it('never writes role B with role A form state and ignores a save after close', async () => {
     const menusA = Promise.withResolvers<any[]>();
     const menusB = Promise.withResolvers<any[]>();
+    const permissionsA = Promise.withResolvers<any[]>();
+    const permissionsB = Promise.withResolvers<any[]>();
+    const grantsA = Promise.withResolvers<any>();
+    const grantsB = Promise.withResolvers<any>();
     const saveB = Promise.withResolvers<any>();
     harness.getMenuList
       .mockReturnValueOnce(menusA.promise)
       .mockReturnValueOnce(menusB.promise);
+    harness.getGrantablePermissions
+      .mockReturnValueOnce(permissionsA.promise)
+      .mockReturnValueOnce(permissionsB.promise);
+    harness.getRoleGrants
+      .mockReturnValueOnce(grantsA.promise)
+      .mockReturnValueOnce(grantsB.promise);
     harness.drawerApi.getData
       .mockReturnValueOnce(role('A', 1))
       .mockReturnValueOnce(role('B', 2));
@@ -121,26 +157,31 @@ describe('role form drawer request isolation', () => {
       name: 'Role B edited',
       status: 1,
     });
-    harness.updateRole.mockReturnValueOnce(saveB.promise);
+    harness.replaceRoleConfiguration.mockReturnValueOnce(saveB.promise);
 
-    const { app, onSuccess } = mountDrawer();
+    const { app, onSuccess, root } = mountDrawer();
     harness.drawerOptions.onOpenChange(true);
     harness.drawerOptions.onOpenChange(false);
     harness.drawerOptions.onOpenChange(true);
 
     menusB.resolve([menu('menu-B')]);
+    permissionsB.resolve([]);
+    grantsB.resolve({ editable: true, grants: [], roleId: 'B', roleVersion: 2 });
     await flushAsyncWork();
     expect(harness.formApi.setValues).toHaveBeenCalledTimes(1);
     expect(harness.formApi.setValues).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'B', menuIds: ['menu-B'] }),
     );
+    await setReason(root, 'bounded role configuration');
 
     const saving = harness.drawerOptions.onConfirm();
     await flushAsyncWork();
-    expect(harness.updateRole).toHaveBeenCalledWith('B', {
+    expect(harness.replaceRoleConfiguration).toHaveBeenCalledWith('B', {
       expectedVersion: 2,
+      grants: [],
       menuIds: ['menu-B'],
       name: 'Role B edited',
+      reason: 'bounded role configuration',
       status: 1,
     });
 
@@ -148,6 +189,8 @@ describe('role form drawer request isolation', () => {
     saveB.resolve(undefined);
     await saving;
     menusA.resolve([menu('menu-A')]);
+    permissionsA.resolve([]);
+    grantsA.resolve({ editable: true, grants: [], roleId: 'A', roleVersion: 1 });
     await flushAsyncWork();
 
     expect(harness.formApi.setValues).toHaveBeenCalledTimes(1);

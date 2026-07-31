@@ -37,6 +37,8 @@ class AdminApiPermissionPolicyTest {
             .isEqualTo(List.of("role:view", "role:grant-update"));
         assertThat(policy.requiredPermissions("PUT", "/api/v1/iam/roles/2001/grants"))
             .isEqualTo(List.of("role:view", "role:grant-update"));
+        assertThat(policy.requiredPermissions("PUT", "/api/v1/iam/roles/2001/configuration"))
+            .isEqualTo(List.of("role:view", "role:update", "menu:view", "role:grant-update"));
         assertThat(policy.requiredPermissions("GET", "/api/system/menu/name-exists"))
             .isEqualTo(List.of("menu:view"));
         assertThat(policy.requiredPermissions("POST", "/api/system/menu"))

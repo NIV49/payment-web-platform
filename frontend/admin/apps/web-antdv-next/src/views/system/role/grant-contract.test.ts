@@ -2,11 +2,8 @@ import type { SystemRoleApi } from '#/api/system/role';
 
 import { describe, expect, it } from 'vitest';
 
-import { PERMISSION_CODES } from '#/api/permission-codes';
-
 import {
   buildTenantRoleGrants,
-  canConfigureRoleGrants,
   canMutateRole,
   findMissingPermissionDependencies,
   permissionDependencies,
@@ -36,17 +33,6 @@ describe('role grant frontend contract', () => {
     expect(canMutateRole(role())).toBe(true);
     expect(canMutateRole(role({ systemRole: true }))).toBe(false);
     expect(canMutateRole(role({ assignable: false }))).toBe(false);
-  });
-
-  it('requires the dedicated grant permission and an editable role', () => {
-    const hasAccess = (codes: string[]) =>
-      codes.every((code) => code === PERMISSION_CODES.roleGrantUpdate);
-
-    expect(canConfigureRoleGrants(role(), hasAccess)).toBe(true);
-    expect(canConfigureRoleGrants(role({ systemRole: true }), hasAccess)).toBe(
-      false,
-    );
-    expect(canConfigureRoleGrants(role(), () => false)).toBe(false);
   });
 
   it('builds only canonical TENANT/TENANT_ALL grant intents', () => {
