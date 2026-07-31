@@ -162,7 +162,7 @@ GET /api/menu/all
 
 `/menu/all` 只返回 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，BUTTON 不进入动态路由。直接授权节点只在同 tenant 且 ACTIVE 的显式祖先链完整时返回，缺少的祖先会补齐但不带 sibling；祖先缺失、禁用、不是可路由类型或成环时整支 fail closed。
 
-`local` profile 的应用级 bootstrap 另外在 User、Role、Menu、Department 页面下预置 19 个 ACTIVE BUTTON 权限目录节点，并保留 2 个 DISABLED/隐藏的旧 manage BUTTON；ACTIVE `auth_code` 与本地 ACTIVE Permission Catalog 一一对应。管理接口 `/system/menu/list` 返回这些节点；它们不写入 `role_menu`，不进入 `/menu/all`，也不替代 RoleGrant。精确旧版 8 菜单无按钮或旧 14 BUTTON 夹具可在 bootstrap 事务内升级为 29 个菜单节点，任何部分升级或冲突数据继续失败关闭。
+`local` profile 的应用级 bootstrap 另外在 User、Role、Menu、Department 页面下预置 19 个 ACTIVE BUTTON 权限目录节点，并保留 2 个 DISABLED/隐藏的旧 manage BUTTON；ACTIVE `auth_code` 与本地 19 个现代管理权限一一对应。管理接口 `/system/menu/list` 返回这些节点；它们不写入 `role_menu`，不进入 `/menu/all`，也不替代 RoleGrant。V15 expand 窗口内两个旧 Permission Catalog 码仍为 ACTIVE，但旧 BUTTON 不会重新启用。精确旧版 8 菜单无按钮、旧 14 BUTTON 或已执行 V14+V15 的过渡夹具可在 bootstrap 事务内收敛为 29 个菜单节点，任何部分升级或冲突数据继续失败关闭。
 
 跨端强约定：
 
@@ -259,11 +259,17 @@ Role、Department、Menu 的管理读模型显式返回 `rowVersion`；PUT/PATCH
 
 三个迁移都使用 `NOT VALID` 后 `VALIDATE CONSTRAINT`，不静默清洗安全语义不明确的历史数据。
 
+### V14-V15 管理权限展开与滚动兼容
+
+V14 建立 19 个现代管理权限和 `role:grant-update` 管理面，并把可证明为单一 `TENANT/TENANT_ALL`、无 target、无有效期的旧 manage Grant 展开为细粒度 Grant。V15 修复 V14 的升级兼容缺口：对带有效期、多维度或 target 的旧 Grant 按原始范围和元数据克隆现代等价 Grant；恢复两个旧 manage Permission 供旧二进制滚动读取；递增所有受影响 role 与 membership 版本，并逐角色写审计、逐成员写 Outbox。
+
+旧 Grant 在 V15 期间作为兼容影子保留。现代 RoleGrant GET 忽略且不返回这两个已知影子，第一次 PUT 会原子停用目标角色全部旧/新 ACTIVE Grant 后写入现代全集。旧码不绑定当前 endpoint、不进入 grantable 目录，也没有 ACTIVE BUTTON。最终停用旧 Permission/Grant 需要独立 contract 迁移和 N/N-1 数据库兼容验证，当前不得宣称滚动迁移已经闭环。
+
 ### 迁移纪律
 
 - 所有已执行版本不可修改 checksum；
 - 结构和数据修正新增 V4+；
-- 同时测试空库从 V1 全量迁移、V2/V3 序列升级，以及 V8 fixture 隔离的成功与拒绝路径；V9-V13 遇到历史重复路由、非法授权组合、不安全外链、跨租户写 action 或非法 BCrypt 摘要必须拒绝升级，禁止自动合并、清洗或改权；
+- 同时测试空库从 V1 全量迁移、V2/V3 序列升级，以及 V8 fixture 隔离的成功与拒绝路径；V9-V13 遇到历史重复路由、非法授权组合、不安全外链、跨租户写 action 或非法 BCrypt 摘要必须拒绝升级；V14/V15 还要覆盖简单和带有效期/多维度/target 的旧 Grant 等价展开、版本、审计和 Outbox，禁止静默丢权；
 - 密码和固定身份初始化只允许 local profile；已有库先按 [V8 fixture 隔离迁移手册](../../runbooks/iam-v8-fixture-isolation.md) 盘点。无关真实数据可原样保留，只有落入预留 footprint 或依赖 tenant `1` 的历史数据才需要单独的前向迁移；
 - 菜单 component 和 i18n key 属于跨端协议，迁移前要有契约校验。
 

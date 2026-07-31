@@ -124,6 +124,8 @@ resourceFingerprint
 - 若新权限曾允许不应允许的动作，立即撤权、冻结相关会话并启动安全事件调查；
 - Schema 采用向前兼容，不在同次发布删除旧字段。
 
+当前管理权限迁移采用明确的 expand/contract：V14 建立细粒度目录，V15 前向补齐所有旧 manage Grant 的等价现代 Grant，并暂时恢复旧 Permission 供滚动兼容。旧码不再绑定当前 endpoint、按钮或新授权；第一次现代 RoleGrant 全量保存会退役该角色的兼容影子。只有 N/N-1 二进制与真实数据库兼容测试、旧调用方清零和生产审批完成后，才允许用新的 contract 迁移停用旧码；禁止修改已执行的 V14/V15。
+
 ## 10. 发布门禁
 
 任何一项未满足都不切换：
@@ -152,6 +154,7 @@ resourceFingerprint
 - Admin HTTP PEP 接入完整授权服务；
 - Java 25 / Spring Boot 4.1 / jOOQ / PostgreSQL 18 构建与生成门禁；
 - 生产 Flyway 与 local fixture 隔离；
+- V14/V15 管理权限 expand 迁移保留复杂历史 Grant 的范围、有效期和 target，并推进 role/membership 版本、审计和 Outbox；
 - DataScopePlan 保留 Grant 元组并排除无可信审批证据的 Grant。
 
 它仍不是生产身份或支付权限系统：外部 IdP、MFA 时效、可信审批工作流、超出首阶段 18 项 TENANT/TENANT_ALL 目录的通用 RoleGrant 管理、关系 Provider、真实订单 Mapper、Outbox relay、生产 provisioning/observability 和资金业务规格尚未完成。任何真实资金写路径仍被发布门禁阻断。

@@ -337,7 +337,7 @@ Vben 路由不变量：
 - `iframeSrc` 只允许 EMBEDDED 持有，`link` 只允许 LINK 持有；都必须是带 host 的绝对 `http/https` 地址，字段互换或者 catalog/menu/button 持有任一外链字段都拒绝；
 - 写菜单时前端和后端都会校验，但后端是最终完整性边界。
 
-## 1.8 本轮 19 个 ACTIVE 管理权限码
+## 1.8 本轮 19 个当前管理权限码
 
 当前数据库迁移、后端拦截器和前端常量一致：
 
@@ -363,7 +363,7 @@ department:update
 department:delete
 ```
 
-其中除管理入口自身使用的 `role:grant-update` 外，其余 18 个 NORMAL、TENANT、`TENANT_ALL` 权限构成平台管理员可向普通角色分配的精确目录。历史 `menu:manage`、`department:manage` 权限保留数据库记录但已 DISABLED，不再授权任何 endpoint，也不出现在可分配目录中。
+其中除管理入口自身使用的 `role:grant-update` 外，其余 18 个 NORMAL、TENANT、`TENANT_ALL` 权限构成平台管理员可向普通角色分配的精确目录。V15 expand 阶段暂时把历史 `menu:manage`、`department:manage` Permission Catalog 记录保持为 ACTIVE，只供旧二进制在滚动兼容窗口继续鉴权；当前 endpoint、前端按钮和新授权都不绑定这两个码，它们也不出现在 18 项可分配目录中。旧码最终停用必须通过后续独立 contract 迁移完成，不能回写 V14/V15。
 
 当前后端方法映射按实际 endpoint 精确匹配，不使用 `startsWith`：
 
@@ -605,7 +605,7 @@ RoleGrant     -> 后端动作和数据范围
 
 两者已在数据库模型和前端交互中分离。角色表单只保存 menuIds，并递归过滤 BUTTON；独立“功能权限”抽屉通过下节 RoleGrant API 读取和替换授权，绝不从 menuIds 推导 Grant。菜单管理树中的 BUTTON 是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
 
-`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，部分状态与预留键冲突继续失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
+`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。V15 中两个旧 Permission 处于 ACTIVE 兼容状态不等于旧 BUTTON 重新启用。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，并精确识别已经执行 V14+V15 的过渡状态；部分状态与预留键冲突继续失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
 
 ### 角色授权第一阶段 API
 
@@ -614,6 +614,8 @@ RoleGrant     -> 后端动作和数据范围
 - `GET /api/v1/iam/permissions/grantable`：只返回精确 18 个 NORMAL、SAME_TENANT_ONLY 管理权限；`role:grant-update` 仅属于 system-admin，不可委派；
 - `GET /api/v1/iam/roles/{roleId}/grants`：返回 `{roleId,roleVersion,editable,grants}`；system role 或存在当前页面不能无损表达的授权时 `editable=false`；
 - `PUT /api/v1/iam/roles/{roleId}/grants`：只接受非 system role、全量替换、必填 `expectedVersion` 与非空 `reason`。
+
+V15 为旧 manage Grant 建立等价的现代 Grant，同时保留旧 Grant 作为滚动兼容影子。GET 不把两个已知兼容影子暴露到现代编辑集合，也不会让它们单独触发只读；第一次 PUT 会在同一事务内停用目标角色全部 ACTIVE Grant（包含兼容影子），再写入请求的现代全集。其他未知权限、高风险、有效期、多维度或带 target 的 Grant 仍使页面只读，禁止静默覆盖。
 
 Grant 请求和响应固定为：
 
@@ -708,7 +710,7 @@ expectedVersion（仅 PUT）
 - BUTTON 必须填写 authCode，所有非空 authCode 都必须命中当前 ACTIVE Permission Catalog；
 - BUTTON 不能成为父节点，已有子节点的菜单也不能转换为 BUTTON；
 - 删除是逻辑禁用，现存 role_menu 关系不会自动变成 RoleGrant。
-- `local` bootstrap 预置 19 个 ACTIVE BUTTON，并保留 2 个 DISABLED/隐藏的历史 `menu:manage`、`department:manage` BUTTON；ACTIVE BUTTON authCode 与 19 个 ACTIVE 本地 Permission Catalog 权限码严格相等，path/component/redirect 为空。
+- `local` bootstrap 预置 19 个 ACTIVE BUTTON，并保留 2 个 DISABLED/隐藏的历史 `menu:manage`、`department:manage` BUTTON；ACTIVE BUTTON authCode 与 19 个现代管理权限码严格相等，path/component/redirect 为空。
 
 ### 管理资源的并发冲突协议
 
@@ -830,12 +832,12 @@ V13__enforce_login_credential_hash_safety.sql
 | --- | --- | --- |
 | username/password login | BCrypt + 统一 hash 格式/成本策略 + Redis 原子 client/client+username 双桶已实现 | 仅本地过渡凭证，不替代 IdP/MFA，也不代表分布式攻击防护已完成 |
 | Cookie session | Sa-Token/Redis 已实现；安全配置在 context 创建期绑定 | 尚需部署拓扑、密钥、TTL、故障和撤权演练 |
-| RBAC management | 用户/角色/菜单/部门与受限 RoleGrant API 已实现 | 仅平台租户、本轮 19 个 ACTIVE 管理权限；角色授权仅支持 18 个精确目录权限 |
+| RBAC management | 用户/角色/菜单/部门与受限 RoleGrant API 已实现 | 仅平台租户、本轮 19 个当前管理权限；V15 另保留 2 个不进入新授权面的旧码；角色授权仅支持 18 个精确目录权限 |
 | Permission load | HTTP PEP + 版本化 Redis GrantSnapshot 已接通 | RoleGrant 写入仍需正式审批、部署与恢复演练 |
 | Cross-tenant model | `SAME_TENANT_ONLY` 默认；只有受控 `READ/VIEW` action 可使用 `RELATED_PARTY_READ`，Core 与 V12 CHECK 双重约束 | 没有 Party/Relationship adapter，运行时仍 fail closed |
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、保留路由冲突即拒绝、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
-| Flyway | V1→V14 fresh/upgrade 可运行；V8 fixture 隔离、V9-V13 拒绝式约束与 V14 细粒度权限等价升级已落迁移 | 生产 migration 审批和备份恢复演练未完成 |
+| Flyway | V1→V15 fresh/upgrade 可运行；V8 fixture 隔离、V9-V13 拒绝式约束、V14 细粒度展开与 V15 滚动兼容修复已落迁移 | 旧 manage 码的 contract 迁移、生产 migration 审批和备份恢复演练未完成 |
 
 ## 2.3 明确不在本轮实现
 
@@ -946,7 +948,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 13. 菜单 authCode ACTIVE Catalog 强校验与 component 服务端 allowlist 已完成；正式 Permission Catalog 生命周期治理仍未完成；
 14. 审计 before/after、权限拒绝、登录失败、reason 和跨进程 trace correlation 未完成；
 15. 没有 OpenTelemetry、结构化日志上下文、关键指标、Dashboard、Alert 和 Runbook；
-16. application-local 不再启用 Flyway baseline；缺少 history 的旧手工开发卷必须备份后重建。fixture 已通过 V8 与 local bootstrap 拆分；精确匹配旧版 8 菜单无按钮或旧 14 BUTTON 基线的开发库会在同一事务内升级到 19 个 ACTIVE BUTTON，并保留 2 个 DISABLED 历史 BUTTON，任何部分按钮、冲突 authCode 或其他 fixture 偏差仍失败关闭；无关真实 IAM/审计/Outbox 可保留，但命中预留 ID/自然键、修改过 fixture、或依赖 tenant `1` 的其他历史库必须使用人工前向迁移并单独演练恢复；
+16. application-local 不再启用 Flyway baseline；缺少 history 的旧手工开发卷必须备份后重建。fixture 已通过 V8 与 local bootstrap 拆分；精确匹配旧版 8 菜单无按钮、旧 14 BUTTON 或已完成 V14+V15 过渡的开发库会在同一事务内收敛到 19 个 ACTIVE BUTTON，并保留 2 个 DISABLED 历史 BUTTON，任何部分按钮、冲突 authCode 或其他 fixture 偏差仍失败关闭；无关真实 IAM/审计/Outbox 可保留，但命中预留 ID/自然键、修改过 fixture、或依赖 tenant `1` 的其他历史库必须使用人工前向迁移并单独演练恢复；
 17. 跨租户、跨商户、多角色组合、撤权时效和故障恢复矩阵未完整验证；
 18. Outbox 只有 append-only fact + relay state schema，尚无 relay、投递/重试、Inbox/幂等、重放、告警和恢复演练；
 19. Payment/Ledger 缺少状态机、金额/币种/精度、幂等、账本分录、调账/对账、API/事件和迁移/回滚的可执行规格；
