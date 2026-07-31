@@ -24,6 +24,14 @@
     "remark": "Remark",
     "createTime": "Creation Time",
     "operation": "Operation",
+    "permission": {
+      "view": "View Users",
+      "create": "Create User",
+      "update": "Update User",
+      "delete": "Delete User",
+      "disable": "Disable User",
+      "assignRole": "Assign Roles"
+    },
     "placeholder": "Search Department..."
   },
   "dept": {
@@ -36,13 +44,21 @@
     "createTime": "Create Time",
     "remark": "Remark",
     "operation": "Operation",
-    "parentDept": "Parent Department"
+    "parentDept": "Parent Department",
+    "permission": {
+      "view": "View Departments",
+      "manage": "Manage Departments"
+    }
   },
   "menu": {
     "addChild": "Add child",
     "list": "Menu List",
     "title": "Menu Management",
     "parent": "Parent Menu",
+    "permission": {
+      "view": "View Menus",
+      "manage": "Manage Menus"
+    },
     "menuTitle": "Title",
     "titleKeyFormat": "Use an i18n key such as system.title",
     "titleKeyMissing": "This i18n key does not exist in the current locale",
@@ -93,6 +109,12 @@
     "remark": "Remark",
     "createTime": "Creation Time",
     "operation": "Operation",
+    "permission": {
+      "view": "View Roles",
+      "create": "Create Role",
+      "update": "Update Role",
+      "delete": "Delete Role"
+    },
     "visibleMenus": "Visible menus",
     "navigationOnlyWarningTitle": "This only configures navigation visibility",
     "navigationOnlyWarningDescription": "Selecting menus only controls navigation and page visibility; it does not grant API permissions. Until the RoleGrant management loop is complete, a new role is not a production-ready authorization state."

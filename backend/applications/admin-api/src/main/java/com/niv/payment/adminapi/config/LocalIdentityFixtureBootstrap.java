@@ -127,7 +127,8 @@ final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
                   WHERE grant_row.tenant_id = 1 AND grant_row.role_id = 2000) AS targets,
                 (SELECT count(*) FROM iam_menu
                   WHERE tenant_id = 1
-                    AND id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)) AS menus,
+                    AND (id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
+                         OR id BETWEEN 6020 AND 6033)) AS menus,
                 (SELECT count(*) FROM iam_role_menu
                   WHERE tenant_id = 1 AND role_id = 2000
                     AND menu_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)) AS role_menus
@@ -155,7 +156,7 @@ final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
                 && grants == 14
                 && dimensions == 14
                 && targets == 0
-                && menus == 8
+                && menus == 22
                 && roleMenus == 8;
         }
     }

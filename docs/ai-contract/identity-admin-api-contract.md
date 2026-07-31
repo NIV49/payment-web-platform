@@ -590,13 +590,13 @@ Permission 为 `role:update`。系统角色不能修改；原子版本比较成�
 ### menuIds 与 RoleGrant
 
 ```text
-Role.menuIds -> 导航、页面、按钮展示
+Role.menuIds -> 导航、页面展示；当前角色 UI 递归过滤 BUTTON
 RoleGrant     -> 后端动作和数据范围
 ```
 
-两者已在数据库模型中分离。当前角色 UI/API 只管理 menuIds，不管理 RoleGrant。
+两者已在数据库模型中分离。当前角色 API 只存储 menuIds，角色 UI 会先递归过滤 BUTTON，因此浏览器只提交可路由节点；两者都不管理 RoleGrant。菜单管理树中的 BUTTON 是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
 
-`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 14 个 `TENANT_ALL` RoleGrant；V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。通过 UI 新建 Role 即使选择了 menuIds，也不会自动获得 `/auth/codes` 中的业务权限。这是明确边界，不得用 menuIds 自动推导 Grant。
+`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 14 个 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立与 Permission Catalog 一一对应的 14 个 BUTTON 目录节点。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。通过 UI 新建 Role 即使选择了 menuIds，也不会自动获得 `/auth/codes` 中的业务权限。这是明确边界，不得用 menuIds 自动推导 Grant。
 
 ## 1.11 Department API
 
@@ -662,6 +662,7 @@ expectedVersion（仅 PUT）
 - PUT/DELETE 在最终 jOOQ UPDATE 的 WHERE 中原子比较 `row_version = expectedVersion`，成功递增 rowVersion；
 - 当前后端尚未强制 authCode 必须存在于 Permission Catalog；
 - 删除是逻辑禁用，现存 role_menu 关系不会自动变成 RoleGrant。
+- `local` bootstrap 预置的 14 个 BUTTON 是受精确夹具校验保护的例外：其 authCode 集合与 14 个本地 Permission Catalog 权限码严格相等，path/component/redirect 为空；这不代表通用菜单写 API 已实现 Catalog 强校验。
 
 ### 管理资源的并发冲突协议
 
@@ -899,7 +900,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 13. 菜单 authCode 仍缺 Permission Catalog 强校验；component 服务端 allowlist 已完成；
 14. 审计 before/after、权限拒绝、登录失败、reason 和跨进程 trace correlation 未完成；
 15. 没有 OpenTelemetry、结构化日志上下文、关键指标、Dashboard、Alert 和 Runbook；
-16. application-local 不再启用 Flyway baseline；缺少 history 的旧手工开发卷必须备份后重建。fixture 已通过 V8 与 local bootstrap 拆分；无关真实 IAM/审计/Outbox 可保留，但命中预留 ID/自然键、修改过 fixture、或依赖 tenant `1` 的历史库必须使用人工前向迁移并单独演练恢复；
+16. application-local 不再启用 Flyway baseline；缺少 history 的旧手工开发卷必须备份后重建。fixture 已通过 V8 与 local bootstrap 拆分；精确匹配旧版 8 菜单本地夹具的开发库会在同一事务内补齐 14 个 BUTTON，任何部分按钮、冲突 authCode 或其他 fixture 偏差仍失败关闭；无关真实 IAM/审计/Outbox 可保留，但命中预留 ID/自然键、修改过 fixture、或依赖 tenant `1` 的其他历史库必须使用人工前向迁移并单独演练恢复；
 17. 跨租户、跨商户、多角色组合、撤权时效和故障恢复矩阵未完整验证；
 18. Outbox 只有 append-only fact + relay state schema，尚无 relay、投递/重试、Inbox/幂等、重放、告警和恢复演练；
 19. Payment/Ledger 缺少状态机、金额/币种/精度、幂等、账本分录、调账/对账、API/事件和迁移/回滚的可执行规格；

@@ -238,7 +238,7 @@ class AdminApiContractIntegrationTest {
         mvc.perform(get("/api/auth/codes").cookie(cookie)).andExpect(status().isOk())
             .andExpect(jsonPath("$.data.length()").value(14))
             .andExpect(jsonPath("$.data[?(@ == 'user:assign-role')]").exists());
-        mvc.perform(get("/api/menu/all").cookie(cookie)).andExpect(status().isOk())
+        String dynamicMenuBody = mvc.perform(get("/api/menu/all").cookie(cookie)).andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].pid").value("0"))
             .andExpect(jsonPath("$.data[0].component").doesNotExist())
             .andExpect(jsonPath("$.data[0].meta.title").value("page.dashboard.title"))
@@ -251,7 +251,9 @@ class AdminApiContractIntegrationTest {
             .andExpect(jsonPath("$.data[1].children[1].meta.title").value("system.role.title"))
             .andExpect(jsonPath("$.data[1].children[2].meta.title").value("system.menu.title"))
             .andExpect(jsonPath("$.data[1].children[3].meta.title").value("system.dept.title"))
-            .andExpect(jsonPath("$.data[1].children[3].name").value("SystemDept"));
+            .andExpect(jsonPath("$.data[1].children[3].name").value("SystemDept"))
+            .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(dynamicMenuBody, "$.data..authCode")).isEmpty();
         mvc.perform(get("/api/system/user/list?page=1&pageSize=20&status=1").cookie(cookie))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].id").isString());
         mvc.perform(get("/api/system/role/list?page=1&pageSize=200&status=1").cookie(cookie))
@@ -262,13 +264,20 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].pid").value("0"))
             .andExpect(jsonPath("$.data[0].rowVersion").isNumber());
-        mvc.perform(get("/api/system/menu/list").cookie(cookie))
+        String administrationMenuBody = mvc.perform(get("/api/system/menu/list").cookie(cookie))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].component").doesNotExist())
             .andExpect(jsonPath("$.data[1].component").doesNotExist())
             .andExpect(jsonPath("$.data[0].rowVersion").isNumber())
             .andExpect(jsonPath("$.data[1].meta.title").value("system.title"))
-            .andExpect(jsonPath("$.data[1].children[0].component").value("/system/user/list"));
+            .andExpect(jsonPath("$.data[1].children[0].component").value("/system/user/list"))
+            .andExpect(jsonPath("$.data[1].children[0].children[0].type").value("button"))
+            .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(administrationMenuBody, "$.data..authCode"))
+            .containsExactlyInAnyOrder(
+                "user:view", "user:create", "user:update", "user:delete", "user:disable", "user:assign-role",
+                "role:view", "role:create", "role:update", "role:delete",
+                "menu:view", "menu:manage", "department:view", "department:manage");
     }
 
     @Test

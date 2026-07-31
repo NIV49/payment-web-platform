@@ -162,6 +162,8 @@ GET /api/menu/all
 
 `/menu/all` 只返回 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，BUTTON 不进入动态路由。直接授权节点只在同 tenant 且 ACTIVE 的显式祖先链完整时返回，缺少的祖先会补齐但不带 sibling；祖先缺失、禁用、不是可路由类型或成环时整支 fail closed。
 
+`local` profile 的应用级 bootstrap 另外在 User、Role、Menu、Department 页面下预置 14 个 BUTTON 权限目录节点，其 `auth_code` 与本地 Permission Catalog 一一对应。管理接口 `/system/menu/list` 返回这些节点；它们不写入 `role_menu`，不进入 `/menu/all`，也不替代 RoleGrant。精确旧版 8 菜单夹具可在 bootstrap 事务内升级为 22 个菜单节点，任何部分升级或冲突数据继续失败关闭。
+
 跨端强约定：
 
 - `meta.title` 是前端语言包 key；

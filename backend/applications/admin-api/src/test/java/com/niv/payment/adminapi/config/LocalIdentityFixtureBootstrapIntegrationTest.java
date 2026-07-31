@@ -147,6 +147,81 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
     }
 
     @Test
+    void exactLegacyEightMenuFixtureUpgradesTransactionally() throws Exception {
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+        jdbc.update("DELETE FROM iam_menu WHERE tenant_id = 1 AND id BETWEEN 6020 AND 6033");
+
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+
+        assertCompleteFixture();
+    }
+
+    @Test
+    void failedLegacyMenuUpgradeRollsBackToTheExactEightMenuState() throws Exception {
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+        jdbc.update("DELETE FROM iam_menu WHERE tenant_id = 1 AND id BETWEEN 6020 AND 6033");
+        jdbc.execute("""
+            CREATE FUNCTION fail_local_permission_button_insert()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.id = 6020 THEN
+                    RAISE EXCEPTION 'forced local permission button failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+            """);
+        jdbc.execute("""
+            CREATE TRIGGER trg_fail_local_permission_button_insert
+            BEFORE INSERT ON iam_menu
+            FOR EACH ROW EXECUTE FUNCTION fail_local_permission_button_insert()
+            """);
+
+        assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
+            .hasStackTraceContaining("forced local permission button failure");
+
+        assertThat(count("iam_menu")).isEqualTo(8);
+        assertThat(count("iam_role_menu")).isEqualTo(8);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_menu
+             WHERE tenant_id = 1 AND menu_type = 'BUTTON'
+            """, Long.class)).isZero();
+    }
+
+    @Test
+    void partialPermissionButtonFixtureFailsInsteadOfBeingSilentlyRepaired() throws Exception {
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+        jdbc.update("DELETE FROM iam_menu WHERE tenant_id = 1 AND id = 6033");
+
+        assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+
+        assertThat(count("iam_menu")).isEqualTo(21);
+        assertThat(count("iam_role_menu")).isEqualTo(8);
+    }
+
+    @Test
+    void duplicateFixtureAuthCodeFailsInsteadOfCreatingAnAmbiguousCatalog() throws Exception {
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+        jdbc.update("""
+            INSERT INTO iam_menu(
+                id, tenant_id, parent_id, menu_type, menu_name, route_name,
+                sort_order, auth_code, status, meta_json
+            ) VALUES (
+                7200, 1, NULL, 'BUTTON', 'Duplicate User View', 'DuplicateUserView',
+                500, 'user:view', 'ACTIVE', '{"title":"system.user.permission.view"}'::jsonb
+            )
+            """);
+
+        assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+
+        assertThat(count("iam_menu")).isEqualTo(23);
+    }
+
+    @Test
     void modifiedFixtureIdentityFailsInsteadOfGrantingTheWrongSubject() throws Exception {
         runBootstrap(FIXTURE_LOGIN_INPUT);
         jdbc.update("UPDATE iam_user SET idp_subject = 'different-subject' WHERE id = 100");
@@ -296,7 +371,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
             .isOne();
         assertThat(count("iam_user")).isEqualTo(2);
         assertThat(count("iam_role")).isEqualTo(2);
-        assertThat(count("iam_menu")).isEqualTo(9);
+        assertThat(count("iam_menu")).isEqualTo(23);
     }
 
     @Test
@@ -427,6 +502,54 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
              WHERE tenant_id = 1 AND role_id = 2000
                AND menu_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
             """, Long.class)).isEqualTo(8);
+        assertThat(jdbc.queryForObject("""
+            WITH expected(parent_id, route_name, auth_code, title_key) AS (
+                VALUES
+                    (6001::bigint, 'UserView', 'user:view', 'system.user.permission.view'),
+                    (6001::bigint, 'UserCreate', 'user:create', 'system.user.permission.create'),
+                    (6001::bigint, 'UserUpdate', 'user:update', 'system.user.permission.update'),
+                    (6001::bigint, 'UserDelete', 'user:delete', 'system.user.permission.delete'),
+                    (6001::bigint, 'UserDisable', 'user:disable', 'system.user.permission.disable'),
+                    (6001::bigint, 'UserAssignRole', 'user:assign-role', 'system.user.permission.assignRole'),
+                    (6002::bigint, 'RoleView', 'role:view', 'system.role.permission.view'),
+                    (6002::bigint, 'RoleCreate', 'role:create', 'system.role.permission.create'),
+                    (6002::bigint, 'RoleUpdate', 'role:update', 'system.role.permission.update'),
+                    (6002::bigint, 'RoleDelete', 'role:delete', 'system.role.permission.delete'),
+                    (6003::bigint, 'MenuView', 'menu:view', 'system.menu.permission.view'),
+                    (6003::bigint, 'MenuManage', 'menu:manage', 'system.menu.permission.manage'),
+                    (6004::bigint, 'DepartmentView', 'department:view', 'system.dept.permission.view'),
+                    (6004::bigint, 'DepartmentManage', 'department:manage', 'system.dept.permission.manage')
+            )
+            SELECT count(*)
+              FROM expected
+              JOIN iam_menu menu
+                ON menu.tenant_id = 1
+               AND menu.parent_id = expected.parent_id
+               AND menu.route_name = expected.route_name
+               AND menu.auth_code = expected.auth_code
+               AND menu.meta_json ->> 'title' = expected.title_key
+              JOIN iam_permission permission
+                ON permission.permission_code = expected.auth_code
+               AND permission.status = 'ACTIVE'
+             WHERE menu.menu_type = 'BUTTON'
+               AND menu.route_path IS NULL
+               AND menu.component_path IS NULL
+               AND menu.redirect_path IS NULL
+               AND menu.status = 'ACTIVE'
+            """, Long.class)).isEqualTo(14);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_menu
+             WHERE tenant_id = 1 AND menu_type = 'BUTTON'
+            """, Long.class)).isEqualTo(14);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*)
+              FROM iam_role_menu role_menu
+              JOIN iam_menu menu
+                ON menu.id = role_menu.menu_id AND menu.tenant_id = role_menu.tenant_id
+             WHERE role_menu.tenant_id = 1
+               AND role_menu.role_id = 2000
+               AND menu.menu_type = 'BUTTON'
+            """, Long.class)).isZero();
     }
 
     private String credentialState() {

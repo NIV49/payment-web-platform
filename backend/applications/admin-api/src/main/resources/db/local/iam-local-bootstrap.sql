@@ -55,45 +55,75 @@ CREATE TEMPORARY TABLE iam_local_expected_menu (
     menu_type VARCHAR(16) NOT NULL,
     menu_name VARCHAR(128) NOT NULL,
     route_name VARCHAR(128) NOT NULL,
-    route_path VARCHAR(255) NOT NULL,
+    route_path VARCHAR(255),
     component_path VARCHAR(255),
     redirect_path VARCHAR(255),
     sort_order INTEGER NOT NULL,
-    meta_json JSONB NOT NULL
+    auth_code VARCHAR(128),
+    meta_json JSONB NOT NULL,
+    permission_button BOOLEAN NOT NULL
 ) ON COMMIT DROP
 @@
 
 INSERT INTO iam_local_expected_menu(
     id, parent_id, menu_type, menu_name, route_name, route_path,
-    component_path, redirect_path, sort_order, meta_json
+    component_path, redirect_path, sort_order, auth_code, meta_json, permission_button
 )
 VALUES
   (6000, NULL, 'DIRECTORY', 'System Management', 'System', '/system',
-   NULL, NULL, 100, '{"title":"system.title","icon":"lucide:settings"}'::jsonb),
+   NULL, NULL, 100, NULL, '{"title":"system.title","icon":"lucide:settings"}'::jsonb, false),
   (6001, 6000, 'PAGE', 'User Management', 'SystemUser', '/system/user',
-   '/system/user/list', NULL, 110,
-   '{"title":"system.user.title","icon":"lucide:users"}'::jsonb),
+   '/system/user/list', NULL, 110, NULL,
+   '{"title":"system.user.title","icon":"lucide:users"}'::jsonb, false),
   (6002, 6000, 'PAGE', 'Role Management', 'SystemRole', '/system/role',
-   '/system/role/list', NULL, 120,
-   '{"title":"system.role.title","icon":"lucide:shield-check"}'::jsonb),
+   '/system/role/list', NULL, 120, NULL,
+   '{"title":"system.role.title","icon":"lucide:shield-check"}'::jsonb, false),
   (6003, 6000, 'PAGE', 'Menu Management', 'SystemMenu', '/system/menu',
-   '/system/menu/list', NULL, 130,
-   '{"title":"system.menu.title","icon":"lucide:menu"}'::jsonb),
+   '/system/menu/list', NULL, 130, NULL,
+   '{"title":"system.menu.title","icon":"lucide:menu"}'::jsonb, false),
   (6004, 6000, 'PAGE', 'Department Management', 'SystemDept', '/system/dept',
-   '/system/dept/list', NULL, 140,
-   '{"title":"system.dept.title","icon":"lucide:building-2"}'::jsonb),
+   '/system/dept/list', NULL, 140, NULL,
+   '{"title":"system.dept.title","icon":"lucide:building-2"}'::jsonb, false),
   (6010, NULL, 'DIRECTORY', 'Dashboard', 'Dashboard', '/dashboard',
-   NULL, '/dashboard/analytics', -100,
-   '{"title":"page.dashboard.title","icon":"lucide:layout-dashboard","order":-1}'::jsonb),
+   NULL, '/dashboard/analytics', -100, NULL,
+   '{"title":"page.dashboard.title","icon":"lucide:layout-dashboard","order":-1}'::jsonb, false),
   (6011, 6010, 'PAGE', 'Analytics', 'Analytics', '/dashboard/analytics',
-   '/dashboard/analytics/index', NULL, -90,
-   '{"title":"page.dashboard.analytics","icon":"lucide:area-chart","affixTab":true}'::jsonb),
+   '/dashboard/analytics/index', NULL, -90, NULL,
+   '{"title":"page.dashboard.analytics","icon":"lucide:area-chart","affixTab":true}'::jsonb, false),
   (6012, 6010, 'PAGE', 'Workspace', 'Workspace', '/dashboard/workspace',
-   '/dashboard/workspace/index', NULL, -80,
-   '{"title":"page.dashboard.workspace","icon":"carbon:workspace"}'::jsonb)
+   '/dashboard/workspace/index', NULL, -80, NULL,
+   '{"title":"page.dashboard.workspace","icon":"carbon:workspace"}'::jsonb, false),
+  (6020, 6001, 'BUTTON', 'View Users', 'UserView', NULL,
+   NULL, NULL, 111, 'user:view', '{"title":"system.user.permission.view"}'::jsonb, true),
+  (6021, 6001, 'BUTTON', 'Create User', 'UserCreate', NULL,
+   NULL, NULL, 112, 'user:create', '{"title":"system.user.permission.create"}'::jsonb, true),
+  (6022, 6001, 'BUTTON', 'Update User', 'UserUpdate', NULL,
+   NULL, NULL, 113, 'user:update', '{"title":"system.user.permission.update"}'::jsonb, true),
+  (6023, 6001, 'BUTTON', 'Delete User', 'UserDelete', NULL,
+   NULL, NULL, 114, 'user:delete', '{"title":"system.user.permission.delete"}'::jsonb, true),
+  (6024, 6001, 'BUTTON', 'Disable User', 'UserDisable', NULL,
+   NULL, NULL, 115, 'user:disable', '{"title":"system.user.permission.disable"}'::jsonb, true),
+  (6025, 6001, 'BUTTON', 'Assign User Roles', 'UserAssignRole', NULL,
+   NULL, NULL, 116, 'user:assign-role', '{"title":"system.user.permission.assignRole"}'::jsonb, true),
+  (6026, 6002, 'BUTTON', 'View Roles', 'RoleView', NULL,
+   NULL, NULL, 121, 'role:view', '{"title":"system.role.permission.view"}'::jsonb, true),
+  (6027, 6002, 'BUTTON', 'Create Role', 'RoleCreate', NULL,
+   NULL, NULL, 122, 'role:create', '{"title":"system.role.permission.create"}'::jsonb, true),
+  (6028, 6002, 'BUTTON', 'Update Role', 'RoleUpdate', NULL,
+   NULL, NULL, 123, 'role:update', '{"title":"system.role.permission.update"}'::jsonb, true),
+  (6029, 6002, 'BUTTON', 'Delete Role', 'RoleDelete', NULL,
+   NULL, NULL, 124, 'role:delete', '{"title":"system.role.permission.delete"}'::jsonb, true),
+  (6030, 6003, 'BUTTON', 'View Menus', 'MenuView', NULL,
+   NULL, NULL, 131, 'menu:view', '{"title":"system.menu.permission.view"}'::jsonb, true),
+  (6031, 6003, 'BUTTON', 'Manage Menus', 'MenuManage', NULL,
+   NULL, NULL, 132, 'menu:manage', '{"title":"system.menu.permission.manage"}'::jsonb, true),
+  (6032, 6004, 'BUTTON', 'View Departments', 'DepartmentView', NULL,
+   NULL, NULL, 141, 'department:view', '{"title":"system.dept.permission.view"}'::jsonb, true),
+  (6033, 6004, 'BUTTON', 'Manage Departments', 'DepartmentManage', NULL,
+   NULL, NULL, 142, 'department:manage', '{"title":"system.dept.permission.manage"}'::jsonb, true)
 @@
 
-CREATE OR REPLACE FUNCTION pg_temp.iam_local_fixture_is_exact()
+CREATE OR REPLACE FUNCTION pg_temp.iam_local_fixture_is_exact(include_permission_buttons BOOLEAN)
 RETURNS BOOLEAN
 LANGUAGE SQL
 STABLE
@@ -214,37 +244,58 @@ SELECT
            AND expected.menu_type = menu.menu_type
            AND expected.menu_name = menu.menu_name
            AND expected.route_name = menu.route_name
-           AND expected.route_path = menu.route_path
+           AND expected.route_path IS NOT DISTINCT FROM menu.route_path
            AND expected.component_path IS NOT DISTINCT FROM menu.component_path
            AND expected.redirect_path IS NOT DISTINCT FROM menu.redirect_path
            AND expected.sort_order = menu.sort_order
+           AND expected.auth_code IS NOT DISTINCT FROM menu.auth_code
            AND expected.meta_json = menu.meta_json
          WHERE menu.tenant_id = 1 AND menu.display_permission_id IS NULL
-           AND menu.auth_code IS NULL AND menu.remark IS NULL AND menu.status = 'ACTIVE'
+           AND menu.remark IS NULL AND menu.status = 'ACTIVE'
            AND menu.row_version = 0
-    ) = 8
+           AND (NOT expected.permission_button OR include_permission_buttons)
+    ) = (
+        SELECT count(*) FROM iam_local_expected_menu
+         WHERE NOT permission_button OR include_permission_buttons
+    )
     AND (
         SELECT count(*)
           FROM iam_menu menu
-         WHERE menu.id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
+         WHERE menu.id IN (SELECT id FROM iam_local_expected_menu)
             OR (
                 menu.tenant_id = 1
                 AND (
                     menu.route_name IN (SELECT route_name FROM iam_local_expected_menu)
-                    OR menu.route_path IN (SELECT route_path FROM iam_local_expected_menu)
-                    OR menu.parent_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
+                    OR menu.route_path IN (
+                        SELECT route_path FROM iam_local_expected_menu WHERE route_path IS NOT NULL
+                    )
+                    OR menu.auth_code IN (
+                        SELECT auth_code FROM iam_local_expected_menu WHERE auth_code IS NOT NULL
+                    )
+                    OR menu.parent_id IN (SELECT id FROM iam_local_expected_menu)
                 )
             )
-    ) = 8
+    ) = (
+        SELECT count(*) FROM iam_local_expected_menu
+         WHERE NOT permission_button OR include_permission_buttons
+    )
     AND (
         SELECT count(*)
           FROM iam_role_menu role_menu
-          JOIN iam_local_expected_menu expected ON expected.id = role_menu.menu_id
+          JOIN iam_local_expected_menu expected
+            ON expected.id = role_menu.menu_id
+           AND NOT expected.permission_button
          WHERE role_menu.tenant_id = 1 AND role_menu.role_id = 2000
-    ) = 8
+    ) = (
+        SELECT count(*) FROM iam_local_expected_menu
+         WHERE NOT permission_button
+    )
     AND (SELECT count(*) FROM iam_role_menu
           WHERE role_id = 2000
-             OR menu_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)) = 8
+             OR menu_id IN (SELECT id FROM iam_local_expected_menu)) = (
+        SELECT count(*) FROM iam_local_expected_menu
+         WHERE NOT permission_button
+    )
 $$
 @@
 
@@ -303,22 +354,40 @@ BEGIN
         OR EXISTS (
             SELECT 1
               FROM iam_menu menu
-             WHERE menu.id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
+             WHERE menu.id IN (SELECT id FROM iam_local_expected_menu)
                 OR (
                     menu.tenant_id = 1
                     AND (
                         menu.route_name IN (SELECT route_name FROM iam_local_expected_menu)
-                        OR menu.route_path IN (SELECT route_path FROM iam_local_expected_menu)
-                        OR menu.parent_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
+                        OR menu.route_path IN (
+                            SELECT route_path FROM iam_local_expected_menu WHERE route_path IS NOT NULL
+                        )
+                        OR menu.auth_code IN (
+                            SELECT auth_code FROM iam_local_expected_menu WHERE auth_code IS NOT NULL
+                        )
+                        OR menu.parent_id IN (SELECT id FROM iam_local_expected_menu)
                     )
                 )
         )
         OR EXISTS (SELECT 1 FROM iam_role_menu
                     WHERE role_id = 2000
-                       OR menu_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012))
+                       OR menu_id IN (SELECT id FROM iam_local_expected_menu))
       INTO fixture_footprint_present;
 
-    IF fixture_footprint_present AND NOT pg_temp.iam_local_fixture_is_exact() THEN
+    IF fixture_footprint_present AND pg_temp.iam_local_fixture_is_exact(false) THEN
+        INSERT INTO iam_menu (
+            id, tenant_id, parent_id, menu_type, menu_name, route_name, route_path,
+            component_path, redirect_path, sort_order, auth_code, status, meta_json
+        )
+        SELECT id, 1, parent_id, menu_type, menu_name, route_name, route_path,
+               component_path, redirect_path, sort_order, auth_code, 'ACTIVE', meta_json
+          FROM iam_local_expected_menu
+         WHERE permission_button
+         ORDER BY id;
+
+    END IF;
+
+    IF fixture_footprint_present AND NOT pg_temp.iam_local_fixture_is_exact(true) THEN
         RAISE EXCEPTION
             'Local bootstrap refused: local fixture footprint is incomplete or modified';
     END IF;
@@ -386,23 +455,23 @@ ON CONFLICT (grant_id, dimension_code) DO NOTHING
 
 INSERT INTO iam_menu (
     id, tenant_id, parent_id, menu_type, menu_name, route_name, route_path,
-    component_path, redirect_path, sort_order, status, meta_json
+    component_path, redirect_path, sort_order, auth_code, status, meta_json
 )
 SELECT id, 1, parent_id, menu_type, menu_name, route_name, route_path,
-       component_path, redirect_path, sort_order, 'ACTIVE', meta_json
+       component_path, redirect_path, sort_order, auth_code, 'ACTIVE', meta_json
   FROM iam_local_expected_menu
  ORDER BY id
 ON CONFLICT (id) DO NOTHING
 @@
 
 INSERT INTO iam_role_menu (tenant_id, role_id, menu_id)
-SELECT 1, 2000, id FROM iam_local_expected_menu
+SELECT 1, 2000, id FROM iam_local_expected_menu WHERE NOT permission_button
 ON CONFLICT DO NOTHING
 @@
 
 DO $$
 BEGIN
-    IF NOT pg_temp.iam_local_fixture_is_exact() THEN
+    IF NOT pg_temp.iam_local_fixture_is_exact(true) THEN
         RAISE EXCEPTION
             'Local bootstrap failed: local identity fixture is incomplete after writing';
     END IF;
@@ -432,5 +501,5 @@ SELECT setval(
 )
 @@
 
-DROP FUNCTION pg_temp.iam_local_fixture_is_exact()
+DROP FUNCTION pg_temp.iam_local_fixture_is_exact(BOOLEAN)
 @@
