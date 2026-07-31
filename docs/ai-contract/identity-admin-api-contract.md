@@ -603,7 +603,7 @@ Role.menuIds -> 导航、页面展示；当前角色 UI 递归过滤 BUTTON
 RoleGrant     -> 后端动作和数据范围
 ```
 
-两者已在数据库模型中分离。当前角色 API 只存储 menuIds，角色 UI 会先递归过滤 BUTTON，因此浏览器只提交可路由节点；两者都不管理 RoleGrant。菜单管理树中的 BUTTON 是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
+两者已在数据库模型和前端交互中分离。角色表单只保存 menuIds，并递归过滤 BUTTON；独立“功能权限”抽屉通过下节 RoleGrant API 读取和替换授权，绝不从 menuIds 推导 Grant。菜单管理树中的 BUTTON 是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
 
 `local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，部分状态与预留键冲突继续失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
 
@@ -877,7 +877,7 @@ V13__enforce_login_credential_hash_safety.sql
 3. 给用户状态 PATCH 增加 reason，并补正式审计 before/after；
 4. 为非平台租户设计独立的成员管理用例和权限目录；当前继续明确拒绝写入；
 5. 为已接入 Permission Catalog 强校验的菜单 authCode 补正式目录生命周期治理；component allowlist 已完成；
-6. 为已落地的独立 RoleGrant 管理 API 完成前端 UI、审批流和扩展维度设计，继续禁止复用 menuIds；
+6. 为已落地的独立 RoleGrant 管理 API/UI 完成审批流和扩展维度设计，继续禁止复用 menuIds；
 7. RoleGrant 上线前实现商户、市场、渠道等服务端 Provider；
 8. 在现有请求 trace 关联基础上接入正式 OpenTelemetry 和跨进程 log correlation；
 9. 外部 IdP 接管凭证后，保留 Vben Cookie-session 适配层，避免向浏览器暴露长期 token。
@@ -910,7 +910,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 | MARKET | `SPECIFIED` |
 | CHANNEL | `SPECIFIED` |
 
-原子 Grant 语义和上表矩阵已经是当前 Core/数据库不变量；浏览器可调用的受限 RoleGrant 管理 API 已覆盖精确 18 个 TENANT/TENANT_ALL 管理权限，管理 UI、通用维度、审批流和业务 Provider 仍是后续目标。不得把角色 menuIds 保存自动转换为 RoleGrant。
+原子 Grant 语义和上表矩阵已经是当前 Core/数据库不变量；浏览器可调用的受限 RoleGrant 管理 API/UI 已覆盖精确 18 个 TENANT/TENANT_ALL 管理权限，通用维度、审批流和业务 Provider 仍是后续目标。不得把角色 menuIds 保存自动转换为 RoleGrant。
 
 ## 3.4 Rollout order
 
@@ -918,7 +918,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 当前平台 IAM 原型
 -> 用户激活/重置 + IdP/MFA
 -> 审计 correlation 和正式可观测性
--> RoleGrant 管理 UI、审批流与扩展维度
+-> RoleGrant 审批流与扩展维度
 -> Merchant/Market/Channel Provider
 -> 只读业务数据权限
 -> 敏感查看/导出
@@ -939,7 +939,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 6. 管理写 Grant 的 `valid_until` 可能在等待 tenant/actor 锁期间过期，事务内授权重验尚未实现；当前只能通过“管理写权限不得配置有限 `valid_until`”的运维约束临时规避；
 7. 普通角色分配已保护最后管理员、禁止自提权并拒绝 system/non-assignable role；仍缺经过审批、双人执行、可审计的 break-glass provisioning；
 8. 管理资源已用 rowVersion 阻止旧快照覆盖，但用户/角色仍无详情重载 endpoint；发生 40902 时只能关闭旧表单并刷新列表，不能自动合并并发修改；
-9. RoleGrant 管理 API 已实现精确目录的全量替换；前端管理 UI、超出 TENANT_ALL 的数据维度和正式审批流仍未完成；
+9. RoleGrant 管理 API/UI 已实现精确目录的全量替换；超出 TENANT_ALL 的数据维度和正式审批流仍未完成；
 10. Merchant、Market、Channel、Customer、AgentRelation、HistoricalSnapshot Provider 未实现；
 11. 数据范围没有在真实订单/报表 Mapper 上完成 tenant + scope 集成测试；
 12. 资金权限目录、step-up、职责分离、审批和审计未实现；

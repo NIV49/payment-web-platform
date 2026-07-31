@@ -154,4 +154,4 @@ resourceFingerprint
 - 生产 Flyway 与 local fixture 隔离；
 - DataScopePlan 保留 Grant 元组并排除无可信审批证据的 Grant。
 
-它仍不是生产身份或支付权限系统：外部 IdP、MFA 时效、可信审批工作流、RoleGrant 管理闭环、关系 Provider、真实订单 Mapper、Outbox relay、生产 provisioning/observability 和资金业务规格尚未完成。任何真实资金写路径仍被发布门禁阻断。
+它仍不是生产身份或支付权限系统：外部 IdP、MFA 时效、可信审批工作流、超出首阶段 18 项 TENANT/TENANT_ALL 目录的通用 RoleGrant 管理、关系 Provider、真实订单 Mapper、Outbox relay、生产 provisioning/observability 和资金业务规格尚未完成。任何真实资金写路径仍被发布门禁阻断。
