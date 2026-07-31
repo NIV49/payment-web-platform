@@ -631,7 +631,7 @@ RoleGrant         -> 后端动作和数据范围
 - `GET /api/v1/iam/permissions/grantable`：只返回精确 18 个 NORMAL、SAME_TENANT_ONLY 管理权限；`role:grant-update` 仅属于 system-admin，不可委派；
 - `GET /api/v1/iam/roles/{roleId}/grants`：返回 `{roleId,roleVersion,editable,grants}`；system role、`assignable=false`、存在当前页面不能无损表达的授权，或旧管理权限 cutover 尚未完成时 `editable=false`；
 - `PUT /api/v1/iam/roles/{roleId}/grants`：只接受 `systemRole=false AND assignable=true` 的普通角色、全量替换、必填 `expectedVersion` 与非空 `reason`；non-assignable role 返回 422 `IAM_ROLE_NOT_ASSIGNABLE`。`payment.permissions.legacy-administration-cutover-complete` 默认为 `false`；未完成 cutover 时返回 40903 `LEGACY_ADMINISTRATION_CUTOVER_REQUIRED`。
-- `PUT /api/v1/iam/roles/{roleId}/configuration`：角色编辑页专用原子入口，请求为 `{expectedVersion,name,status,remark,menuIds,reason,grants}`；成功只递增一次 role rowVersion 和每个成员一次 permissionVersion，写一组 before/after audit 与 Outbox。普通 role PUT 和独立 Grant PUT 继续作为兼容 API 存在，但当前角色编辑 UI 不并发调用它们。
+- `PUT /api/v1/iam/roles/{roleId}/configuration`：角色编辑页专用原子入口，请求为 `{expectedVersion,name,status,remark,menuIds,reason,grants}`；成功只递增一次 role rowVersion 和每个成员一次 permissionVersion，写一组 before/after audit 与 Outbox。审计中的 `menuIds` 前后值只比较本次可管理的 ACTIVE、未删除、可路由导航关系；被保留的 DISABLED、BUTTON 或墓碑历史关系不得误报为本次删除。普通 role PUT 和独立 Grant PUT 继续作为兼容 API 存在，但当前角色编辑 UI 不并发调用它们。
 
 Grant 和 dimension 数组中的 `null` 元素统一返回 400 `INVALID_REQUEST`，并且必须在任何角色版本、Grant、审计或 Outbox 写入前失败。
 
@@ -1016,7 +1016,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 - 用户列表查询字段与本文一致；
 - 角色列表查询字段与本文一致；
 - 用户状态 PATCH 使用 `status + userVersion` 并返回新版本；
-- 用户创建 POST 与 Membership 更新 PUT 已使用不同 DTO；POST 固定创建 `PENDING_ACTIVATION` User + `DISABLED` Credential，列表返回 `identityStatus`；PUT 不接受全局身份字段；
+- 用户创建 POST 与 Membership 更新 PUT 已使用不同 DTO；POST 固定创建 `PENDING_ACTIVATION` User + `DISABLED` Credential，列表返回 `identityStatus`；普通管理员 PUT 不接受全局身份字段，可信 PLATFORM 系统管理员可连同 `identityVersion/credentialVersion` 更新列表返回的身份字段；
 - 角色状态 PATCH 使用 `status + expectedVersion`，权限为 `role:update`；
 - role menuIds 与 RoleGrant 不混用；
 - 所有管理写入要求 ACTIVE PLATFORM Tenant；

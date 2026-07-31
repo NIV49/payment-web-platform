@@ -119,8 +119,9 @@ describe('role navigable menu tree', () => {
     ]);
 
     expect(configuration.tree[0]?.id).toBe('10');
-    expect(configuration.tree[0]?.children?.[0]?.children?.map(({ id }) => id))
-      .toEqual(['12', '17', '18', '19']);
+    expect(
+      configuration.tree[0]?.children?.[0]?.children?.map(({ id }) => id),
+    ).toEqual(['12', '17', '18', '19']);
     expect(configuration.permissionByButtonId).toEqual({
       '12': 'user:view',
       '17': 'user:create',
@@ -131,10 +132,12 @@ describe('role navigable menu tree', () => {
 
   it('hides actions whose permission dependencies are not represented by buttons', () => {
     const configuration = buildRoleConfigurationTree(
-      [makeMenu('10', 'menu', [
-        makeButton('11', 'user:view'),
-        makeButton('12', 'user:create'),
-      ])],
+      [
+        makeMenu('10', 'menu', [
+          makeButton('11', 'user:view'),
+          makeButton('12', 'user:create'),
+        ]),
+      ],
       ['user:create', 'user:view'],
     );
 
@@ -176,14 +179,48 @@ describe('role navigable menu tree', () => {
 
   it('selecting navigation never grants descendant buttons', () => {
     const configuration = buildRoleConfigurationTree(
-      [makeMenu('10', 'catalog', [makeMenu('11', 'menu', [makeButton('12', 'user:view')])])],
+      [
+        makeMenu('10', 'catalog', [
+          makeMenu('11', 'menu', [makeButton('12', 'user:view')]),
+        ]),
+      ],
       ['user:view'],
     );
 
-    expect(normalizeRoleConfigurationSelection(['10', '11'], configuration)).toEqual({
+    expect(
+      normalizeRoleConfigurationSelection(['10', '11'], configuration),
+    ).toEqual({
       menuIds: ['10', '11'],
       permissionCodes: [],
       selectedIds: ['10', '11'],
+    });
+  });
+
+  it('removing a dependency also removes actions that can no longer be granted', () => {
+    const configuration = buildRoleConfigurationTree(
+      [
+        makeMenu('10', 'catalog', [
+          makeMenu('11', 'menu', [
+            makeButton('12', 'role:view'),
+            makeButton('13', 'menu:view'),
+            makeButton('14', 'role:create'),
+          ]),
+        ]),
+      ],
+      ['menu:view', 'role:create', 'role:view'],
+    );
+    const selected = normalizeRoleConfigurationSelection(['14'], configuration);
+
+    expect(
+      normalizeRoleConfigurationSelection(
+        selected.selectedIds.filter((id) => id !== '12'),
+        configuration,
+        { checked: false, id: '12' },
+      ),
+    ).toEqual({
+      menuIds: ['10', '11'],
+      permissionCodes: ['menu:view'],
+      selectedIds: ['10', '11', '13'],
     });
   });
 });

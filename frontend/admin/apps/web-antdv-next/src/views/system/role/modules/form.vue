@@ -1,10 +1,9 @@
 <script lang="ts" setup>
+import type { RoleConfigurationTree } from '../menu-tree';
 import type { RoleRequestIdentity } from '../role-request-guard';
 
 import type { SystemMenuApi } from '#/api/system/menu';
 import type { SystemRoleApi } from '#/api/system/role';
-
-import type { RoleConfigurationTree } from '../menu-tree';
 
 import { computed, nextTick, ref } from 'vue';
 
@@ -16,12 +15,12 @@ import { Alert, Button, Input, Spin } from 'antdv-next';
 import { useVbenForm } from '#/adapter/form';
 import { isOptimisticLockConflict } from '#/api/error-contract';
 import { getMenuList } from '#/api/system/menu';
+import { createRole } from '#/api/system/role';
 import {
   getGrantablePermissions,
   getRoleGrants,
   replaceRoleConfiguration,
 } from '#/api/system/role-grant';
-import { createRole } from '#/api/system/role';
 import { $t } from '#/locales';
 
 import { useFormSchema } from '../data';
@@ -189,7 +188,8 @@ async function initializeForm(existingRole?: SystemRoleApi.SystemRole) {
       );
       const missingDependencies =
         findMissingPermissionDependencies(permissionCodes).length > 0;
-      const versionChanged = grantDetail.roleVersion !== existingRole.rowVersion;
+      const versionChanged =
+        grantDetail.roleVersion !== existingRole.rowVersion;
       configurationReadOnly.value =
         !grantDetail.editable ||
         unsupportedPermission ||
@@ -245,14 +245,19 @@ async function initializeForm(existingRole?: SystemRoleApi.SystemRole) {
   }
 }
 
-async function onRoleTreeSelect() {
+async function onRoleTreeSelect(item: { value: SystemMenuApi.SystemMenu }) {
   const configuration = roleConfigurationTree.value;
   if (!configuration || configurationReadOnly.value) return;
   await nextTick();
   const values = await formApi.getValues<SystemRoleApi.RoleSaveParams>();
+  const selectedIds = values.menuIds ?? [];
   const normalized = normalizeRoleConfigurationSelection(
-    values.menuIds ?? [],
+    selectedIds,
     configuration,
+    {
+      checked: selectedIds.includes(item.value.id),
+      id: item.value.id,
+    },
   );
   await formApi.setValues({ menuIds: normalized.selectedIds });
 }

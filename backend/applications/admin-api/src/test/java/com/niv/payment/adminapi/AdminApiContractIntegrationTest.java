@@ -1437,6 +1437,14 @@ class AdminApiContractIntegrationTest {
             SELECT count(*) FROM iam_permission_change_outbox
              WHERE tenant_id=1 AND aggregate_type='ROLE_CONFIGURATION' AND aggregate_ref=?
             """, Long.class, Long.toString(roleId))).isOne();
+        assertThat(jdbc.queryForMap("""
+            SELECT before_value->>'menuIds' AS before_menu_ids,
+                   after_value->>'menuIds' AS after_menu_ids
+              FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_CONFIGURATION' AND target_ref=?
+            """, Long.toString(roleId)))
+            .containsEntry("before_menu_ids", "6000")
+            .containsEntry("after_menu_ids", "6001");
     }
 
     @Test

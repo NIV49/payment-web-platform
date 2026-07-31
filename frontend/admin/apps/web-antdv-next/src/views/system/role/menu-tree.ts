@@ -15,6 +15,11 @@ export interface RoleConfigurationTree {
   tree: SystemMenuApi.SystemMenu[];
 }
 
+export interface RoleConfigurationSelectionChange {
+  checked: boolean;
+  id: string;
+}
+
 export function filterNavigableMenuTree(
   menuTree: readonly SystemMenuApi.SystemMenu[],
 ): SystemMenuApi.SystemMenu[] {
@@ -52,7 +57,6 @@ export function buildRoleConfigurationTree(
   const buttonIdByPermission: Record<string, string> = {};
   const navigationIds: string[] = [];
   const parentById: Record<string, string | undefined> = {};
-  const permissionByButtonId: Record<string, string> = {};
 
   const visit = (
     menus: readonly SystemMenuApi.SystemMenu[],
@@ -71,7 +75,6 @@ export function buildRoleConfigurationTree(
           return [];
         }
         buttonIdByPermission[authCode] = menu.id;
-        permissionByButtonId[menu.id] = authCode;
         parentById[menu.id] = parentId;
         return [{ ...menu, children: undefined }];
       }
@@ -87,24 +90,30 @@ export function buildRoleConfigurationTree(
     });
 
   const tree = visit(menuTree);
+  const availablePermissions = new Set(Object.keys(buttonIdByPermission));
   let removedDependency = true;
   while (removedDependency) {
     removedDependency = false;
-    for (const [permission, buttonId] of Object.entries(
-      buttonIdByPermission,
-    )) {
+    for (const permission of availablePermissions) {
       if (
         permissionDependencies(permission).some(
-          (dependency) => !buttonIdByPermission[dependency],
+          (dependency) => !availablePermissions.has(dependency),
         )
       ) {
-        delete buttonIdByPermission[permission];
-        delete permissionByButtonId[buttonId];
+        availablePermissions.delete(permission);
         removedDependency = true;
       }
     }
   }
-  const visibleButtons = new Set(Object.values(buttonIdByPermission));
+  const availableButtonIdByPermission: Record<string, string> = {};
+  const availablePermissionByButtonId: Record<string, string> = {};
+  for (const permission of availablePermissions) {
+    const buttonId = buttonIdByPermission[permission];
+    if (!buttonId) continue;
+    availableButtonIdByPermission[permission] = buttonId;
+    availablePermissionByButtonId[buttonId] = permission;
+  }
+  const visibleButtons = new Set(Object.values(availableButtonIdByPermission));
   const removeUnavailableButtons = (
     menus: readonly SystemMenuApi.SystemMenu[],
   ): SystemMenuApi.SystemMenu[] =>
@@ -112,19 +121,21 @@ export function buildRoleConfigurationTree(
       if (menu.type === 'button') {
         return visibleButtons.has(menu.id) ? [menu] : [];
       }
-      return [{
-        ...menu,
-        ...(menu.children
-          ? { children: removeUnavailableButtons(menu.children) }
-          : {}),
-      }];
+      return [
+        {
+          ...menu,
+          ...(menu.children
+            ? { children: removeUnavailableButtons(menu.children) }
+            : {}),
+        },
+      ];
     });
 
   return {
-    buttonIdByPermission,
+    buttonIdByPermission: availableButtonIdByPermission,
     navigationIds,
     parentById,
-    permissionByButtonId,
+    permissionByButtonId: availablePermissionByButtonId,
     tree: removeUnavailableButtons(tree),
   };
 }
@@ -132,15 +143,28 @@ export function buildRoleConfigurationTree(
 export function normalizeRoleConfigurationSelection(
   selectedIds: readonly string[],
   configuration: RoleConfigurationTree,
+  change?: RoleConfigurationSelectionChange,
 ) {
   const navigationSet = new Set(configuration.navigationIds);
   const requestedPermissions = selectedIds.flatMap((id) => {
     const permission = configuration.permissionByButtonId[id];
     return permission ? [permission] : [];
   });
-  let permissions: string[] = [];
-  for (const permission of requestedPermissions) {
-    permissions = reconcilePermissionSelection(permissions, permission, true);
+  const changedPermission = change
+    ? configuration.permissionByButtonId[change.id]
+    : undefined;
+  let permissions: string[];
+  if (change && changedPermission) {
+    permissions = reconcilePermissionSelection(
+      requestedPermissions,
+      changedPermission,
+      change.checked,
+    );
+  } else {
+    permissions = [];
+    for (const permission of requestedPermissions) {
+      permissions = reconcilePermissionSelection(permissions, permission, true);
+    }
   }
   const availablePermissions = permissions.filter(
     (permission) => configuration.buttonIdByPermission[permission],
@@ -161,7 +185,7 @@ export function normalizeRoleConfigurationSelection(
   const normalizedIds = order.filter((id) => nextIds.has(id));
   return {
     menuIds: configuration.navigationIds.filter((id) => nextIds.has(id)),
-    permissionCodes: [...availablePermissions].sort(),
+    permissionCodes: [...availablePermissions].toSorted(),
     selectedIds: normalizedIds,
   };
 }

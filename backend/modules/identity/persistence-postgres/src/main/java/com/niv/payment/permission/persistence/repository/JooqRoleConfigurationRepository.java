@@ -94,8 +94,14 @@ public class JooqRoleConfigurationRepository implements RoleConfigurationPort {
         Map<String, Long> permissionIds = grants.requireCatalog(command.grants());
         List<Long> existingMenus = dsl.select(IAM_ROLE_MENU.MENU_ID)
             .from(IAM_ROLE_MENU)
+            .join(IAM_MENU)
+            .on(IAM_MENU.TENANT_ID.eq(IAM_ROLE_MENU.TENANT_ID)
+                .and(IAM_MENU.ID.eq(IAM_ROLE_MENU.MENU_ID)))
             .where(IAM_ROLE_MENU.TENANT_ID.eq(command.tenantId())
-                .and(IAM_ROLE_MENU.ROLE_ID.eq(command.roleId())))
+                .and(IAM_ROLE_MENU.ROLE_ID.eq(command.roleId()))
+                .and(IAM_MENU.STATUS.eq("ACTIVE"))
+                .and(IAM_MENU.DELETED_AT.isNull())
+                .and(IAM_MENU.MENU_TYPE.in(ROUTABLE_MENU_TYPES)))
             .orderBy(IAM_ROLE_MENU.MENU_ID)
             .fetch(IAM_ROLE_MENU.MENU_ID);
         Field<JSONB> before = auditValue(
