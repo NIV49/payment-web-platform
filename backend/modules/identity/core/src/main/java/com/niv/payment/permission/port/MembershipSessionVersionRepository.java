@@ -1,8 +1,10 @@
 package com.niv.payment.permission.port;
 
-import java.util.OptionalLong;
+import java.util.Optional;
 
 @FunctionalInterface
 public interface MembershipSessionVersionRepository {
-    OptionalLong findActiveSessionVersion(long tenantId, long membershipId, long userId);
+    Optional<MembershipVersions> findActiveVersions(long tenantId, long membershipId, long userId);
+
+    record MembershipVersions(long permissionVersion, long sessionVersion) { }
 }

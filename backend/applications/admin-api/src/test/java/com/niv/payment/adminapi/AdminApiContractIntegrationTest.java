@@ -405,14 +405,14 @@ class AdminApiContractIntegrationTest {
                 "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
                 Long.class, roleId)).isEqualTo(menuIdsBefore);
             mvc.perform(get("/api/auth/codes").cookie(restricted))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(0));
-            mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(restricted))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error").value("SESSION_INVALID"))
                 .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
                     org.hamcrest.Matchers.containsString("PAYMENT_SESSION="),
                     org.hamcrest.Matchers.containsString("Max-Age=0"))));
+            mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(restricted))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("SESSION_INVALID"));
 
             Cookie refreshed = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
             mvc.perform(get("/api/auth/codes").cookie(refreshed))

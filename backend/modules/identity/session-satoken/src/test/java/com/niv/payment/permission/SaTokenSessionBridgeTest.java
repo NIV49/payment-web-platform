@@ -4,10 +4,11 @@ import com.niv.payment.permission.security.SaTokenFacade;
 import com.niv.payment.permission.security.SaTokenSessionBridge;
 import com.niv.payment.permission.security.SessionAttributeNames;
 import com.niv.payment.permission.security.InvalidSessionException;
+import com.niv.payment.permission.port.MembershipSessionVersionRepository.MembershipVersions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
-import java.util.OptionalLong;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -26,7 +27,8 @@ class SaTokenSessionBridgeTest {
         SaTokenFacade facade = new FakeSaTokenFacade(attributes);
 
         var subject = new SaTokenSessionBridge(facade,
-            (tenantId, membershipId, userId) -> OptionalLong.of(3L)).currentSubject();
+            (tenantId, membershipId, userId) -> Optional.of(new MembershipVersions(7L, 3L)))
+            .currentSubject();
 
         assertEquals(20L, subject.membershipId());
         assertEquals(30L, subject.tenantId());
@@ -44,7 +46,23 @@ class SaTokenSessionBridgeTest {
             SessionAttributeNames.STEP_UP_VERIFIED, false);
 
         var bridge = new SaTokenSessionBridge(new FakeSaTokenFacade(attributes),
-            (tenantId, membershipId, userId) -> OptionalLong.of(4L));
+            (tenantId, membershipId, userId) -> Optional.of(new MembershipVersions(7L, 4L)));
+
+        org.junit.jupiter.api.Assertions.assertThrows(InvalidSessionException.class, bridge::currentSubject);
+    }
+
+    @Test
+    void rejectsARevokedPermissionVersion() {
+        Map<String, Object> attributes = Map.of(
+            SessionAttributeNames.USER_ID, 10L,
+            SessionAttributeNames.MEMBERSHIP_ID, 20L,
+            SessionAttributeNames.TENANT_ID, 30L,
+            SessionAttributeNames.PERMISSION_VERSION, 7L,
+            SessionAttributeNames.SESSION_VERSION, 3L,
+            SessionAttributeNames.STEP_UP_VERIFIED, false);
+
+        var bridge = new SaTokenSessionBridge(new FakeSaTokenFacade(attributes),
+            (tenantId, membershipId, userId) -> Optional.of(new MembershipVersions(8L, 3L)));
 
         org.junit.jupiter.api.Assertions.assertThrows(InvalidSessionException.class, bridge::currentSubject);
     }
@@ -60,7 +78,7 @@ class SaTokenSessionBridgeTest {
             SessionAttributeNames.STEP_UP_VERIFIED, false);
 
         var bridge = new SaTokenSessionBridge(new FakeSaTokenFacade(attributes),
-            (tenantId, membershipId, userId) -> OptionalLong.empty());
+            (tenantId, membershipId, userId) -> Optional.empty());
 
         org.junit.jupiter.api.Assertions.assertThrows(InvalidSessionException.class, bridge::currentSubject);
     }
@@ -77,8 +95,8 @@ class SaTokenSessionBridgeTest {
 
         var bridge = new SaTokenSessionBridge(new FakeSaTokenFacade(attributes),
             (tenantId, membershipId, userId) -> userId == 11L
-                ? OptionalLong.of(3L)
-                : OptionalLong.empty());
+                ? Optional.of(new MembershipVersions(7L, 3L))
+                : Optional.empty());
 
         org.junit.jupiter.api.Assertions.assertThrows(InvalidSessionException.class, bridge::currentSubject);
     }

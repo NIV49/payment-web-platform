@@ -122,15 +122,17 @@ class JooqPermissionAdaptersIntegrationTest {
         var grants = new JooqPermissionGrantRepository(dsl);
 
         assertEquals(17L, permissionVersions.findPermissionVersion(TENANT_ID, MEMBERSHIP_ID));
-        assertEquals(23L, sessionVersions.findActiveSessionVersion(TENANT_ID, MEMBERSHIP_ID, USER_ID)
-            .orElseThrow());
-        assertFalse(sessionVersions.findActiveSessionVersion(TENANT_ID, MEMBERSHIP_ID, USER_ID + 1)
+        var versions = sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID)
+            .orElseThrow();
+        assertEquals(17L, versions.permissionVersion());
+        assertEquals(23L, versions.sessionVersion());
+        assertFalse(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID + 1)
             .isPresent());
 
         try {
             dsl.update(IAM_TENANT).set(IAM_TENANT.STATUS, "DISABLED")
                 .where(IAM_TENANT.ID.eq(TENANT_ID)).execute();
-            assertTrue(sessionVersions.findActiveSessionVersion(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_TENANT).set(IAM_TENANT.STATUS, "ACTIVE")
@@ -140,7 +142,7 @@ class JooqPermissionAdaptersIntegrationTest {
         try {
             dsl.update(IAM_USER).set(IAM_USER.STATUS, "DISABLED")
                 .where(IAM_USER.ID.eq(USER_ID)).execute();
-            assertTrue(sessionVersions.findActiveSessionVersion(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_USER).set(IAM_USER.STATUS, "ACTIVE")
@@ -150,7 +152,7 @@ class JooqPermissionAdaptersIntegrationTest {
         try {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL).set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, "LOCKED")
                 .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID)).execute();
-            assertTrue(sessionVersions.findActiveSessionVersion(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL).set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, "ACTIVE")
@@ -165,7 +167,7 @@ class JooqPermissionAdaptersIntegrationTest {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
                 .setNull(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
                 .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID)).execute();
-            assertTrue(sessionVersions.findActiveSessionVersion(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
@@ -176,7 +178,7 @@ class JooqPermissionAdaptersIntegrationTest {
         try {
             dsl.update(IAM_MEMBERSHIP).set(IAM_MEMBERSHIP.STATUS, "DISABLED")
                 .where(IAM_MEMBERSHIP.ID.eq(MEMBERSHIP_ID)).execute();
-            assertTrue(sessionVersions.findActiveSessionVersion(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_MEMBERSHIP).set(IAM_MEMBERSHIP.STATUS, "ACTIVE")

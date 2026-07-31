@@ -22,11 +22,15 @@ public final class SaTokenSessionBridge {
         long userId = requiredLong(SessionAttributeNames.USER_ID);
         long membershipId = requiredLong(SessionAttributeNames.MEMBERSHIP_ID);
         long tenantId = requiredLong(SessionAttributeNames.TENANT_ID);
+        long permissionVersion = requiredLong(SessionAttributeNames.PERMISSION_VERSION);
         long sessionVersion = requiredLong(SessionAttributeNames.SESSION_VERSION);
-        long currentSessionVersion = sessionVersionRepository.findActiveSessionVersion(tenantId, membershipId, userId)
+        var currentVersions = sessionVersionRepository.findActiveVersions(tenantId, membershipId, userId)
             .orElseThrow(() -> new InvalidSessionException(
                 "No active tenant, user, credential, and membership tuple found for session validation"));
-        if (sessionVersion != currentSessionVersion) {
+        if (permissionVersion != currentVersions.permissionVersion()) {
+            throw new InvalidSessionException("Permission version is stale");
+        }
+        if (sessionVersion != currentVersions.sessionVersion()) {
             throw new InvalidSessionException("Session version is stale");
         }
         return new AuthorizationSubject(
@@ -34,7 +38,7 @@ public final class SaTokenSessionBridge {
             membershipId,
             tenantId,
             optionalLong(SessionAttributeNames.DEPARTMENT_ID),
-            requiredLong(SessionAttributeNames.PERMISSION_VERSION),
+            permissionVersion,
             sessionVersion,
             requiredBoolean(SessionAttributeNames.STEP_UP_VERIFIED));
     }

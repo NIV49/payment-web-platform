@@ -4,7 +4,7 @@ import com.niv.payment.permission.port.MembershipSessionVersionRepository;
 import org.jooq.DSLContext;
 
 import java.util.Objects;
-import java.util.OptionalLong;
+import java.util.Optional;
 
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_AUTHENTICATION_CREDENTIAL;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP;
@@ -21,8 +21,8 @@ public final class JooqMembershipSessionVersionRepository implements MembershipS
     }
 
     @Override
-    public OptionalLong findActiveSessionVersion(long tenantId, long membershipId, long userId) {
-        return dsl.select(IAM_MEMBERSHIP.SESSION_VERSION)
+    public Optional<MembershipVersions> findActiveVersions(long tenantId, long membershipId, long userId) {
+        return dsl.select(IAM_MEMBERSHIP.PERMISSION_VERSION, IAM_MEMBERSHIP.SESSION_VERSION)
             .from(IAM_MEMBERSHIP)
             .join(IAM_TENANT)
                 .on(IAM_TENANT.ID.eq(IAM_MEMBERSHIP.TENANT_ID)
@@ -38,8 +38,8 @@ public final class JooqMembershipSessionVersionRepository implements MembershipS
                 .and(IAM_MEMBERSHIP.ID.eq(membershipId))
                 .and(IAM_MEMBERSHIP.USER_ID.eq(userId))
                 .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE)))
-            .fetchOptional(IAM_MEMBERSHIP.SESSION_VERSION)
-            .map(OptionalLong::of)
-            .orElseGet(OptionalLong::empty);
+            .fetchOptional(row -> new MembershipVersions(
+                row.get(IAM_MEMBERSHIP.PERMISSION_VERSION),
+                row.get(IAM_MEMBERSHIP.SESSION_VERSION)));
     }
 }
