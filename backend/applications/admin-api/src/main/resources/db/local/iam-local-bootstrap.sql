@@ -158,7 +158,8 @@ SELECT
     AND (SELECT count(*) FROM iam_department WHERE id=10 OR (tenant_id=1 AND department_code='head-office')) = 1
     AND EXISTS (SELECT 1 FROM iam_department WHERE id=10 AND tenant_id=1 AND parent_id IS NULL
         AND department_code='head-office' AND department_name='Head Office' AND status='ACTIVE'
-        AND remark IS NOT DISTINCT FROM 'Local bootstrap department' AND row_version>=0)
+        AND remark IS NOT DISTINCT FROM 'Local bootstrap department' AND row_version>=0
+        AND system_managed AND deleted_at IS NULL)
     AND (SELECT count(*) FROM iam_user WHERE id=100 OR (idp_issuer='local' AND idp_subject='admin')) = 1
     AND EXISTS (SELECT 1 FROM iam_user WHERE id=100 AND idp_issuer='local' AND idp_subject='admin'
         AND display_name='Platform Administrator' AND email_cipher IS NULL AND phone_cipher IS NULL
@@ -179,7 +180,7 @@ SELECT
         AND role_name='Platform Administrator' AND applicable_tenant_type='PLATFORM'
         AND NOT assignable AND system_role AND status='ACTIVE'
         AND remark IS NOT DISTINCT FROM 'Local bootstrap administration role'
-        AND row_version=migration_stage)
+        AND row_version=migration_stage AND deleted_at IS NULL)
     AND (SELECT count(*) FROM iam_membership_role
         WHERE membership_id=1000 OR role_id=2000) = 1
     AND EXISTS (SELECT 1 FROM iam_membership_role WHERE tenant_id=1 AND membership_id=1000
@@ -284,7 +285,8 @@ SELECT (pg_temp.iam_local_identity_is_exact(0)
           AND expected.redirect_path IS NOT DISTINCT FROM menu.redirect_path
           AND expected.sort_order=menu.sort_order AND expected.auth_code IS NOT DISTINCT FROM menu.auth_code
           AND expected.status=menu.status AND expected.meta_json=menu.meta_json
-         WHERE menu.tenant_id=1 AND menu.display_permission_id IS NULL AND menu.remark IS NULL) = 29
+         WHERE menu.tenant_id=1 AND menu.display_permission_id IS NULL AND menu.remark IS NULL
+           AND menu.system_managed AND menu.deleted_at IS NULL) = 29
    AND (SELECT count(*) FROM iam_menu WHERE id IN (SELECT id FROM iam_local_final_menu)
           OR (tenant_id=1 AND (route_name IN (SELECT route_name FROM iam_local_final_menu)
           OR route_path IN (SELECT route_path FROM iam_local_final_menu WHERE route_path IS NOT NULL)
@@ -349,6 +351,7 @@ SELECT pg_temp.iam_local_identity_is_exact(migration_stage)
           AND expected.sort_order=menu.sort_order AND expected.auth_code IS NOT DISTINCT FROM menu.auth_code
           AND expected.status=menu.status AND expected.meta_json=menu.meta_json
          WHERE menu.tenant_id=1 AND menu.display_permission_id IS NULL AND menu.remark IS NULL
+          AND menu.system_managed AND menu.deleted_at IS NULL
           AND (NOT expected.permission_button OR include_buttons)) = CASE WHEN include_buttons THEN 22 ELSE 8 END
    AND (SELECT count(*) FROM iam_menu WHERE id IN (SELECT id FROM iam_local_final_menu)
           OR (tenant_id=1 AND (route_name IN (SELECT route_name FROM iam_local_final_menu)
@@ -430,14 +433,14 @@ BEGIN
               FROM iam_local_final_menu expected
              WHERE iam_menu.id=expected.id AND iam_menu.tenant_id=1 AND expected.id IN (6031,6033);
             INSERT INTO iam_menu(id,tenant_id,parent_id,menu_type,menu_name,route_name,route_path,
-                component_path,redirect_path,sort_order,auth_code,status,meta_json)
+                component_path,redirect_path,sort_order,auth_code,status,meta_json,system_managed)
             SELECT id,1,parent_id,menu_type,menu_name,route_name,route_path,component_path,redirect_path,
-                   sort_order,auth_code,status,meta_json FROM iam_local_final_menu WHERE id>=6034 ORDER BY id;
+                   sort_order,auth_code,status,meta_json,true FROM iam_local_final_menu WHERE id>=6034 ORDER BY id;
         ELSE
             INSERT INTO iam_menu(id,tenant_id,parent_id,menu_type,menu_name,route_name,route_path,
-                component_path,redirect_path,sort_order,auth_code,status,meta_json)
+                component_path,redirect_path,sort_order,auth_code,status,meta_json,system_managed)
             SELECT id,1,parent_id,menu_type,menu_name,route_name,route_path,component_path,redirect_path,
-                   sort_order,auth_code,status,meta_json FROM iam_local_final_menu
+                   sort_order,auth_code,status,meta_json,true FROM iam_local_final_menu
              WHERE permission_button ORDER BY id;
         END IF;
 
@@ -452,8 +455,8 @@ $$
 INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status)
 VALUES(1,'platform','Platform Administration','PLATFORM','ACTIVE') ON CONFLICT(id) DO NOTHING
 @@
-INSERT INTO iam_department(id,tenant_id,parent_id,department_code,department_name,status,remark)
-VALUES(10,1,NULL,'head-office','Head Office','ACTIVE','Local bootstrap department') ON CONFLICT(id) DO NOTHING
+INSERT INTO iam_department(id,tenant_id,parent_id,department_code,department_name,status,remark,system_managed)
+VALUES(10,1,NULL,'head-office','Head Office','ACTIVE','Local bootstrap department',true) ON CONFLICT(id) DO NOTHING
 @@
 INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status,remark)
 VALUES(100,'local','admin','Platform Administrator','ACTIVE','Local bootstrap administrator') ON CONFLICT(id) DO NOTHING
@@ -480,9 +483,9 @@ SELECT id+2000,id+1000,'TENANT','TENANT_ALL' FROM iam_local_final_permission
 ON CONFLICT(grant_id,dimension_code) DO NOTHING
 @@
 INSERT INTO iam_menu(id,tenant_id,parent_id,menu_type,menu_name,route_name,route_path,
-    component_path,redirect_path,sort_order,auth_code,status,meta_json)
+    component_path,redirect_path,sort_order,auth_code,status,meta_json,system_managed)
 SELECT id,1,parent_id,menu_type,menu_name,route_name,route_path,component_path,redirect_path,
-       sort_order,auth_code,status,meta_json FROM iam_local_final_menu ORDER BY id
+       sort_order,auth_code,status,meta_json,true FROM iam_local_final_menu ORDER BY id
 ON CONFLICT(id) DO NOTHING
 @@
 INSERT INTO iam_role_menu(tenant_id,role_id,menu_id)

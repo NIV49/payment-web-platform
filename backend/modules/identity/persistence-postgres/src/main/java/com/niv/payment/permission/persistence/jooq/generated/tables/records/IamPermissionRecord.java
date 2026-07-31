@@ -134,14 +134,18 @@ public class IamPermissionRecord extends UpdatableRecordImpl<IamPermissionRecord
     }
 
     /**
-     * Setter for <code>public.iam_permission.status</code>.
+     * Setter for <code>public.iam_permission.status</code>. ACTIVE permissions
+     * may authorize requests; legacy manage codes remain active only during the
+     * expand compatibility phase
      */
     public void setStatus(String value) {
         set(8, value);
     }
 
     /**
-     * Getter for <code>public.iam_permission.status</code>.
+     * Getter for <code>public.iam_permission.status</code>. ACTIVE permissions
+     * may authorize requests; legacy manage codes remain active only during the
+     * expand compatibility phase
      */
     public String getStatus() {
         return (String) get(8);

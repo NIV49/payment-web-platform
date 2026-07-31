@@ -113,6 +113,17 @@ public class IamDepartment extends TableImpl<IamDepartmentRecord> {
      */
     public final TableField<IamDepartmentRecord, String> REMARK = createField(DSL.name("remark"), SQLDataType.VARCHAR(500), this, "");
 
+    /**
+     * The column <code>public.iam_department.deleted_at</code>. Forward-only
+     * soft-delete tombstone; old binaries must not run after this is populated
+     */
+    public final TableField<IamDepartmentRecord, OffsetDateTime> DELETED_AT = createField(DSL.name("deleted_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "Forward-only soft-delete tombstone; old binaries must not run after this is populated");
+
+    /**
+     * The column <code>public.iam_department.system_managed</code>.
+     */
+    public final TableField<IamDepartmentRecord, Boolean> SYSTEM_MANAGED = createField(DSL.name("system_managed"), SQLDataType.BOOLEAN.nullable(false).defaultValue(DSL.field(DSL.raw("false"), SQLDataType.BOOLEAN)), this, "");
+
     private IamDepartment(Name alias, Table<IamDepartmentRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -182,7 +193,7 @@ public class IamDepartment extends TableImpl<IamDepartmentRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.IDX_IAM_DEPARTMENT_PARENT);
+        return Arrays.asList(Indexes.IDX_IAM_DEPARTMENT_PARENT, Indexes.IDX_IAM_DEPARTMENT_TENANT_LIVE);
     }
 
     @Override

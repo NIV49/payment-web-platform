@@ -188,6 +188,22 @@ public class IamRoleRecord extends UpdatableRecordImpl<IamRoleRecord> {
         return (String) get(11);
     }
 
+    /**
+     * Setter for <code>public.iam_role.deleted_at</code>. Forward-only
+     * soft-delete tombstone; old binaries must not run after this is populated
+     */
+    public void setDeletedAt(OffsetDateTime value) {
+        set(12, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_role.deleted_at</code>. Forward-only
+     * soft-delete tombstone; old binaries must not run after this is populated
+     */
+    public OffsetDateTime getDeletedAt() {
+        return (OffsetDateTime) get(12);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -211,7 +227,7 @@ public class IamRoleRecord extends UpdatableRecordImpl<IamRoleRecord> {
     /**
      * Create a detached, initialised IamRoleRecord
      */
-    public IamRoleRecord(Long id, Long tenantId, String roleCode, String roleName, String applicableTenantType, Boolean assignable, Boolean systemRole, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark) {
+    public IamRoleRecord(Long id, Long tenantId, String roleCode, String roleName, String applicableTenantType, Boolean assignable, Boolean systemRole, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark, OffsetDateTime deletedAt) {
         super(IamRole.IAM_ROLE);
 
         setId(id);
@@ -226,6 +242,7 @@ public class IamRoleRecord extends UpdatableRecordImpl<IamRoleRecord> {
         setUpdatedAt(updatedAt);
         setRowVersion(rowVersion);
         setRemark(remark);
+        setDeletedAt(deletedAt);
         resetTouchedOnNotNull();
     }
 }

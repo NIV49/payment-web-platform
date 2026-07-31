@@ -273,6 +273,36 @@ public class IamMenuRecord extends UpdatableRecordImpl<IamMenuRecord> {
         return (JSONB) get(17);
     }
 
+    /**
+     * Setter for <code>public.iam_menu.deleted_at</code>. Forward-only
+     * soft-delete tombstone; old binaries must not run after this is populated
+     */
+    public void setDeletedAt(OffsetDateTime value) {
+        set(18, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_menu.deleted_at</code>. Forward-only
+     * soft-delete tombstone; old binaries must not run after this is populated
+     */
+    public OffsetDateTime getDeletedAt() {
+        return (OffsetDateTime) get(18);
+    }
+
+    /**
+     * Setter for <code>public.iam_menu.system_managed</code>.
+     */
+    public void setSystemManaged(Boolean value) {
+        set(19, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_menu.system_managed</code>.
+     */
+    public Boolean getSystemManaged() {
+        return (Boolean) get(19);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -296,7 +326,7 @@ public class IamMenuRecord extends UpdatableRecordImpl<IamMenuRecord> {
     /**
      * Create a detached, initialised IamMenuRecord
      */
-    public IamMenuRecord(Long id, Long tenantId, Long parentId, String menuType, String menuName, String routePath, String componentPath, Long displayPermissionId, Integer sortOrder, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark, String routeName, String redirectPath, String authCode, JSONB metaJson) {
+    public IamMenuRecord(Long id, Long tenantId, Long parentId, String menuType, String menuName, String routePath, String componentPath, Long displayPermissionId, Integer sortOrder, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark, String routeName, String redirectPath, String authCode, JSONB metaJson, OffsetDateTime deletedAt, Boolean systemManaged) {
         super(IamMenu.IAM_MENU);
 
         setId(id);
@@ -317,6 +347,8 @@ public class IamMenuRecord extends UpdatableRecordImpl<IamMenuRecord> {
         setRedirectPath(redirectPath);
         setAuthCode(authCode);
         setMetaJson(metaJson);
+        setDeletedAt(deletedAt);
+        setSystemManaged(systemManaged);
         resetTouchedOnNotNull();
     }
 }

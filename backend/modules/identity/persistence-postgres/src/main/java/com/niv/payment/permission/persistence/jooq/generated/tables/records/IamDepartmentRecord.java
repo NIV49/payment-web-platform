@@ -160,6 +160,36 @@ public class IamDepartmentRecord extends UpdatableRecordImpl<IamDepartmentRecord
         return (String) get(9);
     }
 
+    /**
+     * Setter for <code>public.iam_department.deleted_at</code>. Forward-only
+     * soft-delete tombstone; old binaries must not run after this is populated
+     */
+    public void setDeletedAt(OffsetDateTime value) {
+        set(10, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_department.deleted_at</code>. Forward-only
+     * soft-delete tombstone; old binaries must not run after this is populated
+     */
+    public OffsetDateTime getDeletedAt() {
+        return (OffsetDateTime) get(10);
+    }
+
+    /**
+     * Setter for <code>public.iam_department.system_managed</code>.
+     */
+    public void setSystemManaged(Boolean value) {
+        set(11, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_department.system_managed</code>.
+     */
+    public Boolean getSystemManaged() {
+        return (Boolean) get(11);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -183,7 +213,7 @@ public class IamDepartmentRecord extends UpdatableRecordImpl<IamDepartmentRecord
     /**
      * Create a detached, initialised IamDepartmentRecord
      */
-    public IamDepartmentRecord(Long id, Long tenantId, Long parentId, String departmentCode, String departmentName, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark) {
+    public IamDepartmentRecord(Long id, Long tenantId, Long parentId, String departmentCode, String departmentName, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark, OffsetDateTime deletedAt, Boolean systemManaged) {
         super(IamDepartment.IAM_DEPARTMENT);
 
         setId(id);
@@ -196,6 +226,8 @@ public class IamDepartmentRecord extends UpdatableRecordImpl<IamDepartmentRecord
         setUpdatedAt(updatedAt);
         setRowVersion(rowVersion);
         setRemark(remark);
+        setDeletedAt(deletedAt);
+        setSystemManaged(systemManaged);
         resetTouchedOnNotNull();
     }
 }

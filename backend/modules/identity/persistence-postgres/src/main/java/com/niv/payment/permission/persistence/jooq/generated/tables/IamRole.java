@@ -4,6 +4,7 @@
 package com.niv.payment.permission.persistence.jooq.generated.tables;
 
 
+import com.niv.payment.permission.persistence.jooq.generated.Indexes;
 import com.niv.payment.permission.persistence.jooq.generated.Keys;
 import com.niv.payment.permission.persistence.jooq.generated.Public;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole.IamMembershipRolePath;
@@ -21,6 +22,7 @@ import org.jooq.Check;
 import org.jooq.Condition;
 import org.jooq.Field;
 import org.jooq.ForeignKey;
+import org.jooq.Index;
 import org.jooq.InverseForeignKey;
 import org.jooq.Name;
 import org.jooq.Path;
@@ -122,6 +124,12 @@ public class IamRole extends TableImpl<IamRoleRecord> {
      */
     public final TableField<IamRoleRecord, String> REMARK = createField(DSL.name("remark"), SQLDataType.VARCHAR(500), this, "");
 
+    /**
+     * The column <code>public.iam_role.deleted_at</code>. Forward-only
+     * soft-delete tombstone; old binaries must not run after this is populated
+     */
+    public final TableField<IamRoleRecord, OffsetDateTime> DELETED_AT = createField(DSL.name("deleted_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "Forward-only soft-delete tombstone; old binaries must not run after this is populated");
+
     private IamRole(Name alias, Table<IamRoleRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -190,13 +198,18 @@ public class IamRole extends TableImpl<IamRoleRecord> {
     }
 
     @Override
+    public List<Index> getIndexes() {
+        return Arrays.asList(Indexes.IDX_IAM_ROLE_TENANT_LIVE, Indexes.UK_IAM_ROLE_NAME);
+    }
+
+    @Override
     public UniqueKey<IamRoleRecord> getPrimaryKey() {
         return Keys.IAM_ROLE_PKEY;
     }
 
     @Override
     public List<UniqueKey<IamRoleRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.UK_IAM_ROLE_CODE, Keys.UK_IAM_ROLE_NAME, Keys.UK_IAM_ROLE_TENANT_ID);
+        return Arrays.asList(Keys.UK_IAM_ROLE_CODE, Keys.UK_IAM_ROLE_TENANT_ID);
     }
 
     @Override

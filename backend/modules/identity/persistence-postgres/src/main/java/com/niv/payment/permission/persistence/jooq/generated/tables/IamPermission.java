@@ -102,9 +102,11 @@ public class IamPermission extends TableImpl<IamPermissionRecord> {
     public final TableField<IamPermissionRecord, Boolean> REQUIRES_APPROVAL = createField(DSL.name("requires_approval"), SQLDataType.BOOLEAN.nullable(false).defaultValue(DSL.field(DSL.raw("false"), SQLDataType.BOOLEAN)), this, "");
 
     /**
-     * The column <code>public.iam_permission.status</code>.
+     * The column <code>public.iam_permission.status</code>. ACTIVE permissions
+     * may authorize requests; legacy manage codes remain active only during the
+     * expand compatibility phase
      */
-    public final TableField<IamPermissionRecord, String> STATUS = createField(DSL.name("status"), SQLDataType.VARCHAR(32).nullable(false), this, "");
+    public final TableField<IamPermissionRecord, String> STATUS = createField(DSL.name("status"), SQLDataType.VARCHAR(32).nullable(false), this, "ACTIVE permissions may authorize requests; legacy manage codes remain active only during the expand compatibility phase");
 
     /**
      * The column <code>public.iam_permission.description</code>.

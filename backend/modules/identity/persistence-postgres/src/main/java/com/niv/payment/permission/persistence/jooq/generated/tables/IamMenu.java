@@ -155,6 +155,17 @@ public class IamMenu extends TableImpl<IamMenuRecord> {
      */
     public final TableField<IamMenuRecord, JSONB> META_JSON = createField(DSL.name("meta_json"), SQLDataType.JSONB.nullable(false).defaultValue(DSL.field(DSL.raw("'{}'::jsonb"), SQLDataType.JSONB)), this, "");
 
+    /**
+     * The column <code>public.iam_menu.deleted_at</code>. Forward-only
+     * soft-delete tombstone; old binaries must not run after this is populated
+     */
+    public final TableField<IamMenuRecord, OffsetDateTime> DELETED_AT = createField(DSL.name("deleted_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "Forward-only soft-delete tombstone; old binaries must not run after this is populated");
+
+    /**
+     * The column <code>public.iam_menu.system_managed</code>.
+     */
+    public final TableField<IamMenuRecord, Boolean> SYSTEM_MANAGED = createField(DSL.name("system_managed"), SQLDataType.BOOLEAN.nullable(false).defaultValue(DSL.field(DSL.raw("false"), SQLDataType.BOOLEAN)), this, "");
+
     private IamMenu(Name alias, Table<IamMenuRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -224,7 +235,7 @@ public class IamMenu extends TableImpl<IamMenuRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.IDX_IAM_MENU_PARENT);
+        return Arrays.asList(Indexes.IDX_IAM_MENU_PARENT, Indexes.IDX_IAM_MENU_TENANT_LIVE);
     }
 
     @Override
