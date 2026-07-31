@@ -195,7 +195,7 @@ Controller 从可信 Session 构造 `AdministrationActor(membershipId, expectedU
 
 创建用户是“全局 Identity + 当前 Tenant Membership”用例；新 User 固定为 `PENDING_ACTIVATION`，Credential 固定为 `DISABLED` 且无 password hash，Membership 只按请求预配置。API 用 `identityStatus` 与 Membership `status` 分开表达；当前没有生产邀请/密码设置/激活流程。更新用户只允许修改当前 Membership 的部门、角色、状态和 `row_version`，不会修改全局 username、display name、remark 或 credential。用户更新、状态更新和逻辑删除都使用 membership `row_version` 乐观锁。角色菜单变化推进相关 membership 的 `permission_version`。
 
-Role 普通 update/status/delete 在 tenant/actor 锁之后以 `FOR UPDATE` 锁定目标角色，只允许 `system_role=false AND assignable=true`；受保护角色统一返回 422 `IAM_ROLE_NOT_ASSIGNABLE`。RoleGrant GET 对 system 或 non-assignable role 返回 `editable=false`，PUT 在锁定目标角色后拒绝写入。Role create/update 的 `menuIds` 在同一 tenant 写事务中锁定菜单行，只接受当前 tenant 的 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK；BUTTON 或 DISABLED 菜单返回 409，缺失或跨 tenant ID 返回 404。前端过滤 BUTTON 仅是交互，不是完整性边界。
+Role 普通 update/status/delete 在 tenant/actor 锁之后以 `FOR UPDATE` 锁定目标角色，只允许 `system_role=false AND assignable=true`；受保护角色统一返回 422 `IAM_ROLE_NOT_ASSIGNABLE`。RoleGrant GET 对 system 或 non-assignable role 返回 `editable=false`，PUT 在锁定目标角色后拒绝写入。Role create/update 的 `menuIds` 在同一 tenant 写事务中锁定菜单行，只接受当前 tenant 的 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK；BUTTON 或 DISABLED 菜单返回 409，缺失或跨 tenant ID 返回 404。角色管理读模型只回显 ACTIVE 可路由 menuIds，历史非法关系在第一次显式正常更新时随全集替换惰性清理；客户端直接提交非法 ID 仍严格拒绝。前端过滤只是交互，不是完整性边界。
 
 Role、Department、Menu 的管理读模型显式返回 `rowVersion`；PUT/PATCH body 必须携带 `expectedVersion`，DELETE 通过 query 参数携带。User DELETE 同样要求把列表的 `userVersion` 作为 `expectedVersion`。Repository 的最终 jOOQ UPDATE 在同一个 WHERE 中比较 tenant、资源 ID 与 rowVersion，并原子递增版本。0 row 后在 tenant 写锁事务内区分：资源不存在返回 404 `RESOURCE_NOT_FOUND`，资源仍存在但版本过期返回 40902 `OPTIMISTIC_LOCK_CONFLICT`。树依赖、唯一约束等业务/数据库冲突单独映射为 40901 `DATA_CONFLICT`，不能复用乐观锁异常。
 

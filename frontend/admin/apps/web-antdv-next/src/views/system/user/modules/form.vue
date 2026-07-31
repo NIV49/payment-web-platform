@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import type { UserFormValues } from './form-contract';
 
+import type { SystemRoleApi } from '#/api/system/role';
 import type { SystemUserApi } from '#/api/system/user';
 
 import { computed, ref } from 'vue';
@@ -11,6 +12,7 @@ import { useVbenDrawer } from '@vben/common-ui';
 import { useVbenForm } from '#/adapter/form';
 import {
   createUser,
+  getRoleList,
   hasExplicitRoleIds,
   PERMISSION_CODES,
   updateUser,
@@ -21,6 +23,10 @@ import { $t } from '#/locales';
 import { useFormSchema } from '../data';
 import { hasAllAccessCodes } from '../permission-contract';
 import { toMembershipUpdateParams, toUserCreateParams } from './form-contract';
+import {
+  buildRoleAssignmentOptions,
+  mergeRoleAssignmentIds,
+} from './role-assignment';
 
 const emits = defineEmits(['success']);
 const formData = ref<SystemUserApi.SystemUser>();
@@ -34,9 +40,17 @@ const canAssignRoles = computed(() =>
 );
 const id = ref<string>();
 const isEditing = computed(() => Boolean(id.value));
+const roleCatalog = ref<SystemRoleApi.SystemRole[]>([]);
+const roleOptions = computed(() =>
+  buildRoleAssignmentOptions(
+    roleCatalog.value,
+    formData.value?.roleIds ?? [],
+    formData.value?.roleNames ?? [],
+  ),
+);
 
 const [Form, formApi] = useVbenForm({
-  schema: useFormSchema(canAssignRoles, isEditing),
+  schema: useFormSchema(canAssignRoles, isEditing, roleOptions),
   showDefaultActions: false,
 });
 
@@ -46,10 +60,13 @@ const [Drawer, drawerApi] = useVbenDrawer({
     if (!valid) return;
 
     const values = await formApi.getValues<UserFormValues>();
-    const roleIds =
-      id.value && !canAssignRoles.value
-        ? formData.value?.roleIds
-        : values.roleIds;
+    const roleIds = canAssignRoles.value
+      ? mergeRoleAssignmentIds(
+          values.roleIds ?? [],
+          formData.value?.roleIds ?? [],
+          roleCatalog.value,
+        )
+      : formData.value?.roleIds;
     if (!hasExplicitRoleIds(roleIds)) return;
 
     drawerApi.lock();
@@ -74,6 +91,10 @@ const [Drawer, drawerApi] = useVbenDrawer({
     formApi.resetForm();
     formData.value = data?.id ? data : undefined;
     id.value = data?.id;
+    const rolePage = canAssignRoles.value
+      ? await getRoleList({ page: 1, pageSize: 200 })
+      : undefined;
+    roleCatalog.value = rolePage?.items ?? [];
     await formApi.setValues(
       data?.id
         ? { ...data, roleIds: data.roleIds ?? [] }

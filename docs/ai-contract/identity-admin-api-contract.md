@@ -578,6 +578,7 @@ Response item：
 
 - role:create/update 直接管理 menuIds，无额外 role:assign；
 - menuIds 最多 2048 项，HTTP DTO 和 Core 都会拒绝超限请求；
+- 角色列表响应中的 menuIds 只包含当前 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK；历史 BUTTON、DISABLED 或已删除菜单关系不会回显；
 - menuIds 只接受当前 Session tenant 下状态为 ACTIVE、类型为 DIRECTORY/PAGE/EMBEDDED/LINK 的菜单；BUTTON 或 DISABLED 菜单返回 409 `DATA_CONFLICT`，不存在或其他 tenant 的 ID 返回 404 `RESOURCE_NOT_FOUND`；
 - role code 由后端根据名称和 ID 生成；
 - `systemRole=true` 或 `assignable=false` 的受保护角色不能通过普通 update 修改，返回 422 `IAM_ROLE_NOT_ASSIGNABLE`；
@@ -605,7 +606,7 @@ Role.menuIds -> 导航、页面展示；当前角色 UI 递归过滤 BUTTON
 RoleGrant     -> 后端动作和数据范围
 ```
 
-两者已在数据库模型和前端交互中分离。角色表单只保存 menuIds，并递归过滤 BUTTON；服务端仍在 tenant 写事务中锁定并校验全部 menuIds，只允许 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不能依赖前端过滤。独立“功能权限”抽屉通过下节 RoleGrant API 读取和替换授权，绝不从 menuIds 推导 Grant。菜单管理树中的 BUTTON 是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
+两者已在数据库模型和前端交互中分离。角色表单只保存 menuIds，并递归过滤 BUTTON 与 DISABLED 分支，不把隐藏的历史 ID 合并回请求。角色读模型同样只返回 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK；第一次正常角色更新以响应全集替换 `role_menu` 时会惰性清理该角色的历史 BUTTON、DISABLED 或已删除关系。服务端仍在 tenant 写事务中锁定并校验客户端显式提交的全部 menuIds，不能依赖前端过滤，也不会静默接受非法 ID。独立“功能权限”抽屉通过下节 RoleGrant API 读取和替换授权，绝不从 menuIds 推导 Grant。菜单管理树中的 BUTTON 是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
 
 `local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。V15 中两个旧 Permission 处于 ACTIVE 兼容状态不等于旧 BUTTON 重新启用。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，并精确识别已经执行 V14+V15 的过渡状态；预置部门的非负 `rowVersion` 可自然推进，但其 ID、租户、父级、编码、名称、状态、备注或预留键发生漂移时仍失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
 
@@ -616,6 +617,8 @@ RoleGrant     -> 后端动作和数据范围
 - `GET /api/v1/iam/permissions/grantable`：只返回精确 18 个 NORMAL、SAME_TENANT_ONLY 管理权限；`role:grant-update` 仅属于 system-admin，不可委派；
 - `GET /api/v1/iam/roles/{roleId}/grants`：返回 `{roleId,roleVersion,editable,grants}`；system role、`assignable=false`、存在当前页面不能无损表达的授权，或旧管理权限 cutover 尚未完成时 `editable=false`；
 - `PUT /api/v1/iam/roles/{roleId}/grants`：只接受 `systemRole=false AND assignable=true` 的普通角色、全量替换、必填 `expectedVersion` 与非空 `reason`；non-assignable role 返回 422 `IAM_ROLE_NOT_ASSIGNABLE`。`payment.permissions.legacy-administration-cutover-complete` 默认为 `false`；未完成 cutover 时返回 40903 `LEGACY_ADMINISTRATION_CUTOVER_REQUIRED`。
+
+Grant 和 dimension 数组中的 `null` 元素统一返回 400 `INVALID_REQUEST`，并且必须在任何角色版本、Grant、审计或 Outbox 写入前失败。
 
 V15 为旧 manage Grant 建立等价的现代 Grant，同时保留旧 Grant 作为滚动兼容影子。GET 不把两个已知兼容影子暴露到现代编辑集合。只在所有 N-1 实例和旧调用方已经清零、双版本验证与生产审批完成后，部署方才可显式设置 `PAYMENT_LEGACY_ADMINISTRATION_CUTOVER_COMPLETE=true`；此后第一次 PUT 会在同一事务内停用目标角色全部 ACTIVE Grant（包含兼容影子），再写入请求的现代全集。`local` profile 不存在 N-1 共存，默认打开该开关用于验收。其他未知权限、高风险、有效期、多维度或带 target 的 Grant 仍使页面只读，禁止静默覆盖。
 

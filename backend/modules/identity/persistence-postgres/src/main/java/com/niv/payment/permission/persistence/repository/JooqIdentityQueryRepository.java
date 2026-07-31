@@ -401,8 +401,13 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
         Map<Long, List<Long>> result = new LinkedHashMap<>();
         dsl.select(IAM_ROLE_MENU.ROLE_ID, IAM_ROLE_MENU.MENU_ID)
             .from(IAM_ROLE_MENU)
+            .join(IAM_MENU)
+                .on(IAM_MENU.TENANT_ID.eq(IAM_ROLE_MENU.TENANT_ID)
+                    .and(IAM_MENU.ID.eq(IAM_ROLE_MENU.MENU_ID)))
             .where(IAM_ROLE_MENU.TENANT_ID.eq(tenantId)
-                .and(IAM_ROLE_MENU.ROLE_ID.in(roleIds)))
+                .and(IAM_ROLE_MENU.ROLE_ID.in(roleIds))
+                .and(IAM_MENU.STATUS.eq(ACTIVE))
+                .and(IAM_MENU.MENU_TYPE.in("DIRECTORY", "PAGE", "EMBEDDED", "LINK")))
             .orderBy(IAM_ROLE_MENU.ROLE_ID, IAM_ROLE_MENU.MENU_ID)
             .forEach(row -> result.computeIfAbsent(row.get(IAM_ROLE_MENU.ROLE_ID), ignored -> new ArrayList<>())
                 .add(row.get(IAM_ROLE_MENU.MENU_ID)));

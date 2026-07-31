@@ -131,21 +131,11 @@ function findMissingPermissionDependencies(permissionCodes: readonly string[]) {
   });
 }
 
-function mergeRoleNavigationMenuIds(
-  navigationMenuIds: readonly string[] | undefined,
-  preservedButtonMenuIds: readonly string[],
-) {
-  return [
-    ...new Set([...(navigationMenuIds ?? []), ...preservedButtonMenuIds]),
-  ];
-}
-
 export {
   buildTenantRoleGrants,
   canConfigureRoleGrants,
   canMutateRole,
   findMissingPermissionDependencies,
-  mergeRoleNavigationMenuIds,
   permissionDependencies,
   reconcilePermissionSelection,
   ROLE_LIST_SEARCH_BEHAVIOR,

@@ -18,6 +18,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Objects;
@@ -32,10 +33,15 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class,
-        HttpMessageNotReadableException.class, IdentityAdministrationService.InvalidCommandException.class,
-        IllegalArgumentException.class})
+        HttpMessageNotReadableException.class,
+        IdentityAdministrationService.InvalidCommandException.class, IllegalArgumentException.class})
     ResponseEntity<ApiResponse<Void>> badRequest(Exception exception) {
         return failure(HttpStatus.BAD_REQUEST, 40001, "INVALID_REQUEST", "Invalid request");
+    }
+
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    ResponseEntity<ApiResponse<Void>> methodValidation(HandlerMethodValidationException exception) {
+        return exception.isForReturnValue() ? unexpected(exception) : badRequest(exception);
     }
 
     @ExceptionHandler({AuthenticationService.AuthenticationFailedException.class, NotLoginException.class})

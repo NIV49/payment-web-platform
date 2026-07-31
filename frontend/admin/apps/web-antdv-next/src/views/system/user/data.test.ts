@@ -23,6 +23,7 @@ describe('system user form schema', () => {
     const schema = useFormSchema(
       computed(() => true),
       computed(() => editing.value),
+      computed(() => []),
     );
 
     for (const fieldName of ['username', 'name', 'remark']) {

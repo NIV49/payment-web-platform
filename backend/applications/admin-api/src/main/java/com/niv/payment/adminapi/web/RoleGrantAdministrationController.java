@@ -98,13 +98,13 @@ public final class RoleGrantAdministrationController {
 
     record ReplaceRoleGrantsRequest(@NotNull @Min(0) Long expectedVersion,
                                     @NotBlank @Size(max = 500) String reason,
-                                    @NotNull @Size(max = 18) List<@Valid GrantRequest> grants) {
+                                    @NotNull @Size(max = 18) List<@NotNull @Valid GrantRequest> grants) {
     }
 
     record GrantRequest(
         @NotBlank @Pattern(regexp = "[a-z][a-z0-9_-]{0,63}") String grantKey,
         @NotBlank @Pattern(regexp = "[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*") String permissionCode,
-        @NotNull @Size(min = 1, max = 1) List<@Valid DimensionRequest> dimensions) {
+        @NotNull @Size(min = 1, max = 1) List<@NotNull @Valid DimensionRequest> dimensions) {
         RoleGrantModels.Selection selection() {
             DimensionRequest dimension = dimensions.getFirst();
             return new RoleGrantModels.Selection(grantKey, PermissionCode.of(permissionCode),

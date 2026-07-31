@@ -253,15 +253,23 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             .fetch();
         Map<Long, List<Record>> byGrant = new LinkedHashMap<>();
         rows.forEach(row -> byGrant.computeIfAbsent(row.get(IAM_ROLE_GRANT.ID), ignored -> new ArrayList<>()).add(row));
+        Set<Long> targetedGrantIds = byGrant.isEmpty()
+            ? Set.of()
+            : dsl.selectDistinct(IAM_GRANT_DIMENSION.GRANT_ID)
+                .from(IAM_GRANT_TARGET)
+                .join(IAM_GRANT_DIMENSION).on(IAM_GRANT_DIMENSION.ID.eq(IAM_GRANT_TARGET.DIMENSION_ID))
+                .join(IAM_ROLE_GRANT).on(IAM_ROLE_GRANT.ID.eq(IAM_GRANT_DIMENSION.GRANT_ID))
+                .where(IAM_ROLE_GRANT.TENANT_ID.eq(tenantId)
+                    .and(IAM_ROLE_GRANT.ROLE_ID.eq(roleId))
+                    .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE)))
+                .fetchSet(IAM_GRANT_DIMENSION.GRANT_ID);
         List<RoleGrantModels.Selection> selections = new ArrayList<>();
         boolean editable = !Boolean.TRUE.equals(role.get(IAM_ROLE.SYSTEM_ROLE))
             && Boolean.TRUE.equals(role.get(IAM_ROLE.ASSIGNABLE));
         for (List<Record> grantRows : byGrant.values()) {
             Record first = grantRows.getFirst();
             String code = first.get(IAM_PERMISSION.PERMISSION_CODE);
-            boolean hasTargets = dsl.fetchExists(dsl.selectOne().from(IAM_GRANT_TARGET)
-                .join(IAM_GRANT_DIMENSION).on(IAM_GRANT_DIMENSION.ID.eq(IAM_GRANT_TARGET.DIMENSION_ID))
-                .where(IAM_GRANT_DIMENSION.GRANT_ID.eq(first.get(IAM_ROLE_GRANT.ID))));
+            boolean hasTargets = targetedGrantIds.contains(first.get(IAM_ROLE_GRANT.ID));
             boolean supported = RoleGrantAdministrationService.GRANTABLE_CODES.contains(code)
                 && ACTIVE.equals(first.get(IAM_PERMISSION.STATUS))
                 && "NORMAL".equals(first.get(IAM_PERMISSION.RISK_LEVEL))

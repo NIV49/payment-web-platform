@@ -9,7 +9,6 @@ import {
   canConfigureRoleGrants,
   canMutateRole,
   findMissingPermissionDependencies,
-  mergeRoleNavigationMenuIds,
   permissionDependencies,
   reconcilePermissionSelection,
   ROLE_LIST_SEARCH_BEHAVIOR,
@@ -118,14 +117,5 @@ describe('role grant frontend contract', () => {
         permissionCode: 'user:update',
       },
     ]);
-  });
-
-  it('preserves legacy BUTTON menu relationships during navigation edits', () => {
-    expect(mergeRoleNavigationMenuIds(['10', '11'], ['90', '11'])).toEqual([
-      '10',
-      '11',
-      '90',
-    ]);
-    expect(mergeRoleNavigationMenuIds(undefined, [])).toEqual([]);
   });
 });

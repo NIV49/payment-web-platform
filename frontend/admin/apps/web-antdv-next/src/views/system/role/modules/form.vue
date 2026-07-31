@@ -1,6 +1,5 @@
 <script lang="ts" setup>
-import type { DataNode } from 'antdv-next/dist/tree';
-
+import type { SystemMenuApi } from '#/api/system/menu';
 import type { SystemRoleApi } from '#/api/system/role';
 
 import { computed, nextTick, ref } from 'vue';
@@ -17,8 +16,10 @@ import { createRole, updateRole } from '#/api/system/role';
 import { $t } from '#/locales';
 
 import { useFormSchema } from '../data';
-import { mergeRoleNavigationMenuIds } from '../grant-contract';
-import { filterNavigableMenuTree } from '../menu-tree';
+import {
+  filterAvailableNavigationMenuIds,
+  filterNavigableMenuTree,
+} from '../menu-tree';
 
 const emits = defineEmits(['success']);
 
@@ -29,9 +30,7 @@ const [Form, formApi] = useVbenForm({
   showDefaultActions: false,
 });
 
-const menuOptions = ref<DataNode[]>([]);
-const buttonMenuIds = ref<Set<string>>(new Set());
-const preservedButtonMenuIds = ref<string[]>([]);
+const menuOptions = ref<SystemMenuApi.SystemMenu[]>([]);
 const loadingMenuOptions = ref(false);
 
 const id = ref();
@@ -40,10 +39,6 @@ const [Drawer, drawerApi] = useVbenDrawer({
     const { valid } = await formApi.validate();
     if (!valid) return;
     const values = await formApi.getValues<SystemRoleApi.RoleSaveParams>();
-    values.menuIds = mergeRoleNavigationMenuIds(
-      values.menuIds,
-      preservedButtonMenuIds.value,
-    );
     drawerApi.lock();
     const currentRole = formData.value;
     let request;
@@ -94,12 +89,14 @@ const [Drawer, drawerApi] = useVbenDrawer({
       await nextTick();
       if (existingRole) {
         const currentMenuIds = existingRole.menuIds ?? [];
-        preservedButtonMenuIds.value = currentMenuIds.filter((menuId) =>
-          buttonMenuIds.value.has(menuId),
-        );
-        formApi.setValues({ ...existingRole, menuIds: currentMenuIds });
+        formApi.setValues({
+          ...existingRole,
+          menuIds: filterAvailableNavigationMenuIds(
+            currentMenuIds,
+            menuOptions.value,
+          ),
+        });
       } else {
-        preservedButtonMenuIds.value = [];
         formApi.setValues({ menuIds: [], status: 1 });
       }
     }
@@ -110,24 +107,10 @@ async function loadMenuOptions() {
   loadingMenuOptions.value = true;
   try {
     const res = await getMenuList();
-    buttonMenuIds.value = collectButtonMenuIds(res);
-    menuOptions.value = filterNavigableMenuTree(res) as unknown as DataNode[];
+    menuOptions.value = filterNavigableMenuTree(res);
   } finally {
     loadingMenuOptions.value = false;
   }
-}
-
-function collectButtonMenuIds(
-  menus: readonly import('#/api/system/menu').SystemMenuApi.SystemMenu[],
-) {
-  const ids = new Set<string>();
-  for (const menu of menus) {
-    if (menu.type === 'button') ids.add(menu.id);
-    if (menu.children) {
-      for (const id of collectButtonMenuIds(menu.children)) ids.add(id);
-    }
-  }
-  return ids;
 }
 
 const getDrawerTitle = computed(() => {

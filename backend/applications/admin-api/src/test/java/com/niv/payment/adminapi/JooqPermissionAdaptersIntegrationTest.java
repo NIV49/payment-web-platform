@@ -12,6 +12,7 @@ import com.niv.payment.permission.persistence.repository.JooqMembershipVersionRe
 import com.niv.payment.permission.persistence.repository.JooqPermissionCatalogRepository;
 import com.niv.payment.permission.persistence.repository.JooqPermissionGrantRepository;
 import com.niv.payment.permission.persistence.repository.JooqRoleAdministrationRepository;
+import com.niv.payment.permission.persistence.repository.JooqRoleGrantAdministrationRepository;
 import com.niv.payment.permission.port.InvalidAuthorizationSubjectException;
 import com.niv.payment.permission.port.StalePermissionVersionException;
 import com.niv.payment.permission.service.IdentityModels;
@@ -257,6 +258,38 @@ class JooqPermissionAdaptersIntegrationTest {
         assertEquals(1, statements.get());
         assertEquals(1, snapshot.grants().size());
         assertEquals(FUTURE_FROM.toInstant(), snapshot.refreshAfter());
+    }
+
+    @Test
+    void roleGrantAdministrationBatchesTargetInspection() {
+        AtomicInteger statements = new AtomicInteger();
+        var configuration = new DefaultConfiguration();
+        configuration.set(connection);
+        configuration.set(SQLDialect.POSTGRES);
+        configuration.set(new DefaultExecuteListenerProvider(
+            ExecuteListener.onExecuteStart(context -> statements.incrementAndGet())));
+        var repository = new JooqRoleGrantAdministrationRepository(
+            DSL.using(configuration), () -> "batched-role-grant-read-test");
+
+        try {
+            dsl.update(IAM_ROLE)
+                .set(IAM_ROLE.SYSTEM_ROLE, true)
+                .set(IAM_ROLE.ASSIGNABLE, false)
+                .where(IAM_ROLE.TENANT_ID.eq(TENANT_ID).and(IAM_ROLE.ID.eq(ROLE_ID)))
+                .execute();
+
+            var roleGrants = repository.findRoleGrants(TENANT_ID,
+                new AdministrationActor(MEMBERSHIP_ID, USER_ID, 17L, 23L), ROLE_ID);
+
+            assertEquals(6, statements.get());
+            assertFalse(roleGrants.editable());
+        } finally {
+            dsl.update(IAM_ROLE)
+                .set(IAM_ROLE.SYSTEM_ROLE, false)
+                .set(IAM_ROLE.ASSIGNABLE, true)
+                .where(IAM_ROLE.TENANT_ID.eq(TENANT_ID).and(IAM_ROLE.ID.eq(ROLE_ID)))
+                .execute();
+        }
     }
 
     @Test

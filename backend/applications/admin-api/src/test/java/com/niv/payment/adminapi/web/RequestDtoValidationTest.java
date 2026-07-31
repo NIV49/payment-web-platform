@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -83,5 +84,18 @@ class RequestDtoValidationTest {
         assertThat(validator.validate(missingStatusVersion)).isNotEmpty();
         assertThat(validator.validate(missingDepartmentVersion)).isNotEmpty();
         assertThat(validator.validate(missingMenuVersion)).isNotEmpty();
+    }
+
+    @Test
+    void roleGrantListsRejectNullElementsBeforeControllerMapping() {
+        var nullGrant = new RoleGrantAdministrationController.ReplaceRoleGrantsRequest(
+            0L, "reason", Collections.singletonList(null));
+        var nullDimension = new RoleGrantAdministrationController.ReplaceRoleGrantsRequest(
+            0L, "reason", List.of(new RoleGrantAdministrationController.GrantRequest(
+                "user-view", "user:view",
+                Collections.singletonList(null))));
+
+        assertThat(validator.validate(nullGrant)).isNotEmpty();
+        assertThat(validator.validate(nullDimension)).isNotEmpty();
     }
 }

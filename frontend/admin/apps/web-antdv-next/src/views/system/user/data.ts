@@ -2,6 +2,8 @@ import type { ComputedRef } from 'vue';
 
 import type { DescriptionsItemType } from '@vben/common-ui';
 
+import type { RoleAssignmentOption } from './modules/role-assignment';
+
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridColumns } from '#/adapter/vxe-table';
 import type { SystemUserApi } from '#/api';
@@ -10,7 +12,7 @@ import { h } from 'vue';
 
 import { Tag } from 'antdv-next';
 
-import { getDeptList, getRoleList, PERMISSION_CODES } from '#/api';
+import { getDeptList, PERMISSION_CODES } from '#/api';
 import { $t } from '#/locales';
 
 import { identityStatusPresentation } from './identity-status';
@@ -18,6 +20,7 @@ import { identityStatusPresentation } from './identity-status';
 export function useFormSchema(
   canAssignRoles: ComputedRef<boolean>,
   isEditing: ComputedRef<boolean>,
+  roleOptions: ComputedRef<RoleAssignmentOption[]>,
 ): VbenFormSchema[] {
   return [
     {
@@ -49,16 +52,12 @@ export function useFormSchema(
       rules: 'required',
     },
     {
-      component: 'ApiSelect',
+      component: 'Select',
       componentProps: () => ({
-        api: getRoleList,
         class: 'w-full',
         disabled: !canAssignRoles.value,
-        labelField: 'name',
         mode: 'multiple',
-        params: { page: 1, pageSize: 200, status: 1 },
-        resultField: 'items',
-        valueField: 'id',
+        options: roleOptions.value,
       }),
       description: $t('system.user.rolePermissionTip'),
       fieldName: 'roleIds',

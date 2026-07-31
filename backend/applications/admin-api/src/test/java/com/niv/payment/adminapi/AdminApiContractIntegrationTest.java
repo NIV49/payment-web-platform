@@ -308,6 +308,35 @@ class AdminApiContractIntegrationTest {
             "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
             Long.class, Long.parseLong(roleId));
 
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"reject null grant\",\"grants\":[null]}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("""
+                    {"expectedVersion":0,"reason":"reject null dimension",
+                     "grants":[{"grantKey":"invalid","permissionCode":"user:view",
+                       "dimensions":[null]}]}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        assertThat(jdbc.queryForObject(
+            "SELECT row_version FROM iam_role WHERE tenant_id=1 AND id=?",
+            Long.class, Long.parseLong(roleId))).isZero();
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=?",
+            Long.class, Long.parseLong(roleId))).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
+            """, Long.class, roleId)).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE_GRANTS' AND aggregate_ref=?
+            """, Long.class, roleId)).isZero();
+
         mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.roleId").value(roleId))
@@ -427,6 +456,28 @@ class AdminApiContractIntegrationTest {
             """, roleId))
             .containsEntry("role_name", "Disabled Menu Role")
             .containsEntry("row_version", 0L);
+        assertThat(jdbc.queryForList("""
+            SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id
+            """, Long.class, roleId)).containsExactly(6001L);
+
+        jdbc.update("""
+            INSERT INTO iam_role_menu(tenant_id,role_id,menu_id)
+            VALUES(1,?,6020),(1,?,6031)
+            """, roleId, roleId);
+        String filteredRoleBody = mvc.perform(get("/api/system/role/list").cookie(cookie)
+                .param("page", "1").param("pageSize", "20").param("name", "Disabled Menu Role"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items.length()").value(1))
+            .andExpect(jsonPath("$.data.items[0].menuIds.length()").value(1))
+            .andExpect(jsonPath("$.data.items[0].menuIds[0]").value("6001"))
+            .andReturn().getResponse().getContentAsString();
+        Number filteredVersion = JsonPath.read(filteredRoleBody, "$.data.items[0].rowVersion");
+
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Disabled Menu Role\",\"menuIds\":[\"6001\"],"
+                    + "\"status\":1,\"expectedVersion\":" + filteredVersion.longValue() + "}"))
+            .andExpect(status().isOk());
         assertThat(jdbc.queryForList("""
             SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id
             """, Long.class, roleId)).containsExactly(6001L);
