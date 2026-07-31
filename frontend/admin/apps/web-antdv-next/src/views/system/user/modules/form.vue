@@ -19,6 +19,7 @@ import { isOptimisticLockConflict } from '#/api/error-contract';
 import { $t } from '#/locales';
 
 import { useFormSchema } from '../data';
+import { hasAllAccessCodes } from '../permission-contract';
 import { toMembershipUpdateParams, toUserCreateParams } from './form-contract';
 
 const emits = defineEmits(['success']);
@@ -26,7 +27,10 @@ const formData = ref<SystemUserApi.SystemUser>();
 const { hasAccessByCodes } = useAccess();
 
 const canAssignRoles = computed(() =>
-  hasAccessByCodes([PERMISSION_CODES.userAssignRole]),
+  hasAllAccessCodes(
+    [PERMISSION_CODES.userAssignRole, PERMISSION_CODES.roleView],
+    hasAccessByCodes,
+  ),
 );
 const id = ref<string>();
 const isEditing = computed(() => Boolean(id.value));

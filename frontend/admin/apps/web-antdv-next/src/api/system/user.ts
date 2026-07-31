@@ -1,5 +1,3 @@
-import type { Recordable } from '@vben/types';
-
 import type { PageResult } from './types';
 
 import { requestClient } from '#/api/request';
@@ -42,6 +40,18 @@ export namespace SystemUserApi {
     userVersion: number;
   }
 
+  export interface UserListQuery {
+    deptId?: string;
+    endTime?: string;
+    id?: string;
+    name?: string;
+    page: number;
+    pageSize: number;
+    startTime?: string;
+    status?: 0 | 1;
+    username?: string;
+  }
+
   export interface UserStatusParams {
     status: 0 | 1;
     userVersion: number;
@@ -52,7 +62,7 @@ export namespace SystemUserApi {
   }
 }
 
-async function getUserList(params: Recordable<any>) {
+async function getUserList(params: SystemUserApi.UserListQuery) {
   return requestClient.get<PageResult<SystemUserApi.SystemUser>>(
     '/system/user/list',
     { params },

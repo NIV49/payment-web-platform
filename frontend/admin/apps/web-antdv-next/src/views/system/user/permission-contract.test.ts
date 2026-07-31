@@ -4,15 +4,26 @@ import { PERMISSION_CODES } from '#/api/permission-codes';
 
 import {
   hasAllAccessCodes,
+  USER_CREATE_PERMISSION_CODES,
   USER_EDIT_PERMISSION_CODES,
 } from './permission-contract';
 
 describe('user administration permission contract', () => {
-  it('requires update, disable, and assign-role before showing user edit', () => {
+  it('requires user creation and both option sources before showing create', () => {
+    expect(USER_CREATE_PERMISSION_CODES).toEqual([
+      PERMISSION_CODES.userCreate,
+      PERMISSION_CODES.departmentView,
+      PERMISSION_CODES.roleView,
+    ]);
+  });
+
+  it('requires update, disable, assign-role, and both option sources before showing user edit', () => {
     expect(USER_EDIT_PERMISSION_CODES).toEqual([
       PERMISSION_CODES.userUpdate,
       PERMISSION_CODES.userDisable,
       PERMISSION_CODES.userAssignRole,
+      PERMISSION_CODES.departmentView,
+      PERMISSION_CODES.roleView,
     ]);
 
     const grantedCodes = new Set<string>(USER_EDIT_PERMISSION_CODES);

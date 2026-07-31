@@ -24,6 +24,9 @@
     "remark": "Remark",
     "createTime": "Creation Time",
     "operation": "Operation",
+    "clearDeptFilter": "Clear department filter",
+    "departmentLoadFailed": "Failed to load departments",
+    "retryDepartmentLoad": "Retry loading departments",
     "permission": {
       "view": "View Users",
       "create": "Create User",

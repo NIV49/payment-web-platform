@@ -24,6 +24,9 @@
     "remark": "备注",
     "createTime": "创建时间",
     "operation": "操作",
+    "clearDeptFilter": "清除部门筛选",
+    "departmentLoadFailed": "部门加载失败",
+    "retryDepartmentLoad": "重新加载部门",
     "permission": {
       "view": "查看用户",
       "create": "新增用户",

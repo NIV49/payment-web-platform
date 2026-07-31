@@ -2,13 +2,22 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { SystemDeptApi, SystemUserApi } from '#/api';
 
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { Page, Tree, useVbenDrawer } from '@vben/common-ui';
-import { Plus } from '@vben/icons';
+import { Plus, RotateCw, X } from '@vben/icons';
 
-import { Button, Card, InputSearch, message, Modal } from 'antdv-next';
+import {
+  Alert,
+  Button,
+  Card,
+  InputSearch,
+  message,
+  Modal,
+  Spin,
+  Tooltip,
+} from 'antdv-next';
 
 import { useVbenVxeGrid, VbenTableAction } from '#/adapter/vxe-table';
 import {
@@ -26,13 +35,29 @@ import Detail from './modules/detail.vue';
 import Form from './modules/form.vue';
 import {
   hasAllAccessCodes,
+  USER_CREATE_PERMISSION_CODES,
   USER_EDIT_PERMISSION_CODES,
 } from './permission-contract';
+import {
+  buildUserListQuery,
+  filterDepartmentTree,
+  loadDepartmentTree,
+  resolveDepartmentId,
+  USER_LIST_SEARCH_BEHAVIOR,
+} from './query-contract';
 
 const deptList = ref<SystemDeptApi.SystemDept[]>([]);
 const inputSearchValue = ref('');
-const selectedDeptId = ref<string>('');
+const selectedDeptId = ref<string>();
+const departmentLoadFailed = ref(false);
+const departmentLoading = ref(false);
 const { hasAccessByCodes } = useAccess();
+const canViewDepartments = computed(() =>
+  hasAccessByCodes([PERMISSION_CODES.departmentView]),
+);
+const filteredDeptList = computed(() =>
+  filterDepartmentTree(deptList.value, inputSearchValue.value),
+);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -48,7 +73,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
     fieldMappingTime: [['createTime', ['startTime', 'endTime']]],
     schema: useGridFormSchema(),
-    submitOnChange: true,
+    submitOnChange: USER_LIST_SEARCH_BEHAVIOR.submitOnChange,
   },
   gridOptions: {
     columns: useColumns(onStatusChange),
@@ -57,12 +82,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
     proxyConfig: {
       ajax: {
         query: async ({ page }, formValues) => {
-          return await getUserList({
-            page: page.currentPage,
-            pageSize: page.pageSize,
-            ...formValues,
-            deptId: selectedDeptId.value,
-          });
+          return await getUserList(
+            buildUserListQuery(page, formValues, selectedDeptId.value),
+          );
         },
       },
     },
@@ -167,41 +189,44 @@ function onCreate() {
   formDrawerApi.setData({}).open();
 }
 
+function canCreateUser() {
+  return hasAllAccessCodes(USER_CREATE_PERMISSION_CODES, hasAccessByCodes);
+}
+
 function canEditUser() {
   return hasAllAccessCodes(USER_EDIT_PERMISSION_CODES, hasAccessByCodes);
 }
 
 async function loadDeptList() {
+  if (!canViewDepartments.value || departmentLoading.value) return;
+
+  departmentLoading.value = true;
+  departmentLoadFailed.value = false;
   try {
-    const res = await getDeptList();
-    deptList.value = res;
-  } catch (error) {
-    console.error('Failed to load department list:', error);
+    const { departments, error } = await loadDepartmentTree(getDeptList);
+    deptList.value = departments;
+    departmentLoadFailed.value = Boolean(error);
+    if (error) console.error('Failed to load department list:', error);
+  } finally {
+    departmentLoading.value = false;
   }
 }
 
-function selectDept(v: string) {
-  selectedDeptId.value = v;
+function selectDept(selection: unknown) {
+  const departmentId = resolveDepartmentId(selection);
+  if (!departmentId) return;
+
+  selectedDeptId.value = departmentId;
   gridApi.query();
 }
 
-function searchDept(value: string) {
-  if (!value) {
-    loadDeptList();
-    return;
-  }
-  const filtered = deptList.value.filter((dept) =>
-    dept.name.toLowerCase().includes(value.toLowerCase()),
-  );
-  deptList.value = filtered;
+function clearDeptFilter() {
+  selectedDeptId.value = undefined;
+  gridApi.query();
 }
 
 onMounted(() => {
   loadDeptList();
-});
-
-watch(inputSearchValue, (value) => {
-  searchDept(value);
 });
 </script>
 <template>
@@ -209,24 +234,59 @@ watch(inputSearchValue, (value) => {
     <FormDrawer @success="onRefresh" />
     <DetailDrawer @success="onRefresh" />
     <div class="flex size-full">
-      <Card class="w-1/6">
-        <InputSearch
-          v-model:value="inputSearchValue"
-          :placeholder="$t('system.user.placeholder')"
-        />
-        <Tree
-          label-field="name"
-          value-field="id"
-          :tree-data="deptList"
-          :default-expanded-level="2"
-          @select="selectDept"
-        />
+      <Card v-if="canViewDepartments" class="w-1/6">
+        <div class="mb-2 flex items-center gap-1">
+          <InputSearch
+            v-model:value="inputSearchValue"
+            :placeholder="$t('system.user.placeholder')"
+          />
+          <Tooltip :title="$t('system.user.clearDeptFilter')">
+            <Button
+              :aria-label="$t('system.user.clearDeptFilter')"
+              :disabled="!selectedDeptId"
+              type="text"
+              @click="clearDeptFilter"
+            >
+              <X class="size-4" />
+            </Button>
+          </Tooltip>
+        </div>
+        <Alert
+          v-if="departmentLoadFailed"
+          show-icon
+          :title="$t('system.user.departmentLoadFailed')"
+          type="error"
+        >
+          <template #action>
+            <Tooltip :title="$t('system.user.retryDepartmentLoad')">
+              <Button
+                :aria-label="$t('system.user.retryDepartmentLoad')"
+                size="small"
+                type="text"
+                @click="loadDeptList"
+              >
+                <RotateCw class="size-4" />
+              </Button>
+            </Tooltip>
+          </template>
+        </Alert>
+        <Spin v-else :spinning="departmentLoading">
+          <Tree
+            label-field="name"
+            value-field="id"
+            :model-value="selectedDeptId"
+            :tree-data="filteredDeptList"
+            :default-expanded-level="2"
+            @select="selectDept"
+          />
+        </Spin>
       </Card>
 
-      <div class="w-5/6 ml-4">
+      <div :class="canViewDepartments ? 'ml-4 w-5/6' : 'w-full'">
         <Grid :table-title="$t('system.user.list')">
           <template #toolbar-tools>
             <Button
+              v-if="canCreateUser()"
               v-access:code="PERMISSION_CODES.userCreate"
               type="primary"
               @click="onCreate"
