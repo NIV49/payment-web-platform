@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_AUDIT_EVENT;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_AUTHENTICATION_CREDENTIAL;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_GRANT_DIMENSION;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_GRANT_TARGET;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP_ROLE;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_PERMISSION;
@@ -50,6 +51,8 @@ class JooqRoleGrantTransactionReauthorizationIntegrationTest {
     private static final long GRANT_UPDATE_GRANT_ID = 9_840_007L;
     private static final long EXPIRY_TARGET_GRANT_ID = 9_840_008L;
     private static final long MISSING_PERMISSION_TARGET_GRANT_ID = 9_840_009L;
+    private static final long UNSAFE_DIMENSION_ID = 9_840_010L;
+    private static final long UNSAFE_TARGET_ID = 9_840_011L;
     private static final long PERMISSION_VERSION = 31L;
     private static final long SESSION_VERSION = 47L;
     private static final String TEST_PASSWORD_HASH =
@@ -159,6 +162,81 @@ class JooqRoleGrantTransactionReauthorizationIntegrationTest {
                     .set(IAM_ROLE_GRANT.STATUS, "ACTIVE")
                     .where(IAM_ROLE_GRANT.ID.eq(missingGrantId))
                     .execute();
+            }
+        }
+    }
+
+    @Test
+    void roleGrantReplacementRejectsEveryUnsupportedTransactionalAuthorizationShape() throws Exception {
+        long roleViewPermissionId = permissionId("role:view");
+        long roleViewDimensionId = ROLE_VIEW_GRANT_ID + 100L;
+        List<AuthorizationMutation> mutations = List.of(
+            new AuthorizationMutation(
+                "disabled permission catalog entry",
+                () -> setPermissionStatus(roleViewPermissionId, "DISABLED"),
+                () -> setPermissionStatus(roleViewPermissionId, "ACTIVE")),
+            new AuthorizationMutation(
+                "sensitive permission risk",
+                () -> setPermissionRisk(roleViewPermissionId, "SENSITIVE"),
+                () -> setPermissionRisk(roleViewPermissionId, "NORMAL")),
+            new AuthorizationMutation(
+                "cross-tenant permission mode",
+                () -> setPermissionCrossTenantMode(roleViewPermissionId, "RELATED_PARTY_READ"),
+                () -> setPermissionCrossTenantMode(roleViewPermissionId, "SAME_TENANT_ONLY")),
+            new AuthorizationMutation(
+                "unsupported permission dimensions",
+                () -> setPermissionDimensions(roleViewPermissionId, new String[]{"TENANT", "OWNER"}),
+                () -> setPermissionDimensions(roleViewPermissionId, new String[]{"TENANT"})),
+            new AuthorizationMutation(
+                "step-up requirement",
+                () -> setPermissionStepUp(roleViewPermissionId, true),
+                () -> setPermissionStepUp(roleViewPermissionId, false)),
+            new AuthorizationMutation(
+                "approval requirement",
+                () -> setPermissionApproval(roleViewPermissionId, true),
+                () -> setPermissionApproval(roleViewPermissionId, false)),
+            new AuthorizationMutation(
+                "non-tenant dimension and scope",
+                () -> setDimension(roleViewDimensionId, "OWNER", "SELF"),
+                () -> setDimension(roleViewDimensionId, "TENANT", "TENANT_ALL")),
+            new AuthorizationMutation(
+                "extra grant dimension",
+                () -> dsl.insertInto(IAM_GRANT_DIMENSION)
+                    .set(IAM_GRANT_DIMENSION.ID, UNSAFE_DIMENSION_ID)
+                    .set(IAM_GRANT_DIMENSION.GRANT_ID, ROLE_VIEW_GRANT_ID)
+                    .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, "OWNER")
+                    .set(IAM_GRANT_DIMENSION.SCOPE_MODE, "SELF")
+                    .execute(),
+                () -> dsl.deleteFrom(IAM_GRANT_DIMENSION)
+                    .where(IAM_GRANT_DIMENSION.ID.eq(UNSAFE_DIMENSION_ID))
+                    .execute()),
+            new AuthorizationMutation(
+                "targeted tenant dimension",
+                () -> dsl.insertInto(IAM_GRANT_TARGET)
+                    .set(IAM_GRANT_TARGET.ID, UNSAFE_TARGET_ID)
+                    .set(IAM_GRANT_TARGET.DIMENSION_ID, roleViewDimensionId)
+                    .set(IAM_GRANT_TARGET.TARGET_REF, "unexpected-target")
+                    .execute(),
+                () -> dsl.deleteFrom(IAM_GRANT_TARGET)
+                    .where(IAM_GRANT_TARGET.ID.eq(UNSAFE_TARGET_ID))
+                    .execute())
+        );
+
+        for (AuthorizationMutation mutation : mutations) {
+            mutation.apply().run();
+            try (Connection workerConnection = DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
+                workerConnection.setAutoCommit(false);
+                DSLContext worker = DSL.using(workerConnection, SQLDialect.POSTGRES);
+
+                Throwable failure = executeReplacement(
+                    workerConnection, worker, MISSING_PERMISSION_TARGET_ROLE_ID);
+
+                assertInstanceOf(SecurityException.class, failure, mutation.name());
+                assertTargetUnchanged(
+                    MISSING_PERMISSION_TARGET_ROLE_ID, MISSING_PERMISSION_TARGET_GRANT_ID);
+            } finally {
+                mutation.restore().run();
             }
         }
     }
@@ -349,5 +427,58 @@ class JooqRoleGrantTransactionReauthorizationIntegrationTest {
             .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, "TENANT")
             .set(IAM_GRANT_DIMENSION.SCOPE_MODE, "TENANT_ALL")
             .execute();
+    }
+
+    private static void setPermissionStatus(long permissionId, String status) {
+        dsl.update(IAM_PERMISSION)
+            .set(IAM_PERMISSION.STATUS, status)
+            .where(IAM_PERMISSION.ID.eq(permissionId))
+            .execute();
+    }
+
+    private static void setPermissionRisk(long permissionId, String riskLevel) {
+        dsl.update(IAM_PERMISSION)
+            .set(IAM_PERMISSION.RISK_LEVEL, riskLevel)
+            .where(IAM_PERMISSION.ID.eq(permissionId))
+            .execute();
+    }
+
+    private static void setPermissionCrossTenantMode(long permissionId, String mode) {
+        dsl.update(IAM_PERMISSION)
+            .set(IAM_PERMISSION.CROSS_TENANT_MODE, mode)
+            .where(IAM_PERMISSION.ID.eq(permissionId))
+            .execute();
+    }
+
+    private static void setPermissionDimensions(long permissionId, String[] dimensions) {
+        dsl.update(IAM_PERMISSION)
+            .set(IAM_PERMISSION.REQUIRED_DIMENSIONS, dimensions)
+            .where(IAM_PERMISSION.ID.eq(permissionId))
+            .execute();
+    }
+
+    private static void setPermissionStepUp(long permissionId, boolean required) {
+        dsl.update(IAM_PERMISSION)
+            .set(IAM_PERMISSION.REQUIRES_STEP_UP, required)
+            .where(IAM_PERMISSION.ID.eq(permissionId))
+            .execute();
+    }
+
+    private static void setPermissionApproval(long permissionId, boolean required) {
+        dsl.update(IAM_PERMISSION)
+            .set(IAM_PERMISSION.REQUIRES_APPROVAL, required)
+            .where(IAM_PERMISSION.ID.eq(permissionId))
+            .execute();
+    }
+
+    private static void setDimension(long dimensionId, String dimensionCode, String scopeMode) {
+        dsl.update(IAM_GRANT_DIMENSION)
+            .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, dimensionCode)
+            .set(IAM_GRANT_DIMENSION.SCOPE_MODE, scopeMode)
+            .where(IAM_GRANT_DIMENSION.ID.eq(dimensionId))
+            .execute();
+    }
+
+    private record AuthorizationMutation(String name, Runnable apply, Runnable restore) {
     }
 }
