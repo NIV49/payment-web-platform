@@ -437,7 +437,8 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         }
         int found = dsl.fetchCount(IAM_ROLE,
             IAM_ROLE.TENANT_ID.eq(tenantId)
-                .and(IAM_ROLE.ID.in(distinctRoleIds)));
+                .and(IAM_ROLE.ID.in(distinctRoleIds))
+                .and(IAM_ROLE.DELETED_AT.isNull()));
         if (found != distinctRoleIds.size()) {
             throw new IdentityAdministrationService.ResourceNotFoundException(
                 "One or more roles were not found");

@@ -214,7 +214,7 @@ identityStatus=LOCKED             = 全局身份锁定
 
 当前没有生产可用的邀请、密码设置或身份激活流程，也没有对应 Admin API。测试中的直接 SQL 状态推进仅模拟未来受控激活边界，不是运维方案；正式激活流程上线前禁止人工把这些三项状态拼成可登录账号。
 
-User DELETE 将当前租户 Membership 标记为 `TERMINATED`；Role、Menu、Department DELETE 当前都是逻辑禁用，不物理删除主要业务记录。
+User DELETE 将当前租户 Membership 标记为 `TERMINATED`；Role、Menu、Department DELETE 是带 `deleted_at` 墓碑的软删除，同时把状态置为 DISABLED。墓碑行及其历史关系保留在数据库和审计中，但不得再出现在管理列表、选择器、动态菜单或有效授权查询中。单纯 DISABLED 且未删除的记录仍出现在自身管理列表，便于恢复，但不得作为其他模块的新依赖候选。
 
 ### Pagination
 
@@ -377,6 +377,7 @@ department:delete
 | `/api/system/dept`、`/list`、`/{id}` | `department:view` | `department:create` | `department:update` | — | `department:delete` |
 | `/api/v1/iam/permissions/grantable` | `role:view` + `role:grant-update` | — | — | — | — |
 | `/api/v1/iam/roles/{roleId}/grants` | `role:view` + `role:grant-update` | — | `role:view` + `role:grant-update` | — | — |
+| `/api/v1/iam/roles/{roleId}/configuration` | — | — | `role:view` + `role:update` + `menu:view` + `role:grant-update` | — | — |
 
 用户创建时 roleIds 非空，Controller 额外要求 `user:assign-role`。当前用户 PUT 同时提交部门、状态和角色最终全集，因此入口固定要求 `user:update`、`user:disable`、`user:assign-role`；不在事务外先读角色差异来决定是否鉴权，避免检查与写入之间的竞态。后续若要降低权限粒度，应把它拆成独立的部门、状态和角色命令，而不是恢复数据相关的预检查。
 
@@ -404,7 +405,7 @@ AdministrationActor(
 
 锁后发现任一主体状态或版本漂移时，接口返回 401 `SESSION_INVALID`，注销服务端会话并清 Cookie。它关闭了主体禁用、密码失效和版本撤权发生在事务排队期间的写入窗口。
 
-`PUT /api/v1/iam/roles/{roleId}/grants` 在锁定 tenant、actor、目标 role 和 ACTIVE system role 后，使用单条 PostgreSQL `statement_timestamp()` 查询重新验证操作者同时持有有效的 `role:view` 与 `role:grant-update`；只接受 NORMAL、SAME_TENANT_ONLY、精确 `TENANT/TENANT_ALL`、无 target、无 step-up/approval 的授权。真实双连接测试覆盖等待 tenant 锁期间 `valid_until` 过期以及任一权限缺失，失败时角色版本、Grant、审计和 Outbox 均不改变。
+`PUT /api/v1/iam/roles/{roleId}/grants` 在锁定 tenant、actor、目标 role 和 ACTIVE system role 后，使用单条 PostgreSQL `statement_timestamp()` 查询重新验证操作者同时持有有效的 `role:view` 与 `role:grant-update`。角色编辑使用的 `PUT /api/v1/iam/roles/{roleId}/configuration` 在同一锁后边界精确重验 `role:view`、`role:update`、`menu:view`、`role:grant-update` 四项权限，并在一个事务中替换角色字段、导航关系和 RoleGrant。两者都只接受 NORMAL、SAME_TENANT_ONLY、精确 `TENANT/TENANT_ALL`、无 target、无 step-up/approval 的授权；真实双连接测试覆盖等待 tenant 锁期间 `valid_until` 过期以及任一权限缺失，失败时角色版本、Grant、菜单关系、审计和 Outbox 均不改变。
 
 该关闭范围只覆盖 RoleGrant 替换写入。User、Role、Menu、Department 的其他写接口仍主要依赖事务前 HTTP PEP；若其管理权限 Grant 设置有限 `valid_until`，仍可能在等待写锁期间过期而 permissionVersion 不变。这一剩余边界继续是生产 **NO-GO / Required**，过渡期不得给这些管理写权限配置有限有效期。
 
@@ -443,6 +444,8 @@ Response item：
   "status": 1,
   "identityStatus": "ACTIVE",
   "userVersion": 0,
+  "identityVersion": 0,
+  "credentialVersion": 0,
   "remark": "",
   "createTime": "2026-07-17T00:00:00Z"
 }
@@ -477,7 +480,7 @@ Response item：
 
 ### PUT `/system/user/{userId}`
 
-Request 只包含当前租户 Membership 可变字段：
+普通管理员请求只包含当前租户 Membership 可变字段：
 
 ```json
 {
@@ -497,7 +500,9 @@ Request 只包含当前租户 Membership 可变字段：
 - 系统管理员清理能力只取 `/user/info.systemAdministrator`，不得用权限码或角色名称推断；角色候选首屏和名称搜索均使用最大 `pageSize=200`，首屏未覆盖的当前角色通过租户内 `id` 精确查询补齐，不允许为了打开表单串行扫描完整租户角色目录；
 - userVersion 不匹配返回 409；
 - 更新当前 Membership 的部门、状态、角色、permissionVersion、sessionVersion；
-- 不接受也不修改全局 `username`、display name、remark 或 credential；前端编辑态将这些身份字段设为只读，并通过 payload 白名单保证不会误传；
+- PLATFORM 系统管理员由可信 Session 的 ACTIVE、未删除 system role 判定，可额外提交列表返回的 `username/name/remark/identityVersion/credentialVersion`，在同一事务中更新全局 User 和本地 Credential；用户名改变会同步 local issuer 的 `idp_subject`、推进全部未终止 Membership 的 sessionVersion，并写 User 审计；
+- 外部 IdP 用户的 subject 不允许通过本地管理接口改写；普通管理员前端将身份字段设为只读，payload 白名单也会剔除这些字段；
+- userVersion、identityVersion 或 credentialVersion 任一不匹配都返回 409；
 - 成功响应 `data=null`。
 
 ### PATCH `/system/user/{userId}/status`
@@ -549,6 +554,8 @@ Response item：
   "status": 1,
   "remark": "",
   "rowVersion": 0,
+  "systemRole": true,
+  "assignable": false,
   "createTime": "2026-07-17T00:00:00Z"
 }
 ```
@@ -603,26 +610,28 @@ Permission 为 `role:update`。`systemRole=true` 或 `assignable=false` 的受�
 
 ### DELETE `/system/role/{roleId}?expectedVersion={rowVersion}`
 
-`expectedVersion` 必填。只逻辑禁用 `systemRole=false AND assignable=true` 的普通角色，不物理删除；受保护角色返回 422 `IAM_ROLE_NOT_ASSIGNABLE`，成功后递增 role rowVersion 和相关成员 permissionVersion。
+`expectedVersion` 必填。只允许软删除 `systemRole=false AND assignable=true` 的普通角色：设置 `status=DISABLED` 和 `deleted_at`，递增 role rowVersion 与相关成员 permissionVersion，并显式删除 `iam_membership_role` 使权限立即失效；`iam_role_menu`、`iam_role_grant` 和角色主记录保留为历史。受保护角色返回 422 `IAM_ROLE_NOT_ASSIGNABLE`。
 
 ### menuIds 与 RoleGrant
 
 ```text
-Role.menuIds -> 导航、页面展示；当前角色 UI 递归过滤 BUTTON
-RoleGrant     -> 后端动作和数据范围
+Role.menuIds      -> 导航、页面展示
+BUTTON.authCode   -> 权限目录在树中的展示绑定
+RoleGrant         -> 后端动作和数据范围
 ```
 
-两者已在数据库模型和前端交互中分离。角色表单只保存 menuIds，并递归过滤 BUTTON 与 DISABLED 分支，不把隐藏的历史 ID 合并回请求。角色读模型同样只返回 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK；第一次正常角色更新以响应全集替换 `role_menu` 时会惰性清理该角色的历史 BUTTON、DISABLED 或已删除关系。服务端仍在 tenant 写事务中锁定并校验客户端显式提交的全部 menuIds，不能依赖前端过滤，也不会静默接受非法 ID。独立“功能权限”抽屉通过下节 RoleGrant API 读取和替换授权，绝不从 menuIds 推导 Grant。菜单管理树中的 BUTTON 是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
+三者已在数据库模型和写入契约中分离。角色编辑抽屉在同一个多层树中展示 ACTIVE 导航节点及其可分配 BUTTON，勾选 BUTTON 只生成 RoleGrant intent，并自动补齐必要权限和导航祖先；BUTTON ID 绝不写入 `iam_role_menu`，导航 ID 也绝不推导 Grant。保存调用原子 configuration API，一次性替换角色字段、ACTIVE 可路由 menuIds 和页面可无损表达的 RoleGrant。未知、高风险、有效期、多维度或带 target 的现有 Grant 会使表单只读，禁止静默覆盖。菜单管理树中的 BUTTON 只是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
 
 `local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。V15 中两个旧 Permission 处于 ACTIVE 兼容状态不等于旧 BUTTON 重新启用。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，并精确识别已经执行 V14+V15 的过渡状态；预置部门的非负 `rowVersion` 可自然推进，但其 ID、租户、父级、编码、名称、状态、备注或预留键发生漂移时仍失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
 
 ### 角色授权第一阶段 API
 
-以下端点统一返回 `ApiResponse<T>`，Long ID 仍使用字符串。三者都要求当前会话同时拥有 `role:view` 与 `role:grant-update`，并验证操作者当前持有 ACTIVE `system_role`；其中 PUT 还执行上一节定义的锁后事务内权限重验：
+以下端点统一返回 `ApiResponse<T>`，Long ID 仍使用字符串。grantable/grants 三个端点要求当前会话同时拥有 `role:view` 与 `role:grant-update`；configuration PUT 额外要求 `role:update` 与 `menu:view`。所有写入都验证操作者当前持有 ACTIVE、未删除的 `system_role`，并执行上一节定义的锁后事务内权限重验：
 
 - `GET /api/v1/iam/permissions/grantable`：只返回精确 18 个 NORMAL、SAME_TENANT_ONLY 管理权限；`role:grant-update` 仅属于 system-admin，不可委派；
 - `GET /api/v1/iam/roles/{roleId}/grants`：返回 `{roleId,roleVersion,editable,grants}`；system role、`assignable=false`、存在当前页面不能无损表达的授权，或旧管理权限 cutover 尚未完成时 `editable=false`；
 - `PUT /api/v1/iam/roles/{roleId}/grants`：只接受 `systemRole=false AND assignable=true` 的普通角色、全量替换、必填 `expectedVersion` 与非空 `reason`；non-assignable role 返回 422 `IAM_ROLE_NOT_ASSIGNABLE`。`payment.permissions.legacy-administration-cutover-complete` 默认为 `false`；未完成 cutover 时返回 40903 `LEGACY_ADMINISTRATION_CUTOVER_REQUIRED`。
+- `PUT /api/v1/iam/roles/{roleId}/configuration`：角色编辑页专用原子入口，请求为 `{expectedVersion,name,status,remark,menuIds,reason,grants}`；成功只递增一次 role rowVersion 和每个成员一次 permissionVersion，写一组 before/after audit 与 Outbox。普通 role PUT 和独立 Grant PUT 继续作为兼容 API 存在，但当前角色编辑 UI 不并发调用它们。
 
 Grant 和 dimension 数组中的 `null` 元素统一返回 400 `INVALID_REQUEST`，并且必须在任何角色版本、Grant、审计或 Outbox 写入前失败。
 
@@ -662,10 +671,10 @@ grantable 元数据使用绑定维度与模式的对象数组：
 
 | Endpoint | Request/response |
 | --- | --- |
-| `GET /system/dept/list` | 返回 `id/pid/name/status/remark/rowVersion/createTime/children` 树 |
+| `GET /system/dept/list` | 返回未删除的管理树；`selectableOnly=true` 时只返回 ACTIVE 候选 |
 | `POST /system/dept` | `{pid,name,status,remark}`，返回 `{id}` |
 | `PUT /system/dept/{id}` | `{pid,name,status,remark,expectedVersion}` |
-| `DELETE /system/dept/{id}?expectedVersion={rowVersion}` | 逻辑禁用 |
+| `DELETE /system/dept/{id}?expectedVersion={rowVersion}` | 软删除并写 `deleted_at` |
 
 约束：
 
@@ -682,12 +691,12 @@ grantable 元数据使用绑定维度与模式的对象数组：
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /system/menu/list` | 返回管理树，包含按钮节点；每个节点含 `rowVersion` |
+| `GET /system/menu/list` | 返回未删除的管理树，包含按钮节点；`selectableOnly=true` 时只返回 ACTIVE 候选 |
 | `GET /system/menu/name-exists?name=&id=` | name 唯一性检查 |
 | `GET /system/menu/path-exists?path=&id=` | path 唯一性检查 |
 | `POST /system/menu` | 创建，返回 `{id}` |
 | `PUT /system/menu/{id}` | 更新；业务字段之外必填 `expectedVersion` |
-| `DELETE /system/menu/{id}?expectedVersion={rowVersion}` | 逻辑禁用 |
+| `DELETE /system/menu/{id}?expectedVersion={rowVersion}` | 软删除并写 `deleted_at` |
 
 请求字段：
 
@@ -722,7 +731,7 @@ expectedVersion（仅 PUT）
 - PUT/DELETE 在最终 jOOQ UPDATE 的 WHERE 中原子比较 `row_version = expectedVersion`，成功递增 rowVersion；
 - BUTTON 必须填写 authCode，所有非空 authCode 都必须命中当前 ACTIVE Permission Catalog；滚动兼容期仍为 ACTIVE 的 `menu:manage`、`department:manage` 只服务旧二进制鉴权，create/update 均禁止将其绑定到菜单；
 - BUTTON 不能成为父节点，已有子节点的菜单也不能转换为 BUTTON；
-- 删除是逻辑禁用，现存 role_menu 关系不会自动变成 RoleGrant。
+- 删除写入墓碑并从后续管理树、选择器和动态菜单隐藏；现存 role_menu 关系作为历史保留，也不会自动变成 RoleGrant。
 - `local` bootstrap 预置 19 个 ACTIVE BUTTON，并保留 2 个 DISABLED/隐藏的历史 `menu:manage`、`department:manage` BUTTON；ACTIVE BUTTON authCode 与 19 个现代管理权限码严格相等，path/component/redirect 为空。
 
 ### 管理资源的并发冲突协议
@@ -787,7 +796,7 @@ V16__enforce_exact_administration_permission_catalog.sql
 
 - `local` profile 启用自动迁移，但不启用 `baseline-on-migrate`；
 - 已经手工执行 V1、但没有 `flyway_schema_history` 的旧开发卷不属于升级契约；需要的数据先备份，然后从空库重建；
-- 全新空库正常执行 V1 到 V16；
+- 全新空库正常执行 V1 到 V17；
 - V2/V3 的历史固定身份和菜单只为兼容旧迁移链存在；V8 只在预留 footprint 仍是精确 fixture 时删除它，其他租户、用户、审计、Outbox 和扩展权限原样保留；
 - V3 为预置平台管理员补充 Dashboard、Analytics 和 Workspace 动态路由，保证 `/dashboard` 登录首页可用；
 - V4 把系统菜单 title 修正为 i18n key，并清除一级目录旧 `BasicLayout`；
@@ -796,6 +805,7 @@ V16__enforce_exact_administration_permission_catalog.sql
 - V10 以 Core 相同的 dimension/mode 允许矩阵增加 `CHECK` 并验证历史行；非法历史授权使迁移失败，不自动改权；
 - V11-V13 分别约束菜单外链、跨租户只读 action 和 BCrypt hash；历史非法数据使迁移失败，不做静默清洗；
 - V14 建立细粒度管理权限，V15 前向保留旧 manage Grant 的滚动兼容，V16 在不回写已执行 V14/V15 的前提下精确核验 21 条管理 Permission 的固定 ID、code/resource/action、风险、维度、step-up、approval、跨租户模式和状态；目录漂移使应用升级失败关闭且不自动修复；
+- V17 为 Role、Menu、Department 增加 `deleted_at`，为 Menu、Department 增加 `system_managed`，并把角色/菜单唯一索引调整为只约束未删除行；它只建立软删除能力和精确 local fixture 标记，不物理清理已有业务数据；
 - `LocalIdentityFixtureBootstrap` 只在 `local` profile、Flyway 完成后事务性执行 `db/local/iam-local-bootstrap.sql` 并写入 BCrypt 密码；fixture 归属只按预留 ID、自然键/authCode、预置主体和预置主体自身关系判断，不按 `assigned_by/created_by/updated_by` 或菜单父节点扩大。它允许管理员已有成功登录元数据，以及管理员后续创建且无碰撞的部门、用户、Membership、普通角色、Grant、菜单和普通角色菜单关系；密码配置变化、预留键碰撞、预置行或预置主体自身关系被修改时仍拒绝启动；
 - 任何环境的迁移都不得依赖 `baseline-on-migrate=true` 自动猜测历史状态。
 
@@ -955,7 +965,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 3. 新建用户没有可用的密码激活、邀请、首次改密或管理员重置流程；
 4. Cookie Secure 的生产强制、代理拓扑、TTL、Redis 故障和会话撤权未演练；
 5. CSRF/Origin/CORS 策略尚未经过真实部署安全测试；
-6. RoleGrant PUT 已关闭 `valid_until` 在等待锁期间过期的竞态；User、Role、Menu、Department 其他管理写接口尚未执行同等事务内授权重验，仍需通过“这些管理写权限不得配置有限 `valid_until`”的运维约束临时规避；
+6. RoleGrant PUT 和角色 configuration PUT 已关闭 `valid_until` 在等待锁期间过期的竞态；User、普通 Role lifecycle、Menu、Department 其他管理写接口尚未执行同等事务内授权重验，仍需通过“这些管理写权限不得配置有限 `valid_until`”的运维约束临时规避；
 7. 普通角色分配已保护最后管理员、禁止自提权并拒绝 system/non-assignable role；仍缺经过审批、双人执行、可审计的 break-glass provisioning；
 8. 管理资源已用 rowVersion 阻止旧快照覆盖，但用户/角色仍无详情重载 endpoint；发生 40902 时只能关闭旧表单并刷新列表，不能自动合并并发修改；
 9. RoleGrant 管理 API/UI 已实现精确目录的全量替换，但生产默认由旧管理权限切换闸门禁用；清除全部 N-1 依赖、打开闸门、超出 TENANT_ALL 的数据维度和正式审批流仍未完成；

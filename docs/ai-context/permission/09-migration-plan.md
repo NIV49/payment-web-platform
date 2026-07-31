@@ -50,7 +50,7 @@
 
 验证：多角色动作/范围不拼接、RELATED_PARTY_READ 不能包装写 action、非法 BCrypt hash 不能充当备用管理员、最后管理员保护、自提权拒绝。
 
-当前管理权限目录采用 V14 细粒度扩展、V15 N-1 兼容、V16 精确目录守卫的前向链。已执行迁移不可回写：V16 发现固定管理权限元数据漂移时停在 V15 且不修数据，但不能让已经成功执行的 V15 自身事后回滚。N-1 兼容期内 RoleGrant 全量替换必须由默认关闭的部署闸门禁止；只有旧客户端依赖清零并完成发布验证后才可打开。
+当前管理权限目录采用 V14 细粒度扩展、V15 N-1 兼容、V16 精确目录守卫的前向链；V17 在其后只增不改地加入 Role/Menu/Department 墓碑和 live-only 唯一索引。已执行迁移不可回写：V16 发现固定管理权限元数据漂移时停在 V15 且不修数据；V17 不物理清理业务行。N-1 兼容期内 RoleGrant/角色 configuration 全量替换必须由默认关闭的部署闸门禁止；只有旧客户端依赖清零并完成发布验证后才可打开。
 
 ## 5. 阶段 3：业务范围 Provider
 
@@ -128,6 +128,8 @@ resourceFingerprint
 
 当前管理权限迁移采用明确的 expand/contract：V14 建立细粒度目录，V15 前向补齐所有旧 manage Grant 的等价现代 Grant，并暂时恢复旧 Permission 供滚动兼容；V16 只读式精确核验当前 21 条管理 Permission 元数据，发现漂移即阻断升级，不回写已执行的 V14/V15。旧码不再绑定当前 endpoint、按钮或新授权。现代 RoleGrant PUT 在生产默认关闭；只有 N/N-1 二进制与真实数据库兼容测试、旧实例和旧调用方清零、生产审批完成后，部署方才可显式打开 cutover 开关并允许全量保存退役该角色的兼容影子。最终仍需新的 contract 迁移停用旧码；禁止修改已执行的 V14/V15。
 
+V17 墓碑写入属于前向状态：旧二进制会把墓碑误当普通 DISABLED 行，因此一旦新版本开始软删除，不能通过回滚应用版本继续对同库写入。发布计划必须把“停止写入并前向修复”或“恢复发布前整库快照”作为回退路径，并分别验证 live-only unique index 和历史行保留。
+
 ## 10. 发布门禁
 
 任何一项未满足都不切换：
@@ -158,6 +160,7 @@ resourceFingerprint
 - 生产 Flyway 与 local fixture 隔离；
 - V14/V15 管理权限 expand 迁移保留复杂历史 Grant 的范围、有效期和 target，并推进 role/membership 版本、审计和 Outbox；
 - V16 固定管理权限目录失败关闭守卫，以及默认关闭的 RoleGrant N-1 切换闸门；
+- V17 墓碑、系统预置保护和 live-only 唯一索引；软删除后列表/选择器/有效授权均排除墓碑；
 - DataScopePlan 保留 Grant 元组并排除无可信审批证据的 Grant。
 
 它仍不是生产身份或支付权限系统：外部 IdP、MFA 时效、可信审批工作流、超出首阶段 18 项 TENANT/TENANT_ALL 目录的通用 RoleGrant 管理、关系 Provider、真实订单 Mapper、Outbox relay、生产 provisioning/observability 和资金业务规格尚未完成。任何真实资金写路径仍被发布门禁阻断。

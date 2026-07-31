@@ -1548,6 +1548,12 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.items").isEmpty())
             .andExpect(jsonPath("$.data.total").value(0));
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"username\":\"deleted-role-candidate-" + roleId
+                    + "\",\"name\":\"Deleted Role Candidate\",\"deptId\":\"10\","
+                    + "\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
+            .andExpect(status().isNotFound());
     }
 
     @Test

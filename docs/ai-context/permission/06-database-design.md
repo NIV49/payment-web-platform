@@ -7,7 +7,7 @@
 ```text
 backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V1__permission_schema.sql
 ...
-backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V10__enforce_grant_dimension_mode_compatibility.sql
+backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V17__add_administration_tombstones.sql
 ```
 
 Verdict：**有条件通过作为新库基线，不允许直接在生产执行。**
@@ -107,8 +107,9 @@ Core `DimensionScope` 与 V10 `ck_iam_grant_dimension_mode_compatibility` 同时
 | role_grant `(role_id,permission_id)` | 按角色和权限加载全部 tuple | 额外写索引 |
 | grant_dimension `(grant_id,dimension_code)` unique | 组装授权范围 | 低写高读合适 |
 | grant_target `(dimension_id,target_ref)` unique | SPECIFIED 目标匹配 | 大范围角色可能产生较多行 |
-| menu `(tenant_id,lower(effective route name))` unique | Vben route name 稳定解析 | 改名增加唯一性检查，历史重复需先人工分类 |
-| menu `(tenant_id,route_path) WHERE route_path IS NOT NULL` unique | tenant 内路由唯一定位 | 非空 path 写入增加唯一性检查 |
+| role `(tenant_id,role_name) WHERE deleted_at IS NULL` unique | live 角色名称唯一，允许墓碑后重建同名角色 | 查询必须始终带 live predicate |
+| menu `(tenant_id,lower(effective route name)) WHERE deleted_at IS NULL` unique | live Vben route name 稳定解析 | 改名增加唯一性检查，历史重复需先人工分类 |
+| menu `(tenant_id,route_path) WHERE route_path IS NOT NULL AND deleted_at IS NULL` unique | live tenant 路由唯一定位 | 非空 path 写入增加唯一性检查 |
 | audit `(tenant_id,occurred_at desc)` | 租户审计时间线 | 审计高写成本，需要分区门槛 |
 | audit `(trace_id)` | 事故追踪 | 额外写索引 |
 | outbox `(event_id)` unique | 消息幂等 | 每事件一次唯一性检查 |
@@ -124,7 +125,7 @@ Core `DimensionScope` 与 V10 `ck_iam_grant_dimension_mode_compatibility` 同时
 - 审计前后值使用受控 `JSONB`，必须脱敏；
 - OIDC 身份使用 `(idp_issuer, idp_subject)` 唯一，不能假设 `sub` 在不同 Issuer 间全局唯一；
 - 权限表不存金额，因此没有资金精度字段；
-- 不使用物理删除回收权限历史，业务表通过状态和审计表达变更。
+- 不使用物理删除回收权限历史。Membership 删除以 `TERMINATED` 表达；Role、Menu、Department 使用 `deleted_at` 墓碑并保留状态、关系和审计。运行时所有管理列表、选择器和有效授权 join 都必须显式排除墓碑，不能只依赖 `status=DISABLED`。
 
 ## 6. 历史兼容与迁移
 
@@ -140,13 +141,14 @@ Core `DimensionScope` 与 V10 `ck_iam_grant_dimension_mode_compatibility` 同时
 8. 影子比对新旧授权结果；
 9. 强制重新登录后灰度。
 
-升级既有库时，V9/V10 都采取拒绝式迁移：重复菜单路由和非法 dimension/mode 组合必须先由业务负责人分类并通过新的前向修复迁移处理，不能在约束迁移里自动选边或改权。
+升级既有库时，V9/V10 都采取拒绝式迁移：重复菜单路由和非法 dimension/mode 组合必须先由业务负责人分类并通过新的前向修复迁移处理，不能在约束迁移里自动选边或改权。V17 增加 Role/Menu/Department 墓碑和 local system-managed 标记，并把 live 角色/菜单唯一性改成 `WHERE deleted_at IS NULL` 的 partial index；迁移不删除或猜测归并历史业务行。
 
 ## 7. 回滚
 
 - 新系统未承接流量前可以删除新库重建；
 - 灰度后回滚只停止新会话和新授权写入，不把已产生的审计丢弃；
 - 权限变更使用事件和版本，旧应用只在兼容窗口读取旧模型；
+- 一旦 V17 后发生墓碑写入，旧二进制因不理解 `deleted_at` 不属于可写回滚路径；故障恢复只能停止新写、保留审计并前向修复或恢复整库快照；
 - 不通过反向修改旧系统权限表实现回滚；
 - 迁移脚本必须可重跑，并记录 source_id -> target_id 映射。
 

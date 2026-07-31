@@ -76,6 +76,7 @@ Admin CRUD 的 HTTP PEP 已接入 `DefaultAuthorizationService` 和版本化 Gra
 - `AuthenticationService`：用户名标准化、失败限流、恒定风格密码校验、会话签发。
 - `IdentityAdministrationService`：当前用户、权限码、可见菜单、用户/角色/部门/菜单管理的应用门面。
 - `RoleGrantAdministrationService`：原子 RoleGrant 写入、版本推进和缓存失效的业务边界。
+- `RoleConfigurationAdministrationService`：把普通角色字段、导航菜单和可表达 RoleGrant 作为一个版本化原子配置写入。
 - `IdentityModels`：应用层 command/query/result records，不是 HTTP DTO。
 
 ### `port`
@@ -191,11 +192,11 @@ SystemAdministrationController
 
 Controller 从可信 Session 构造 `AdministrationActor(membershipId, expectedUserId, expectedPermissionVersion, expectedSessionVersion)`，不接受浏览器提供这些字段。每个 Admin 写事务先锁定并校验当前 ACTIVE PLATFORM tenant，再以 `FOR UPDATE` 锁定 actor 对应的 Membership、User 和 Credential tuple；写入前重新确认 userId 归属关系、四态、受 V13 保证的可验证 BCrypt 凭证，以及 permissionVersion/sessionVersion。最后管理员判定还会在 Java 侧复用 `LoginCredentialPolicy`，即使数据库约束被旁路，非法 hash 也不能冒充备用管理员。任何主体状态或版本漂移都返回 401 `SESSION_INVALID`，注销会话并清 Cookie。
 
-主体/版本复核本身不等于完整权限判定。RoleGrant PUT 额外在锁定 tenant、actor、目标 role 和 ACTIVE system role 后，以单条 PostgreSQL `statement_timestamp()` 查询重新验证 `role:view` 与 `role:grant-update`，并拒绝非 NORMAL/SAME_TENANT_ONLY、非精确 `TENANT/TENANT_ALL`、带 target、step-up 或 approval 的入口授权；双连接测试证明等待锁期间过期会 fail closed。User、Role、Menu、Department 其他管理写接口尚未执行同等权限重验，有限 `valid_until` 的同类 TOCTOU 对这些接口仍是生产 **NO-GO / Required**；过渡期不得给这些写权限设置有限有效期。
+主体/版本复核本身不等于完整权限判定。RoleGrant PUT 额外在锁定 tenant、actor、目标 role 和 ACTIVE system role 后，以单条 PostgreSQL `statement_timestamp()` 查询重新验证 `role:view` 与 `role:grant-update`；角色 configuration PUT 在同一边界精确重验 `role:view/role:update/menu:view/role:grant-update`。两者都拒绝非 NORMAL/SAME_TENANT_ONLY、非精确 `TENANT/TENANT_ALL`、带 target、step-up 或 approval 的入口授权；双连接测试证明等待锁期间过期会 fail closed。User、普通 Role、Menu、Department 其他写接口尚未执行同等权限重验，有限 `valid_until` 的同类 TOCTOU 对这些接口仍是生产 **NO-GO / Required**；过渡期不得给这些写权限设置有限有效期。
 
-创建用户是“全局 Identity + 当前 Tenant Membership”用例；新 User 固定为 `PENDING_ACTIVATION`，Credential 固定为 `DISABLED` 且无 password hash，Membership 只按请求预配置。API 用 `identityStatus` 与 Membership `status` 分开表达；当前没有生产邀请/密码设置/激活流程。更新用户只允许修改当前 Membership 的部门、角色、状态和 `row_version`，不会修改全局 username、display name、remark 或 credential。用户角色全集先校验同租户存在性，再由基于 added/removed diff 的策略判断可分配性：新分配只接受 ACTIVE、assignable、非 system 角色；已有禁用普通角色可保留，只有活动系统管理员可将其移除，非系统管理员即使自身持有同一禁用角色也不能获得清理权；受保护角色不能通过普通流程增删。用户更新、状态更新和逻辑删除都使用 membership `row_version` 乐观锁。角色菜单变化推进相关 membership 的 `permission_version`。
+创建用户是“全局 Identity + 当前 Tenant Membership”用例；新 User 固定为 `PENDING_ACTIVATION`，Credential 固定为 `DISABLED` 且无 password hash，Membership 只按请求预配置。API 用 `identityStatus` 与 Membership `status` 分开表达；当前没有生产邀请/密码设置/激活流程。普通管理员更新只修改 Membership；活动 PLATFORM 系统管理员可在同一事务中额外修改全局 username、display name、remark 和本地 Credential username，使用 user/identity/credential 三个版本防止覆盖。local issuer 的 `idp_subject` 随用户名同步，外部 IdP subject 拒绝本地改写，用户名改变推进该 User 全部未终止 Membership 的 sessionVersion。用户角色全集先校验同租户存在性，再由 added/removed diff 策略判断可分配性：新分配只接受 ACTIVE、未删除、assignable、非 system 角色；已有禁用普通角色可保留，只有活动系统管理员可将其移除；受保护角色不能通过普通流程增删。
 
-Role 普通 update/status/delete 在 tenant/actor 锁之后以 `FOR UPDATE` 锁定目标角色，只允许 `system_role=false AND assignable=true`；受保护角色统一返回 422 `IAM_ROLE_NOT_ASSIGNABLE`。RoleGrant GET 对 system 或 non-assignable role 返回 `editable=false`，PUT 在锁定目标角色后拒绝写入。Role create/update 的 `menuIds` 在同一 tenant 写事务中锁定菜单行，只接受当前 tenant 的 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK；BUTTON 或 DISABLED 菜单返回 409，缺失或跨 tenant ID 返回 404。角色管理读模型只回显 ACTIVE 可路由 menuIds，历史非法关系在第一次显式正常更新时随全集替换惰性清理；客户端直接提交非法 ID 仍严格拒绝。前端过滤只是交互，不是完整性边界。
+Role 普通 update/status/delete 在 tenant/actor 锁之后以 `FOR UPDATE` 锁定目标角色，只允许 `system_role=false AND assignable=true`；受保护角色统一返回 422 `IAM_ROLE_NOT_ASSIGNABLE`。角色编辑使用 configuration PUT，在一个事务中锁定一次目标角色并替换字段、ACTIVE 可路由 `role_menu` 和可表达 RoleGrant，只递增一次 role/member 版本并写一组 audit/outbox。RoleGrant GET 对 system/non-assignable、墓碑或含不可表达 Grant 的角色拒绝编辑。角色软删除设置 `status=DISABLED/deleted_at`，显式清除 membership_role 使授权立即失效，保留 role_menu/role_grant 历史；所有角色列表和有效授权 join 都排除墓碑。禁用但未删除角色保留在自身管理列表，依赖选择器只接收 ACTIVE、未删除记录。
 
 Role、Department、Menu 的管理读模型显式返回 `rowVersion`；PUT/PATCH body 必须携带 `expectedVersion`，DELETE 通过 query 参数携带。User DELETE 同样要求把列表的 `userVersion` 作为 `expectedVersion`。Repository 的最终 jOOQ UPDATE 在同一个 WHERE 中比较 tenant、资源 ID 与 rowVersion，并原子递增版本。0 row 后在 tenant 写锁事务内区分：资源不存在返回 404 `RESOURCE_NOT_FOUND`，资源仍存在但版本过期返回 40902 `OPTIMISTIC_LOCK_CONFLICT`。树依赖、唯一约束等业务/数据库冲突单独映射为 40901 `DATA_CONFLICT`，不能复用乐观锁异常。
 
@@ -271,11 +272,15 @@ V14 建立 19 个现代管理权限和 `role:grant-update` 管理面，并把可
 
 V16 是只增不改的前向守卫：已执行的 V14/V15 不回写；V16 精确核验 21 条管理 Permission 的固定 ID、code/resource/action、风险、维度、step-up、approval、跨租户模式和状态，额外业务 Permission 不受影响。目录漂移会原子阻断升级，不自动修复权限事实。V15 已提交且可能已经执行，因此 V16 只能让停在 V15 的漂移库无法升级，并由 Schema readiness guard 阻止应用启动；它不能让已成功执行的 V15 事后回滚。
 
+### V17 管理资源墓碑
+
+V17 为 `iam_role/iam_menu/iam_department` 增加 `deleted_at`，为菜单和部门增加 `system_managed`，并把角色 name、菜单 canonical name/path 的唯一索引改成只约束 `deleted_at IS NULL` 的 live rows。迁移不删除历史业务行；local bootstrap 只对精确预置 ID 设置 system-managed 标记。旧二进制不理解 tombstone，因此写入墓碑后的数据库只能前向恢复，不能依赖回滚旧应用继续写入。
+
 ### 迁移纪律
 
 - 所有已执行版本不可修改 checksum；
 - 结构和数据修正新增 V4+；
-- 同时测试空库从 V1 全量迁移、V2/V3 序列升级，以及 V8 fixture 隔离的成功与拒绝路径；V9-V13 遇到历史重复路由、非法授权组合、不安全外链、跨租户写 action 或非法 BCrypt 摘要必须拒绝升级；V14/V15 还要覆盖简单和带有效期/多维度/target 的旧 Grant 等价展开、版本、审计和 Outbox，V16 覆盖目录元数据漂移的失败关闭，禁止静默丢权或自动修复未知权限事实；
+- 同时测试空库从 V1 全量迁移、V2/V3 序列升级，以及 V8 fixture 隔离的成功与拒绝路径；V9-V13 遇到历史重复路由、非法授权组合、不安全外链、跨租户写 action 或非法 BCrypt 摘要必须拒绝升级；V14/V15 还要覆盖简单和带有效期/多维度/target 的旧 Grant 等价展开、版本、审计和 Outbox，V16 覆盖目录元数据漂移的失败关闭，V17 覆盖墓碑列、live-only 唯一性和旧数据保留，禁止静默丢权或自动修复未知权限事实；
 - 密码和固定身份初始化只允许 local profile；已有库先按 [V8 fixture 隔离迁移手册](../../runbooks/iam-v8-fixture-isolation.md) 盘点。无关真实数据可原样保留，只有落入预留 footprint 或依赖 tenant `1` 的历史数据才需要单独的前向迁移；
 - 菜单 component 和 i18n key 属于跨端协议，迁移前要有契约校验。
 
@@ -352,13 +357,13 @@ cd backend
 
 - Admin API 已有默认拒绝的 method/path 权限注册表和完整授权服务，但仍是手工登记；新增 endpoint 必须同步策略与回归测试。
 - Admin CRUD 使用服务端构造的 tenant 资源上下文；跨租户 Party/Relationship、订单授权视图和列表 DataScopePlan 尚未接入。
-- Admin 写事务会锁定 tenant 和 actor tuple 并复核主体状态、密码可用性及 session/permission 两个版本；RoleGrant PUT 还会在锁后用数据库时间重验两项入口权限。其他管理写接口尚未关闭 finite `valid_until` 的同类 TOCTOU，过渡期间禁止给这些权限配置有限过期时间。
+- Admin 写事务会锁定 tenant 和 actor tuple 并复核主体状态、密码可用性及 session/permission 两个版本；RoleGrant PUT 和角色 configuration PUT 还会在锁后用数据库时间分别重验两项/四项入口权限。其他管理写接口尚未关闭 finite `valid_until` 的同类 TOCTOU，过渡期间禁止给这些权限配置有限过期时间。
 - `cross_tenant_mode` 已落库，但当前没有权限被标为 `RELATED_PARTY_READ`，也没有关系适配器，因此现有运行时不会开放跨租户访问。
 - menu component 由前后端白名单与契约测试共同约束，发布新组件时仍需同步两端清单。
 - `meta_json` 已有容器、深度、key/string 和总 value 硬上限，外链字段也按菜单类型隔离；新增字段仍必须先定义跨端语义和测试，不得把任意 JSON 当成无约束扩展口。
 - `SystemAdministrationController` 同时承担多资源 DTO/映射，继续扩展会形成浅而宽的入口层。
 - Role、Department、Menu 与 User 管理写入已统一执行 optimistic version 契约；Local fixture 仍不是生产 provisioning；命中 V8 预留 footprint 冲突的历史库需要人工前向迁移，无关业务数据不受 V8 影响。
-- 角色 `menuIds` 只是导航/展示，不会生成 RoleGrant；RoleGrant 写 API 在生产默认受 legacy cutover 闸门禁用，N-1 清退、UI、正式审批和演练完成前不得打开；Outbox relay、外部 IdP、MFA/step-up 时效、可信审批证据、关系数据权限、审计 before/after/拒绝/登录失败和生产级可观测性仍是明确阻断项。
+- 角色 `menuIds` 只是导航/展示，BUTTON authCode 只是目录展示绑定；统一角色配置 UI/API 仍分别写 `role_menu` 与 RoleGrant，不从任一方推导另一方。RoleGrant 写在生产默认受 legacy cutover 闸门禁用，N-1 清退、正式审批和演练完成前不得打开；Outbox relay、外部 IdP、MFA/step-up 时效、可信审批证据、关系数据权限、审计拒绝/登录失败和生产级可观测性仍是明确阻断项。
 - 资金权限核心已有模型和测试，但不得在完成 [迁移计划](../permission/09-migration-plan.md) 的门禁前直接接入真实资金写路径。
 
 ## 11. 改动检查清单
