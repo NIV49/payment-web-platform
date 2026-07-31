@@ -36,7 +36,7 @@ export function useFormSchema(): VbenFormSchema[] {
       component: 'Input',
       fieldName: 'menuIds',
       formItemClass: 'items-start',
-      label: $t('system.role.visibleMenus'),
+      label: $t('system.role.navigationMenus'),
       modelPropName: 'modelValue',
     },
   ];
@@ -78,6 +78,9 @@ export function useGridFormSchema(): VbenFormSchema[] {
 export function useColumns<T = SystemRoleApi.SystemRole>(
   onActionClick: OnActionClickFn<T>,
   onStatusChange?: (newStatus: any, row: T) => PromiseLike<boolean | undefined>,
+  canMutate: (row: T) => boolean = () => true,
+  canEdit: (row: T) => boolean = () => true,
+  canGrant: (row: T) => boolean = () => true,
 ): VxeTableGridColumns {
   return [
     {
@@ -97,6 +100,9 @@ export function useColumns<T = SystemRoleApi.SystemRole>(
           beforeChange: onStatusChange,
         },
         name: onStatusChange ? 'CellSwitch' : 'CellTag',
+        props: {
+          disabled: (row: T) => !canMutate(row),
+        },
       },
       field: 'status',
       title: $t('system.role.status'),
@@ -122,14 +128,28 @@ export function useColumns<T = SystemRoleApi.SystemRole>(
         },
         name: 'CellOperation',
         options: [
-          { auth: PERMISSION_CODES.roleUpdate, code: 'edit' },
-          { auth: PERMISSION_CODES.roleDelete, code: 'delete' },
+          {
+            auth: PERMISSION_CODES.roleGrantUpdate,
+            code: 'grants',
+            show: canGrant,
+            text: $t('system.role.functionalPermissions'),
+          },
+          {
+            auth: PERMISSION_CODES.roleUpdate,
+            code: 'edit',
+            show: canEdit,
+          },
+          {
+            auth: PERMISSION_CODES.roleDelete,
+            code: 'delete',
+            show: canMutate,
+          },
         ],
       },
       field: 'operation',
       fixed: 'right',
       title: $t('system.role.operation'),
-      width: 130,
+      width: 240,
     },
   ];
 }

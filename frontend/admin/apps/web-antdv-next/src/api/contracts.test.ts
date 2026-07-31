@@ -1,6 +1,7 @@
 import type { SystemDeptApi } from './system/dept';
 import type { SystemMenuApi } from './system/menu';
 import type { SystemRoleApi } from './system/role';
+import type { IamRoleGrantApi } from './system/role-grant';
 import type { PageResult } from './system/types';
 import type { SystemUserApi } from './system/user';
 
@@ -93,10 +94,15 @@ describe('admin API contracts', () => {
       'role:create',
       'role:update',
       'role:delete',
+      'role:grant-update',
       'menu:view',
-      'menu:manage',
+      'menu:create',
+      'menu:update',
+      'menu:delete',
       'department:view',
-      'department:manage',
+      'department:create',
+      'department:update',
+      'department:delete',
     ]);
   });
 
@@ -114,7 +120,9 @@ describe('admin API contracts', () => {
       total: number;
     }>();
     expectTypeOf<SystemRoleApi.SystemRole>().toMatchTypeOf<{
+      assignable: boolean;
       rowVersion: number;
+      systemRole: boolean;
     }>();
     expectTypeOf<SystemDeptApi.SystemDept>().toMatchTypeOf<{
       rowVersion: number;
@@ -155,6 +163,19 @@ describe('admin API contracts', () => {
   it('uses menuIds rather than ambiguous permissions on roles', () => {
     expectTypeOf<SystemRoleApi.SystemRole>().toMatchTypeOf<{
       menuIds: string[];
+    }>();
+  });
+
+  it('keeps role grants separate from navigation menu ids', () => {
+    expectTypeOf<IamRoleGrantApi.ReplaceRoleGrantsParams>().toEqualTypeOf<{
+      expectedVersion: number;
+      grants: IamRoleGrantApi.GrantIntent[];
+      reason: string;
+    }>();
+    expectTypeOf<IamRoleGrantApi.GrantIntent>().toMatchTypeOf<{
+      dimensions: IamRoleGrantApi.GrantDimension[];
+      grantKey: string;
+      permissionCode: string;
     }>();
   });
 

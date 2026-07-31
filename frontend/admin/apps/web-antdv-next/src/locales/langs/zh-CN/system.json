@@ -47,7 +47,10 @@
     "parentDept": "上级部门",
     "permission": {
       "view": "查看部门",
-      "manage": "管理部门"
+      "create": "新增部门",
+      "update": "修改部门",
+      "delete": "删除部门",
+      "manage": "管理部门（兼容）"
     },
     "remark": "备注",
     "status": "状态",
@@ -90,7 +93,10 @@
     "parent": "上级菜单",
     "permission": {
       "view": "查看菜单",
-      "manage": "管理菜单"
+      "create": "新增菜单",
+      "update": "修改菜单",
+      "delete": "删除菜单",
+      "manage": "管理菜单（兼容）"
     },
     "path": "路由地址",
     "status": "状态",
@@ -116,10 +122,23 @@
       "view": "查看角色",
       "create": "新增角色",
       "update": "修改角色",
-      "delete": "删除角色"
+      "delete": "删除角色",
+      "grantUpdate": "配置功能权限"
     },
-    "visibleMenus": "可见菜单",
+    "navigationMenus": "导航菜单",
     "navigationOnlyWarningTitle": "这里只配置导航可见性",
-    "navigationOnlyWarningDescription": "选择菜单只控制导航和页面可见性，不会授予 API 权限。RoleGrant 管理闭环完成前，新建角色不能视为生产授权完成态。"
+    "navigationOnlyWarningDescription": "选择菜单只控制导航和页面可见性；按钮和 API 授权请使用“功能权限”。",
+    "functionalPermissions": "功能权限",
+    "grantDrawerTitle": "配置「{0}」的功能权限",
+    "grantLoadFailed": "功能权限加载失败",
+    "grantReadOnly": "该角色包含当前页面不能安全修改的授权，已切换为只读。",
+    "selectedGrantCount": "已选择 {0} 项",
+    "clearGrants": "清空全部",
+    "clearGrantsConfirm": "确认清空该角色的全部功能权限吗？保存后立即生效。",
+    "grantReason": "变更原因",
+    "grantReasonPlaceholder": "请输入本次权限变更原因",
+    "grantReasonRequired": "请输入权限变更原因",
+    "grantSaveSuccess": "功能权限已保存",
+    "retry": "重试"
   }
 }

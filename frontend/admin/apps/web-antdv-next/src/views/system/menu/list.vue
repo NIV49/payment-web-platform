@@ -90,6 +90,7 @@ function onCreate() {
   formDrawerApi.setData({}).open();
 }
 function onAppend(row: SystemMenuApi.SystemMenu) {
+  if (row.type === 'button') return;
   formDrawerApi.setData({ pid: row.id }).open();
 }
 
@@ -119,7 +120,7 @@ function onDelete(row: SystemMenuApi.SystemMenu) {
     <Grid :table-title="$t('system.menu.list')">
       <template #toolbar-tools>
         <Button
-          v-access:code="PERMISSION_CODES.menuManage"
+          v-access:code="PERMISSION_CODES.menuCreate"
           type="primary"
           @click="onCreate"
         >

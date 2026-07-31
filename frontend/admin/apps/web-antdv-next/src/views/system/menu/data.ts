@@ -4,6 +4,8 @@ import type { SystemMenuApi } from '#/api/system/menu';
 import { PERMISSION_CODES } from '#/api';
 import { $t } from '#/locales';
 
+import { canAppendMenuChild } from './permission-contract';
+
 export function getMenuTypeOptions() {
   return [
     {
@@ -92,16 +94,17 @@ export function useColumns(
         name: 'CellOperation',
         options: [
           {
-            auth: PERMISSION_CODES.menuManage,
+            auth: PERMISSION_CODES.menuCreate,
             code: 'append',
+            show: canAppendMenuChild,
             text: $t('system.menu.addChild'),
           },
           {
-            auth: PERMISSION_CODES.menuManage,
+            auth: PERMISSION_CODES.menuUpdate,
             code: 'edit',
           },
           {
-            auth: PERMISSION_CODES.menuManage,
+            auth: PERMISSION_CODES.menuDelete,
             code: 'delete',
           },
         ],

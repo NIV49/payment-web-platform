@@ -5,6 +5,9 @@ import type {
 } from '#/adapter/vxe-table';
 import type { SystemRoleApi } from '#/api';
 
+import { computed } from 'vue';
+
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -21,21 +24,54 @@ import { isOptimisticLockConflict } from '#/api/error-contract';
 import { $t } from '#/locales';
 
 import { useColumns, useGridFormSchema } from './data';
+import {
+  canConfigureRoleGrants,
+  canMutateRole,
+  ROLE_LIST_SEARCH_BEHAVIOR,
+} from './grant-contract';
 import Form from './modules/form.vue';
+import Grants from './modules/grants.vue';
+
+const { hasAccessByCodes } = useAccess();
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
   destroyOnClose: true,
 });
 
+const [GrantDrawer, grantDrawerApi] = useVbenDrawer({
+  connectedComponent: Grants,
+  destroyOnClose: true,
+});
+
+const canCreateRole = computed(
+  () =>
+    hasAccessByCodes([PERMISSION_CODES.roleCreate]) &&
+    hasAccessByCodes([PERMISSION_CODES.menuView]),
+);
+
+function canEditRole(row: SystemRoleApi.SystemRole) {
+  return (
+    canMutateRole(row) &&
+    hasAccessByCodes([PERMISSION_CODES.roleUpdate]) &&
+    hasAccessByCodes([PERMISSION_CODES.menuView])
+  );
+}
+
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
     fieldMappingTime: [['createTime', ['startTime', 'endTime']]],
     schema: useGridFormSchema(),
-    submitOnChange: true,
+    submitOnChange: ROLE_LIST_SEARCH_BEHAVIOR.submitOnChange,
   },
   gridOptions: {
-    columns: useColumns(onActionClick, onStatusChange),
+    columns: useColumns(
+      onActionClick,
+      onStatusChange,
+      canMutateRole,
+      canEditRole,
+      (row) => canConfigureRoleGrants(row, hasAccessByCodes),
+    ),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -73,6 +109,10 @@ function onActionClick(e: OnActionClickParams<SystemRoleApi.SystemRole>) {
       onEdit(e.row);
       break;
     }
+    case 'grants': {
+      onGrant(e.row);
+      break;
+    }
   }
 }
 
@@ -106,6 +146,7 @@ async function onStatusChange(
   newStatus: number,
   row: SystemRoleApi.SystemRole,
 ) {
+  if (!canMutateRole(row)) return false;
   try {
     const statusLabel = $t(
       newStatus === 1 ? 'common.enabled' : 'common.disabled',
@@ -128,10 +169,17 @@ async function onStatusChange(
 }
 
 function onEdit(row: SystemRoleApi.SystemRole) {
+  if (!canEditRole(row)) return;
   formDrawerApi.setData(row).open();
 }
 
+function onGrant(row: SystemRoleApi.SystemRole) {
+  if (!canConfigureRoleGrants(row, hasAccessByCodes)) return;
+  grantDrawerApi.setData(row).open();
+}
+
 function onDelete(row: SystemRoleApi.SystemRole) {
+  if (!canMutateRole(row)) return;
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.name]),
     duration: 0,
@@ -162,13 +210,10 @@ function onCreate() {
 <template>
   <Page auto-content-height>
     <FormDrawer @success="onRefresh" />
+    <GrantDrawer @success="onRefresh" />
     <Grid :table-title="$t('system.role.list')">
       <template #toolbar-tools>
-        <Button
-          v-access:code="PERMISSION_CODES.roleCreate"
-          type="primary"
-          @click="onCreate"
-        >
+        <Button v-if="canCreateRole" type="primary" @click="onCreate">
           <Plus class="size-5" />
           {{ $t('ui.actionTitle.create', [$t('system.role.name')]) }}
         </Button>

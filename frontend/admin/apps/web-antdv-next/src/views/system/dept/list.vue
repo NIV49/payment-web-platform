@@ -137,7 +137,7 @@ function refreshGrid() {
     <Grid :table-title="$t('system.dept.list')">
       <template #toolbar-tools>
         <Button
-          v-access:code="PERMISSION_CODES.departmentManage"
+          v-access:code="PERMISSION_CODES.departmentCreate"
           type="primary"
           @click="onCreate"
         >

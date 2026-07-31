@@ -123,7 +123,9 @@ setupVbenVxeTable({
           ...props,
           checked: row[column.field],
           disabled:
-            props?.disabled ||
+            (isFunction(props?.disabled)
+              ? props.disabled(row)
+              : props?.disabled) ||
             (authCodes.length > 0 && !hasAccessByCodes(authCodes)),
           loading: row[loadingKey] ?? false,
           'onUpdate:checked': onChange,

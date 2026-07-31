@@ -113,16 +113,16 @@ export function useColumns(
         name: 'CellOperation',
         options: [
           {
-            auth: PERMISSION_CODES.departmentManage,
+            auth: PERMISSION_CODES.departmentCreate,
             code: 'append',
             text: $t('system.dept.addChild'),
           },
           {
-            auth: PERMISSION_CODES.departmentManage,
+            auth: PERMISSION_CODES.departmentUpdate,
             code: 'edit',
           },
           {
-            auth: PERMISSION_CODES.departmentManage,
+            auth: PERMISSION_CODES.departmentDelete,
             code: 'delete', // 默认的删除按钮
             disabled: (row: SystemDeptApi.SystemDept) => {
               return !!(row.children && row.children.length > 0);

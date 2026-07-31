@@ -9,10 +9,15 @@ export const PERMISSION_CODES = {
   roleCreate: 'role:create',
   roleUpdate: 'role:update',
   roleDelete: 'role:delete',
+  roleGrantUpdate: 'role:grant-update',
   menuView: 'menu:view',
-  menuManage: 'menu:manage',
+  menuCreate: 'menu:create',
+  menuUpdate: 'menu:update',
+  menuDelete: 'menu:delete',
   departmentView: 'department:view',
-  departmentManage: 'department:manage',
+  departmentCreate: 'department:create',
+  departmentUpdate: 'department:update',
+  departmentDelete: 'department:delete',
 } as const;
 
 export type PermissionCode =

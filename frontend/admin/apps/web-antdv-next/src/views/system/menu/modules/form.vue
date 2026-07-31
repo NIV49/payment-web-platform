@@ -32,6 +32,7 @@ import { $t } from '#/locales';
 import { componentKeys } from '#/router/routes';
 
 import { getMenuTypeOptions } from '../data';
+import { filterMenuParentOptions } from '../permission-contract';
 
 const emit = defineEmits<{
   success: [];
@@ -78,7 +79,8 @@ const schema: VbenFormSchema[] = [
   {
     component: 'ApiTreeSelect',
     componentProps: {
-      api: getMenuList,
+      api: async () =>
+        filterMenuParentOptions(await getMenuList(), formData.value?.id),
       class: 'w-full',
       filterTreeNode(input: string, node: Recordable<any>) {
         if (!input || input.length === 0) {

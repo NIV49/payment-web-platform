@@ -17,6 +17,7 @@ import { createRole, updateRole } from '#/api/system/role';
 import { $t } from '#/locales';
 
 import { useFormSchema } from '../data';
+import { mergeRoleNavigationMenuIds } from '../grant-contract';
 import { filterNavigableMenuTree } from '../menu-tree';
 
 const emits = defineEmits(['success']);
@@ -29,6 +30,8 @@ const [Form, formApi] = useVbenForm({
 });
 
 const menuOptions = ref<DataNode[]>([]);
+const buttonMenuIds = ref<Set<string>>(new Set());
+const preservedButtonMenuIds = ref<string[]>([]);
 const loadingMenuOptions = ref(false);
 
 const id = ref();
@@ -37,6 +40,10 @@ const [Drawer, drawerApi] = useVbenDrawer({
     const { valid } = await formApi.validate();
     if (!valid) return;
     const values = await formApi.getValues<SystemRoleApi.RoleSaveParams>();
+    values.menuIds = mergeRoleNavigationMenuIds(
+      values.menuIds,
+      preservedButtonMenuIds.value,
+    );
     drawerApi.lock();
     const currentRole = formData.value;
     let request;
@@ -85,8 +92,12 @@ const [Drawer, drawerApi] = useVbenDrawer({
       // Wait for Vue to flush DOM updates (form fields mounted)
       await nextTick();
       if (data) {
+        preservedButtonMenuIds.value = data.menuIds.filter((menuId) =>
+          buttonMenuIds.value.has(menuId),
+        );
         formApi.setValues({ ...data, menuIds: data.menuIds ?? [] });
       } else {
+        preservedButtonMenuIds.value = [];
         formApi.setValues({ menuIds: [], status: 1 });
       }
     }
@@ -97,10 +108,24 @@ async function loadMenuOptions() {
   loadingMenuOptions.value = true;
   try {
     const res = await getMenuList();
+    buttonMenuIds.value = collectButtonMenuIds(res);
     menuOptions.value = filterNavigableMenuTree(res) as unknown as DataNode[];
   } finally {
     loadingMenuOptions.value = false;
   }
+}
+
+function collectButtonMenuIds(
+  menus: readonly import('#/api/system/menu').SystemMenuApi.SystemMenu[],
+) {
+  const ids = new Set<string>();
+  for (const menu of menus) {
+    if (menu.type === 'button') ids.add(menu.id);
+    if (menu.children) {
+      for (const id of collectButtonMenuIds(menu.children)) ids.add(id);
+    }
+  }
+  return ids;
 }
 
 const getDrawerTitle = computed(() => {
@@ -115,7 +140,7 @@ const getDrawerTitle = computed(() => {
       class="mb-4"
       show-icon
       :title="$t('system.role.navigationOnlyWarningTitle')"
-      type="warning"
+      type="info"
     >
       <template #description>
         {{ $t('system.role.navigationOnlyWarningDescription') }}

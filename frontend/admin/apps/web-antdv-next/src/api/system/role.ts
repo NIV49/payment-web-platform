@@ -6,6 +6,7 @@ import { requestClient } from '#/api/request';
 
 export namespace SystemRoleApi {
   export interface SystemRole {
+    assignable: boolean;
     createTime?: string;
     id: string;
     menuIds: string[];
@@ -13,11 +14,12 @@ export namespace SystemRoleApi {
     remark?: string;
     rowVersion: number;
     status: 0 | 1;
+    systemRole: boolean;
   }
 
   export type RoleSaveParams = Omit<
     SystemRole,
-    'createTime' | 'id' | 'rowVersion'
+    'assignable' | 'createTime' | 'id' | 'rowVersion' | 'systemRole'
   >;
 
   export type RoleUpdateParams = RoleSaveParams & {
