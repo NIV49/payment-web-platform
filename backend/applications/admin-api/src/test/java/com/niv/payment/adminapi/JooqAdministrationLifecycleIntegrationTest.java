@@ -60,6 +60,8 @@ class JooqAdministrationLifecycleIntegrationTest {
     private static final long OTHER_MEMBERSHIP_ID = 9_320_301L;
     private static final long TERMINATED_MEMBERSHIP_ID = 9_330_301L;
     private static final long CONFLICT_USER_ID = 9_310_400L;
+    private static final long EXTERNAL_USER_ID = 9_310_410L;
+    private static final long EXTERNAL_MEMBERSHIP_ID = 9_310_411L;
     private static final AdministrationActor SYSTEM_ACTOR =
         new AdministrationActor(ACTOR_MEMBERSHIP_ID, ACTOR_USER_ID, 0L, 0L);
     private static final AdministrationActor PLAIN_ACTOR =
@@ -310,6 +312,28 @@ class JooqAdministrationLifecycleIntegrationTest {
                 new IdentityModels.MembershipUpdateCommand(
                     "lifecycle-conflict", currentDisplayName(), ROOT_DEPARTMENT_ID, List.of(), 1,
                     membershipVersion, identityVersion, credentialVersion, currentRemark())));
+    }
+
+    @Test
+    void externalIdentityUsernameCannotBeRewrittenByLocalAdministration() {
+        seedUser(EXTERNAL_USER_ID, "external-subject", "External User");
+        dsl.update(IAM_USER).set(IAM_USER.IDP_ISSUER, "https://idp.example.test")
+            .where(IAM_USER.ID.eq(EXTERNAL_USER_ID)).execute();
+        seedMembership(EXTERNAL_MEMBERSHIP_ID, TENANT_ID, EXTERNAL_USER_ID,
+            ROOT_DEPARTMENT_ID, "ACTIVE");
+
+        assertThrows(IdentityAdministrationService.DataConflictException.class,
+            () -> users.updateUser(TENANT_ID, SYSTEM_ACTOR, EXTERNAL_USER_ID,
+                new IdentityModels.MembershipUpdateCommand(
+                    "rewritten-subject", "External User", ROOT_DEPARTMENT_ID, List.of(), 1,
+                    0L, 0L, 0L, null)));
+
+        assertEquals("external-subject", dsl.select(IAM_USER.IDP_SUBJECT).from(IAM_USER)
+            .where(IAM_USER.ID.eq(EXTERNAL_USER_ID)).fetchSingle(IAM_USER.IDP_SUBJECT));
+        assertEquals("external-subject", dsl.select(IAM_AUTHENTICATION_CREDENTIAL.USERNAME)
+            .from(IAM_AUTHENTICATION_CREDENTIAL)
+            .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(EXTERNAL_USER_ID))
+            .fetchSingle(IAM_AUTHENTICATION_CREDENTIAL.USERNAME));
     }
 
     private static void seedEditableTarget() {

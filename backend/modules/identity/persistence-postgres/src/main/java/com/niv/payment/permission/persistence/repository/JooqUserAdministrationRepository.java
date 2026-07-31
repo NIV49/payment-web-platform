@@ -153,6 +153,10 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
                 throw new SecurityException("Platform system administrator is required for identity changes");
             }
             if (usernameChanged) {
+                if (!"local".equals(target.get(IAM_USER.IDP_ISSUER))) {
+                    throw new IdentityAdministrationService.DataConflictException(
+                        "External identity username cannot be edited");
+                }
                 requireUniqueUsername(userId, target.get(IAM_USER.IDP_ISSUER), username);
             }
         }
@@ -214,6 +218,9 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
                 .execute();
         }
         replaceRoles(tenantId, membershipId, command.roleIds(), actor.membershipId());
+        if (userChanged) {
+            support.audit(tenantId, actor.membershipId(), "USER", userId, "UPDATE", "user:update");
+        }
         support.audit(tenantId, actor.membershipId(), "MEMBERSHIP", membershipId, "UPDATE", "user:update");
     }
 
