@@ -10,6 +10,11 @@ interface DepartmentTreeSelection {
   value?: unknown;
 }
 
+interface UserDepartmentOption extends SystemDeptApi.SystemDept {
+  children?: UserDepartmentOption[];
+  disabled?: boolean;
+}
+
 const USER_LIST_SEARCH_BEHAVIOR = {
   submitOnChange: false,
 } as const;
@@ -64,6 +69,54 @@ function cloneDepartmentTree(
   }));
 }
 
+function filterActiveDepartmentTree(
+  departments: readonly SystemDeptApi.SystemDept[],
+): SystemDeptApi.SystemDept[] {
+  return departments
+    .filter((department) => department.status === 1 && !department.deletedAt)
+    .map((department) => ({
+      ...department,
+      ...(department.children
+        ? { children: filterActiveDepartmentTree(department.children) }
+        : {}),
+    }));
+}
+
+function buildUserDepartmentOptions(
+  departments: readonly SystemDeptApi.SystemDept[],
+  currentDepartmentId?: string,
+): UserDepartmentOption[] {
+  const visit = (
+    nodes: readonly SystemDeptApi.SystemDept[],
+    ancestorsActive: boolean,
+  ): Array<{ containsCurrent: boolean; option: UserDepartmentOption }> =>
+    nodes.flatMap((department) => {
+      if (department.deletedAt) return [];
+
+      const active = ancestorsActive && department.status === 1;
+      const children = visit(department.children ?? [], active);
+      const containsCurrent =
+        department.id === currentDepartmentId ||
+        children.some((child) => child.containsCurrent);
+      if (!active && !containsCurrent) return [];
+
+      return [
+        {
+          containsCurrent,
+          option: {
+            ...department,
+            ...(active ? {} : { disabled: true }),
+            ...(children.length > 0
+              ? { children: children.map(({ option }) => option) }
+              : {}),
+          },
+        },
+      ];
+    });
+
+  return visit(departments, true).map(({ option }) => option);
+}
+
 function filterDepartmentTree(
   departments: readonly SystemDeptApi.SystemDept[],
   keyword: string,
@@ -88,13 +141,17 @@ async function loadDepartmentTree(
   loader: () => Promise<SystemDeptApi.SystemDept[]>,
 ) {
   try {
-    return { departments: await loader(), error: undefined };
+    return {
+      departments: filterActiveDepartmentTree(await loader()),
+      error: undefined,
+    };
   } catch (error) {
     return { departments: [] as SystemDeptApi.SystemDept[], error };
   }
 }
 
 export {
+  buildUserDepartmentOptions,
   buildUserListQuery,
   filterDepartmentTree,
   loadDepartmentTree,

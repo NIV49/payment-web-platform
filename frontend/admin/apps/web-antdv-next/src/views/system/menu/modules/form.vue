@@ -32,7 +32,7 @@ import { $t } from '#/locales';
 import { componentKeys } from '#/router/routes';
 
 import { getMenuTypeOptions } from '../data';
-import { filterMenuParentOptions } from '../permission-contract';
+import { canManageMenu, filterMenuParentOptions } from '../permission-contract';
 
 const emit = defineEmits<{
   success: [];
@@ -78,9 +78,9 @@ const schema: VbenFormSchema[] = [
   },
   {
     component: 'ApiTreeSelect',
-    componentProps: {
-      api: async () =>
-        filterMenuParentOptions(await getMenuList(), formData.value?.id),
+    componentProps: () => ({
+      api: async (params?: { excludedMenuId?: string }) =>
+        filterMenuParentOptions(await getMenuList(), params?.excludedMenuId),
       class: 'w-full',
       filterTreeNode(input: string, node: Recordable<any>) {
         if (!input || input.length === 0) {
@@ -92,11 +92,12 @@ const schema: VbenFormSchema[] = [
       },
       getPopupContainer,
       labelField: 'meta.title',
+      params: { excludedMenuId: formData.value?.id },
       showSearch: true,
       treeDefaultExpandAll: true,
       valueField: 'id',
       childrenField: 'children',
-    },
+    }),
     fieldName: 'pid',
     label: $t('system.menu.parent'),
     renderComponentContent() {
@@ -499,6 +500,7 @@ const [Drawer, drawerApi] = useVbenDrawer({
 });
 
 async function onSubmit() {
+  if (formData.value?.id && !canManageMenu(formData.value)) return;
   const { valid } = await formApi.validate();
   if (valid) {
     drawerApi.lock();

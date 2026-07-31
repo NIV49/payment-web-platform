@@ -1,7 +1,11 @@
 import type { SystemMenuApi } from '#/api/system/menu';
 
 function canAppendMenuChild(menu: SystemMenuApi.SystemMenu) {
-  return menu.type !== 'button';
+  return canManageMenu(menu) && menu.status === 1 && menu.type !== 'button';
+}
+
+function canManageMenu(menu: SystemMenuApi.SystemMenu) {
+  return !menu.deletedAt && menu.systemManaged !== true;
 }
 
 function filterMenuParentOptions(
@@ -18,4 +22,4 @@ function filterMenuParentOptions(
     }));
 }
 
-export { canAppendMenuChild, filterMenuParentOptions };
+export { canAppendMenuChild, canManageMenu, filterMenuParentOptions };

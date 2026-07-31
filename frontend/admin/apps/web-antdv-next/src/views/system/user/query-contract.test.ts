@@ -3,6 +3,7 @@ import type { SystemDeptApi } from '#/api/system/dept';
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildUserDepartmentOptions,
   buildUserListQuery,
   filterDepartmentTree,
   loadDepartmentTree,
@@ -143,5 +144,58 @@ describe('system user query contract', () => {
       departments,
       error: undefined,
     });
+  });
+
+  it('keeps only active department branches in the list filter', async () => {
+    const result = await loadDepartmentTree(async () => [
+      ...departments,
+      {
+        children: [
+          {
+            id: '31',
+            name: 'Hidden active child',
+            pid: '30',
+            rowVersion: 0,
+            status: 1,
+          },
+        ],
+        id: '30',
+        name: 'Disabled branch',
+        pid: '0',
+        rowVersion: 0,
+        status: 0,
+      },
+    ]);
+
+    expect(result.departments.map(({ id }) => id)).toEqual(['10', '20']);
+  });
+
+  it('pins only the current disabled department as read-only in the edit selector', () => {
+    const options = buildUserDepartmentOptions(
+      [
+        ...departments,
+        {
+          id: '30',
+          name: 'Historical department',
+          pid: '0',
+          rowVersion: 0,
+          status: 0,
+        },
+        {
+          id: '40',
+          name: 'Other disabled department',
+          pid: '0',
+          rowVersion: 0,
+          status: 0,
+        },
+      ],
+      '30',
+    );
+
+    expect(options.find(({ id }) => id === '30')).toMatchObject({
+      disabled: true,
+      id: '30',
+    });
+    expect(options.some(({ id }) => id === '40')).toBe(false);
   });
 });

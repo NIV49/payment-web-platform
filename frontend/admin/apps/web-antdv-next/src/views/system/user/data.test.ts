@@ -18,10 +18,13 @@ function resolveDisabled(schema: VbenFormSchema[], fieldName: string) {
 }
 
 describe('system user form schema', () => {
-  it('makes global identity fields read-only only while editing', () => {
+  it('allows only a system administrator to edit global identity fields', () => {
     const editing = ref(true);
+    const systemAdministrator = ref(false);
     const schema = useFormSchema(
       computed(() => true),
+      computed(() => systemAdministrator.value),
+      computed(() => '10'),
       computed(() => editing.value),
       computed(() => []),
       ref(false),
@@ -32,10 +35,45 @@ describe('system user form schema', () => {
       expect(resolveDisabled(schema, fieldName)).toBe(true);
     }
 
-    editing.value = false;
+    systemAdministrator.value = true;
 
     for (const fieldName of ['username', 'name', 'remark']) {
       expect(resolveDisabled(schema, fieldName)).toBe(false);
     }
+
+    editing.value = false;
+    systemAdministrator.value = false;
+
+    for (const fieldName of ['username', 'name', 'remark']) {
+      expect(resolveDisabled(schema, fieldName)).toBe(false);
+    }
+  });
+
+  it('reactively reloads department options after the edited user is known', () => {
+    const currentDepartmentId = ref<string>();
+    const schema = useFormSchema(
+      computed(() => true),
+      computed(() => true),
+      computed(() => currentDepartmentId.value),
+      computed(() => true),
+      computed(() => []),
+      ref(false),
+      vi.fn(),
+    );
+    const componentProps = schema.find(
+      (field) => field.fieldName === 'deptId',
+    )?.componentProps;
+
+    expect(componentProps).toBeTypeOf('function');
+    const resolveProps = componentProps as () => {
+      params: { currentDepartmentId?: string };
+    };
+    expect(resolveProps().params).toEqual({
+      currentDepartmentId: undefined,
+    });
+
+    currentDepartmentId.value = '30';
+
+    expect(resolveProps().params).toEqual({ currentDepartmentId: '30' });
   });
 });

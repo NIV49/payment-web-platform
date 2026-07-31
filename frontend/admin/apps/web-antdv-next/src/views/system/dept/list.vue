@@ -18,6 +18,10 @@ import { $t } from '#/locales';
 
 import { useColumns } from './data';
 import Form from './modules/form.vue';
+import {
+  canAppendDepartmentChild,
+  canManageDepartment,
+} from './selection-contract';
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
@@ -29,6 +33,7 @@ const [FormModal, formModalApi] = useVbenModal({
  * @param row
  */
 function onEdit(row: SystemDeptApi.SystemDept) {
+  if (!canManageDepartment(row)) return;
   formModalApi.setData(row).open();
 }
 
@@ -37,6 +42,7 @@ function onEdit(row: SystemDeptApi.SystemDept) {
  * @param row
  */
 function onAppend(row: SystemDeptApi.SystemDept) {
+  if (!canAppendDepartmentChild(row)) return;
   formModalApi.setData({ pid: row.id }).open();
 }
 
@@ -52,6 +58,7 @@ function onCreate() {
  * @param row
  */
 function onDelete(row: SystemDeptApi.SystemDept) {
+  if (!canManageDepartment(row)) return;
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.name]),
     duration: 0,

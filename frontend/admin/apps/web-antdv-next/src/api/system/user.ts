@@ -10,10 +10,12 @@ export namespace SystemUserApi {
     | 'PENDING_ACTIVATION';
 
   export interface SystemUser {
+    credentialVersion: number;
     createTime?: string;
     deptId: string;
     deptName?: string;
     id: string;
+    identityVersion: number;
     identityStatus: IdentityStatus;
     name: string;
     remark?: string;
@@ -39,6 +41,18 @@ export namespace SystemUserApi {
     status: 0 | 1;
     userVersion: number;
   }
+
+  export interface SystemAdministratorUserUpdateParams extends MembershipUpdateParams {
+    credentialVersion: number;
+    identityVersion: number;
+    name: string;
+    remark?: string;
+    username: string;
+  }
+
+  export type UserUpdateParams =
+    | MembershipUpdateParams
+    | SystemAdministratorUserUpdateParams;
 
   export interface UserListQuery {
     deptId?: string;
@@ -73,10 +87,7 @@ async function createUser(data: SystemUserApi.UserCreateParams) {
   return requestClient.post('/system/user', data);
 }
 
-async function updateUser(
-  id: string,
-  data: SystemUserApi.MembershipUpdateParams,
-) {
+async function updateUser(id: string, data: SystemUserApi.UserUpdateParams) {
   return requestClient.put(`/system/user/${id}`, data);
 }
 

@@ -13,9 +13,11 @@ import { createDept, updateDept } from '#/api/system/dept';
 import { $t } from '#/locales';
 
 import { useSchema } from '../data';
+import { canManageDepartment } from '../selection-contract';
 
 const emit = defineEmits(['success']);
 const formData = ref<SystemDeptApi.SystemDept>();
+const currentDepartmentId = computed(() => formData.value?.id);
 const getTitle = computed(() => {
   return formData.value?.id
     ? $t('ui.actionTitle.edit', [$t('system.dept.name')])
@@ -24,7 +26,7 @@ const getTitle = computed(() => {
 
 const [Form, formApi] = useVbenForm({
   layout: 'vertical',
-  schema: useSchema(),
+  schema: useSchema(currentDepartmentId),
   showDefaultActions: false,
 });
 
@@ -35,6 +37,7 @@ function resetForm() {
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (formData.value?.id && !canManageDepartment(formData.value)) return;
     const { valid } = await formApi.validate();
     if (valid) {
       modalApi.lock();
@@ -59,7 +62,8 @@ const [Modal, modalApi] = useVbenModal({
   },
   onOpenChange(isOpen) {
     if (isOpen) {
-      const data = modalApi.getData<SystemDeptApi.SystemDept>();
+      const source = modalApi.getData<SystemDeptApi.SystemDept>();
+      const data = source ? { ...source } : undefined;
       if (data) {
         if (data.pid === 0) {
           data.pid = undefined;

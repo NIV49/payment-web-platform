@@ -19,6 +19,7 @@ import { $t } from '#/locales';
 
 import { useColumns } from './data';
 import Form from './modules/form.vue';
+import { canAppendMenuChild, canManageMenu } from './permission-contract';
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -84,17 +85,19 @@ function onRefresh() {
   gridApi.query();
 }
 function onEdit(row: SystemMenuApi.SystemMenu) {
+  if (!canManageMenu(row)) return;
   formDrawerApi.setData(row).open();
 }
 function onCreate() {
   formDrawerApi.setData({}).open();
 }
 function onAppend(row: SystemMenuApi.SystemMenu) {
-  if (row.type === 'button') return;
+  if (!canAppendMenuChild(row)) return;
   formDrawerApi.setData({ pid: row.id }).open();
 }
 
 function onDelete(row: SystemMenuApi.SystemMenu) {
+  if (!canManageMenu(row)) return;
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.name]),
     duration: 0,

@@ -50,6 +50,10 @@ const canRemoveDisabledRoles = computed(() =>
 );
 const id = ref<string>();
 const isEditing = computed(() => Boolean(id.value));
+const canEditIdentity = computed(
+  () => isEditing.value && userStore.userInfo?.systemAdministrator === true,
+);
+const currentDepartmentId = computed(() => formData.value?.deptId);
 const roleCatalog = ref<SystemRoleApi.SystemRole[]>([]);
 const roleAssignmentReady = ref(false);
 const roleSearchLoading = ref(false);
@@ -67,6 +71,8 @@ const roleOptions = computed(() =>
 const [Form, formApi] = useVbenForm({
   schema: useFormSchema(
     canAssignRoles,
+    canEditIdentity,
+    currentDepartmentId,
     isEditing,
     roleOptions,
     roleSearchLoading,
@@ -156,7 +162,13 @@ async function initializeForm(isOpen: boolean) {
     await formApi.setValues(
       data?.id
         ? { ...data, roleIds: data.roleIds ?? [] }
-        : { roleIds: [], status: 1, userVersion: 0 },
+        : {
+            credentialVersion: 0,
+            identityVersion: 0,
+            roleIds: [],
+            status: 1,
+            userVersion: 0,
+          },
     );
     if (loadSequence !== drawerLoadSequence) return;
     roleAssignmentReady.value = true;
@@ -191,7 +203,10 @@ const [Drawer, drawerApi] = useVbenDrawer({
     drawerApi.lock();
     try {
       await (id.value
-        ? updateUser(id.value, toMembershipUpdateParams(values, roleIds))
+        ? updateUser(
+            id.value,
+            toMembershipUpdateParams(values, roleIds, canEditIdentity.value),
+          )
         : createUser(toUserCreateParams(values, roleIds)));
       emits('success');
       drawerApi.close();

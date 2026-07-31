@@ -1,16 +1,22 @@
 import type { SystemMenuApi } from '#/api/system/menu';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { filterDeletedMenuTree } from '#/api/system/menu';
 
 import {
   canAppendMenuChild,
+  canManageMenu,
   filterMenuParentOptions,
 } from './permission-contract';
+
+vi.mock('#/api/request', () => ({ requestClient: {} }));
 
 const menu = (
   id: string,
   type: SystemMenuApi.SystemMenu['type'],
   children?: SystemMenuApi.SystemMenu[],
+  overrides: Partial<SystemMenuApi.SystemMenu> = {},
 ): SystemMenuApi.SystemMenu => ({
   children,
   id,
@@ -19,12 +25,47 @@ const menu = (
   rowVersion: 0,
   status: 1,
   type,
+  ...overrides,
 });
 
 describe('menu permission presentation contract', () => {
+  it('hides deleted menus while retaining disabled management rows', () => {
+    const result = filterDeletedMenuTree([
+      menu('1', 'menu', undefined, { status: 0 }),
+      menu('2', 'menu', undefined, {
+        deletedAt: '2026-08-01T00:00:00Z',
+      }),
+    ]);
+
+    expect(result).toEqual([menu('1', 'menu', undefined, { status: 0 })]);
+  });
+
   it('never allows BUTTON nodes to own children', () => {
     expect(canAppendMenuChild(menu('1', 'button'))).toBe(false);
     expect(canAppendMenuChild(menu('2', 'menu'))).toBe(true);
+  });
+
+  it('prevents protected, disabled, and deleted menus from owning children', () => {
+    expect(
+      canAppendMenuChild(menu('1', 'menu', undefined, { systemManaged: true })),
+    ).toBe(false);
+    expect(
+      canAppendMenuChild(menu('2', 'menu', undefined, { status: 0 })),
+    ).toBe(false);
+    expect(
+      canAppendMenuChild(
+        menu('3', 'menu', undefined, { deletedAt: '2026-08-01T00:00:00Z' }),
+      ),
+    ).toBe(false);
+  });
+
+  it('allows disabled ordinary menus to be managed but never system-managed menus', () => {
+    expect(canManageMenu(menu('1', 'menu', undefined, { status: 0 }))).toBe(
+      true,
+    );
+    expect(
+      canManageMenu(menu('2', 'menu', undefined, { systemManaged: true })),
+    ).toBe(false);
   });
 
   it('removes BUTTON nodes from parent choices without mutating the tree', () => {
@@ -49,5 +90,17 @@ describe('menu permission presentation contract', () => {
       menu('1', 'catalog', []),
       menu('4', 'menu'),
     ]);
+  });
+
+  it('only enables active ordinary non-BUTTON parent choices', () => {
+    const result = filterMenuParentOptions([
+      menu('1', 'catalog'),
+      menu('2', 'menu', undefined, { status: 0 }),
+      menu('3', 'button'),
+      menu('4', 'menu', undefined, { systemManaged: true }),
+      menu('5', 'menu', undefined, { deletedAt: '2026-08-01T00:00:00Z' }),
+    ]);
+
+    expect(result).toEqual([menu('1', 'catalog')]);
   });
 });

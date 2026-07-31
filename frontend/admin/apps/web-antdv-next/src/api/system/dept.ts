@@ -4,17 +4,24 @@ export namespace SystemDeptApi {
   export interface SystemDept {
     children?: SystemDept[];
     createTime?: string;
+    deletedAt?: null | string;
     id: string;
     name: string;
     pid?: number | string;
     remark?: string;
     rowVersion: number;
     status: 0 | 1;
+    systemManaged?: boolean;
   }
 
   export type DeptSaveParams = Omit<
     SystemDept,
-    'children' | 'createTime' | 'id' | 'rowVersion'
+    | 'children'
+    | 'createTime'
+    | 'deletedAt'
+    | 'id'
+    | 'rowVersion'
+    | 'systemManaged'
   >;
 
   export type DeptUpdateParams = DeptSaveParams & {
@@ -22,8 +29,23 @@ export namespace SystemDeptApi {
   };
 }
 
+function filterDeletedDepartmentTree(
+  departments: readonly SystemDeptApi.SystemDept[],
+): SystemDeptApi.SystemDept[] {
+  return departments
+    .filter((department) => !department.deletedAt)
+    .map((department) => ({
+      ...department,
+      ...(department.children
+        ? { children: filterDeletedDepartmentTree(department.children) }
+        : {}),
+    }));
+}
+
 async function getDeptList() {
-  return requestClient.get<SystemDeptApi.SystemDept[]>('/system/dept/list');
+  const departments =
+    await requestClient.get<SystemDeptApi.SystemDept[]>('/system/dept/list');
+  return filterDeletedDepartmentTree(departments);
 }
 
 async function createDept(data: SystemDeptApi.DeptSaveParams) {
@@ -40,4 +62,10 @@ async function deleteDept(id: string, expectedVersion: number) {
   });
 }
 
-export { createDept, deleteDept, getDeptList, updateDept };
+export {
+  createDept,
+  deleteDept,
+  filterDeletedDepartmentTree,
+  getDeptList,
+  updateDept,
+};

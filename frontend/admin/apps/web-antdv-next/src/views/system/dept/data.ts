@@ -1,3 +1,5 @@
+import type { ComputedRef } from 'vue';
+
 import type { VxeTableGridColumns } from '@vben/plugins/vxe-table';
 
 import type { VbenFormSchema } from '#/adapter/form';
@@ -9,10 +11,18 @@ import { PERMISSION_CODES } from '#/api';
 import { getDeptList } from '#/api/system/dept';
 import { $t } from '#/locales';
 
+import {
+  canAppendDepartmentChild,
+  canManageDepartment,
+  filterDepartmentParentOptions,
+} from './selection-contract';
+
 /**
  * 获取编辑表单的字段配置。如果没有使用多语言，可以直接export一个数组常量
  */
-export function useSchema(): VbenFormSchema[] {
+export function useSchema(
+  currentDepartmentId: ComputedRef<string | undefined>,
+): VbenFormSchema[] {
   return [
     {
       component: 'Input',
@@ -28,14 +38,19 @@ export function useSchema(): VbenFormSchema[] {
     },
     {
       component: 'ApiTreeSelect',
-      componentProps: {
+      componentProps: () => ({
         allowClear: true,
-        api: getDeptList,
+        api: async (params?: { excludedDepartmentId?: string }) =>
+          filterDepartmentParentOptions(
+            await getDeptList(),
+            params?.excludedDepartmentId,
+          ),
         class: 'w-full',
         labelField: 'name',
+        params: { excludedDepartmentId: currentDepartmentId.value },
         valueField: 'id',
         childrenField: 'children',
-      },
+      }),
       fieldName: 'pid',
       label: $t('system.dept.parentDept'),
     },
@@ -115,11 +130,13 @@ export function useColumns(
           {
             auth: PERMISSION_CODES.departmentCreate,
             code: 'append',
+            show: canAppendDepartmentChild,
             text: $t('system.dept.addChild'),
           },
           {
             auth: PERMISSION_CODES.departmentUpdate,
             code: 'edit',
+            show: canManageDepartment,
           },
           {
             auth: PERMISSION_CODES.departmentDelete,
@@ -127,6 +144,7 @@ export function useColumns(
             disabled: (row: SystemDeptApi.SystemDept) => {
               return !!(row.children && row.children.length > 0);
             },
+            show: canManageDepartment,
           },
         ],
       },

@@ -23,6 +23,7 @@ export namespace SystemMenuApi {
     authCode?: string;
     children?: SystemMenu[];
     component?: string;
+    deletedAt?: null | string;
     id: string;
     meta?: {
       activeIcon?: string;
@@ -53,12 +54,13 @@ export namespace SystemMenuApi {
     redirect?: string;
     rowVersion: number;
     status: 0 | 1;
+    systemManaged?: boolean;
     type: (typeof MenuTypes)[number];
   }
 
   export type MenuSaveParams = Omit<
     SystemMenu,
-    'children' | 'id' | 'rowVersion'
+    'children' | 'deletedAt' | 'id' | 'rowVersion' | 'systemManaged'
   >;
 
   export type MenuUpdateParams = MenuSaveParams & {
@@ -66,8 +68,23 @@ export namespace SystemMenuApi {
   };
 }
 
+function filterDeletedMenuTree(
+  menus: readonly SystemMenuApi.SystemMenu[],
+): SystemMenuApi.SystemMenu[] {
+  return menus
+    .filter((menu) => !menu.deletedAt)
+    .map((menu) => ({
+      ...menu,
+      ...(menu.children
+        ? { children: filterDeletedMenuTree(menu.children) }
+        : {}),
+    }));
+}
+
 async function getMenuList() {
-  return requestClient.get<SystemMenuApi.SystemMenu[]>('/system/menu/list');
+  const menus =
+    await requestClient.get<SystemMenuApi.SystemMenu[]>('/system/menu/list');
+  return filterDeletedMenuTree(menus);
 }
 
 async function isMenuNameExists(
@@ -105,6 +122,7 @@ async function deleteMenu(id: string, expectedVersion: number) {
 export {
   createMenu,
   deleteMenu,
+  filterDeletedMenuTree,
   getMenuList,
   isMenuNameExists,
   isMenuPathExists,

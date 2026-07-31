@@ -16,9 +16,12 @@ import { getDeptList, PERMISSION_CODES } from '#/api';
 import { $t } from '#/locales';
 
 import { identityStatusPresentation } from './identity-status';
+import { buildUserDepartmentOptions } from './query-contract';
 
 export function useFormSchema(
   canAssignRoles: ComputedRef<boolean>,
+  canEditIdentity: ComputedRef<boolean>,
+  currentDepartmentId: ComputedRef<string | undefined>,
   isEditing: ComputedRef<boolean>,
   roleOptions: ComputedRef<RoleAssignmentOption[]>,
   roleSearchLoading: Ref<boolean>,
@@ -27,28 +30,37 @@ export function useFormSchema(
   return [
     {
       component: 'Input',
-      componentProps: () => ({ disabled: isEditing.value }),
+      componentProps: () => ({
+        disabled: isEditing.value && !canEditIdentity.value,
+      }),
       fieldName: 'username',
       label: $t('system.user.username'),
       rules: 'required',
     },
     {
       component: 'Input',
-      componentProps: () => ({ disabled: isEditing.value }),
+      componentProps: () => ({
+        disabled: isEditing.value && !canEditIdentity.value,
+      }),
       fieldName: 'name',
       label: $t('system.user.name'),
       rules: 'required',
     },
     {
       component: 'ApiTreeSelect',
-      componentProps: {
+      componentProps: () => ({
         allowClear: true,
-        api: getDeptList,
+        api: async (params?: { currentDepartmentId?: string }) =>
+          buildUserDepartmentOptions(
+            await getDeptList(),
+            params?.currentDepartmentId,
+          ),
         childrenField: 'children',
         class: 'w-full',
         labelField: 'name',
+        params: { currentDepartmentId: currentDepartmentId.value },
         valueField: 'id',
-      },
+      }),
       fieldName: 'deptId',
       label: $t('system.user.dept'),
       rules: 'required',
@@ -85,9 +97,25 @@ export function useFormSchema(
     },
     {
       component: 'Textarea',
-      componentProps: () => ({ disabled: isEditing.value }),
+      componentProps: () => ({
+        disabled: isEditing.value && !canEditIdentity.value,
+      }),
       fieldName: 'remark',
       label: $t('system.user.remark'),
+    },
+    {
+      component: 'InputNumber',
+      defaultValue: 0,
+      fieldName: 'identityVersion',
+      formItemClass: 'hidden',
+      hideLabel: true,
+    },
+    {
+      component: 'InputNumber',
+      defaultValue: 0,
+      fieldName: 'credentialVersion',
+      formItemClass: 'hidden',
+      hideLabel: true,
     },
     {
       component: 'InputNumber',

@@ -1,8 +1,8 @@
 import type { SystemUserApi } from '#/api/system/user';
 
 export type UserFormValues = Pick<
-  SystemUserApi.MembershipUpdateParams,
-  'userVersion'
+  SystemUserApi.SystemAdministratorUserUpdateParams,
+  'credentialVersion' | 'identityVersion' | 'userVersion'
 > &
   SystemUserApi.UserCreateParams;
 
@@ -23,11 +23,22 @@ export function toUserCreateParams(
 export function toMembershipUpdateParams(
   values: UserFormValues,
   roleIds: string[],
-): SystemUserApi.MembershipUpdateParams {
-  return {
+  canEditIdentity = false,
+): SystemUserApi.UserUpdateParams {
+  const membership: SystemUserApi.MembershipUpdateParams = {
     deptId: values.deptId,
     roleIds,
     status: values.status,
     userVersion: values.userVersion,
+  };
+  if (!canEditIdentity) return membership;
+
+  return {
+    ...membership,
+    credentialVersion: values.credentialVersion,
+    identityVersion: values.identityVersion,
+    name: values.name,
+    remark: values.remark,
+    username: values.username,
   };
 }
