@@ -48,6 +48,9 @@ public final class RoleAssignmentPolicy {
 
         for (Long roleId : removed) {
             RoleFacts role = requireFacts(roleFacts, roleId);
+            if (!role.active() && !operatorIsSystemAdministrator) {
+                throw new RoleNotAssignableException();
+            }
             if (!role.assignable() || role.systemRole()) {
                 throw new RoleNotAssignableException();
             }

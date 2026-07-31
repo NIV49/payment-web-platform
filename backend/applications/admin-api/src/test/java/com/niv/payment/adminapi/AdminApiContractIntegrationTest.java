@@ -1174,6 +1174,74 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void nonSystemAdministratorCannotRemoveDisabledRoleTheyHold() throws Exception {
+        long operatorRoleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long disabledRoleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES
+              (?,1,?,?,'PLATFORM',true,false,'ACTIVE'),
+              (?,1,?,?,'PLATFORM',true,false,'DISABLED')
+            """,
+            operatorRoleId, "restricted-role-operator-" + operatorRoleId,
+            "Restricted Role Operator " + operatorRoleId,
+            disabledRoleId, "restricted-disabled-role-" + disabledRoleId,
+            "Restricted Disabled Role " + disabledRoleId);
+        assertThat(jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            SELECT nextval('iam_id_seq'),1,?,id,
+                   'restricted-' || replace(permission_code, ':', '-'),'ACTIVE'
+              FROM iam_permission
+             WHERE permission_code IN ('user:update','user:disable','user:assign-role')
+            """, operatorRoleId)).isEqualTo(3);
+        assertThat(jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            SELECT nextval('iam_id_seq'),id,'TENANT','TENANT_ALL'
+              FROM iam_role_grant WHERE tenant_id=1 AND role_id=?
+            """, operatorRoleId)).isEqualTo(3);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,802,?,802),(1,802,?,802)
+            """, operatorRoleId, disabledRoleId);
+        jdbc.update("""
+            UPDATE iam_membership SET permission_version=permission_version+1
+             WHERE tenant_id=1 AND id=802
+            """);
+
+        try {
+            Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            mvc.perform(put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN)
+                    .contentType("application/json")
+                    .content("{\"deptId\":\"10\",\"roleIds\":[\"" + operatorRoleId
+                        + "\"],\"status\":1,\"userVersion\":0}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+
+            assertThat(jdbc.queryForObject("""
+                SELECT row_version FROM iam_membership WHERE tenant_id=1 AND id=802
+                """, Long.class)).isZero();
+            assertThat(jdbc.queryForList("""
+                SELECT role_id FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=802 ORDER BY role_id
+                """, Long.class)).containsExactlyInAnyOrder(operatorRoleId, disabledRoleId);
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802");
+            jdbc.update("""
+                DELETE FROM iam_grant_dimension
+                 WHERE grant_id IN (SELECT id FROM iam_role_grant WHERE tenant_id=1 AND role_id=?)
+                """, operatorRoleId);
+            jdbc.update("DELETE FROM iam_role_grant WHERE tenant_id=1 AND role_id=?", operatorRoleId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id IN (?,?)",
+                operatorRoleId, disabledRoleId);
+            jdbc.update("""
+                UPDATE iam_membership SET permission_version=permission_version+1
+                 WHERE tenant_id=1 AND id=802
+                """);
+        }
+    }
+
+    @Test
     void lastActiveSystemAdministratorCannotBeDisabled() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
 

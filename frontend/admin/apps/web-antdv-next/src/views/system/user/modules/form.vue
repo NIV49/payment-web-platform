@@ -25,6 +25,7 @@ import { hasAllAccessCodes } from '../permission-contract';
 import { toMembershipUpdateParams, toUserCreateParams } from './form-contract';
 import {
   buildRoleAssignmentOptions,
+  loadRoleAssignmentCatalog,
   resolveRoleAssignmentIds,
 } from './role-assignment';
 
@@ -38,6 +39,9 @@ const canAssignRoles = computed(() =>
     hasAccessByCodes,
   ),
 );
+const canRemoveDisabledRoles = computed(() =>
+  hasAccessByCodes([PERMISSION_CODES.roleGrantUpdate]),
+);
 const id = ref<string>();
 const isEditing = computed(() => Boolean(id.value));
 const roleCatalog = ref<SystemRoleApi.SystemRole[]>([]);
@@ -46,6 +50,7 @@ const roleOptions = computed(() =>
     roleCatalog.value,
     formData.value?.roleIds ?? [],
     formData.value?.roleNames ?? [],
+    canRemoveDisabledRoles.value,
   ),
 );
 
@@ -65,6 +70,7 @@ const [Drawer, drawerApi] = useVbenDrawer({
       values.roleIds ?? [],
       formData.value?.roleIds ?? [],
       roleCatalog.value,
+      canRemoveDisabledRoles.value,
     );
     if (!hasExplicitRoleIds(roleIds)) return;
 
@@ -90,10 +96,9 @@ const [Drawer, drawerApi] = useVbenDrawer({
     formApi.resetForm();
     formData.value = data?.id ? data : undefined;
     id.value = data?.id;
-    const rolePage = canAssignRoles.value
-      ? await getRoleList({ page: 1, pageSize: 200 })
-      : undefined;
-    roleCatalog.value = rolePage?.items ?? [];
+    roleCatalog.value = canAssignRoles.value
+      ? await loadRoleAssignmentCatalog(getRoleList)
+      : [];
     await formApi.setValues(
       data?.id
         ? { ...data, roleIds: data.roleIds ?? [] }

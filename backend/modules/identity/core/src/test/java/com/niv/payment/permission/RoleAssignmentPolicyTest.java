@@ -69,6 +69,12 @@ class RoleAssignmentPolicyTest {
     }
 
     @Test
+    void nonSystemAdministratorCannotRemoveDisabledNormalRoleTheyHold() {
+        assertThrows(RoleAssignmentPolicy.RoleNotAssignableException.class,
+            () -> POLICY.validateReplacement(10, 20, Set.of(5L), Set.of(), Set.of(5L), ROLES));
+    }
+
+    @Test
     void lastSystemAdministratorCannotBeDeactivated() {
         assertThrows(RoleAssignmentPolicy.LastAdministratorException.class,
             () -> POLICY.validateDeactivation(true, false));

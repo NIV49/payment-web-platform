@@ -1,4 +1,16 @@
 import type { SystemRoleApi } from '#/api/system/role';
+import type { PageResult } from '#/api/system/types';
+
+const ROLE_CATALOG_PAGE_SIZE = 200;
+
+interface RoleCatalogPageQuery {
+  page: number;
+  pageSize: number;
+}
+
+type RoleCatalogPageLoader = (
+  query: RoleCatalogPageQuery,
+) => Promise<PageResult<SystemRoleApi.SystemRole>>;
 
 export interface RoleAssignmentOption {
   disabled: boolean;
@@ -18,6 +30,7 @@ function buildRoleAssignmentOptions(
   roles: SystemRoleApi.SystemRole[],
   currentRoleIds: string[],
   currentRoleNames: string[] = [],
+  canRemoveDisabledRoles = false,
 ): RoleAssignmentOption[] {
   const currentIds = new Set(currentRoleIds);
   const currentLabels = new Map(
@@ -27,7 +40,8 @@ function buildRoleAssignmentOptions(
   const knownOptions = roles
     .filter((role) => isCurrentlyAssignable(role) || currentIds.has(role.id))
     .map((role) => ({
-      disabled: isProtected(role),
+      disabled:
+        isProtected(role) || (role.status === 0 && !canRemoveDisabledRoles),
       label: role.name,
       value: role.id,
     }));
@@ -45,6 +59,7 @@ function mergeRoleAssignmentIds(
   selectedRoleIds: string[],
   currentRoleIds: string[],
   roles: SystemRoleApi.SystemRole[],
+  canRemoveDisabledRoles = false,
 ): string[] {
   const currentIds = new Set(currentRoleIds);
   const rolesById = new Map(roles.map((role) => [role.id, role]));
@@ -53,13 +68,20 @@ function mergeRoleAssignmentIds(
       .filter(
         (role) =>
           isCurrentlyAssignable(role) ||
-          (currentIds.has(role.id) && !isProtected(role)),
+          (currentIds.has(role.id) &&
+            !isProtected(role) &&
+            role.status === 0 &&
+            canRemoveDisabledRoles),
       )
       .map((role) => role.id),
   );
   const preservedIds = currentRoleIds.filter((id) => {
     const role = rolesById.get(id);
-    return !role || isProtected(role);
+    return (
+      !role ||
+      isProtected(role) ||
+      (role.status === 0 && !canRemoveDisabledRoles)
+    );
   });
   const selectedEditableIds = selectedRoleIds.filter((id) =>
     editableIds.has(id),
@@ -72,14 +94,41 @@ function resolveRoleAssignmentIds(
   selectedRoleIds: string[],
   currentRoleIds: string[],
   roles: SystemRoleApi.SystemRole[],
+  canRemoveDisabledRoles = false,
 ): string[] {
   return canAssignRoles
-    ? mergeRoleAssignmentIds(selectedRoleIds, currentRoleIds, roles)
+    ? mergeRoleAssignmentIds(
+        selectedRoleIds,
+        currentRoleIds,
+        roles,
+        canRemoveDisabledRoles,
+      )
     : [...currentRoleIds];
+}
+
+async function loadRoleAssignmentCatalog(loadPage: RoleCatalogPageLoader) {
+  const rolesById = new Map<string, SystemRoleApi.SystemRole>();
+  let expectedTotal = 0;
+  let page = 1;
+
+  while (true) {
+    const result = await loadPage({ page, pageSize: ROLE_CATALOG_PAGE_SIZE });
+    expectedTotal = Math.max(expectedTotal, result.total);
+    result.items.forEach((role) => rolesById.set(role.id, role));
+
+    if (rolesById.size >= expectedTotal) {
+      return [...rolesById.values()];
+    }
+    if (result.items.length < ROLE_CATALOG_PAGE_SIZE) {
+      throw new Error('Role catalog pagination ended before total was loaded');
+    }
+    page += 1;
+  }
 }
 
 export {
   buildRoleAssignmentOptions,
+  loadRoleAssignmentCatalog,
   mergeRoleAssignmentIds,
   resolveRoleAssignmentIds,
 };
