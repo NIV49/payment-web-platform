@@ -26,6 +26,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers
 class LocalIdentityFixtureBootstrapIntegrationTest {
     private static final String FIXTURE_LOGIN_INPUT = "local-test-password";
+    private static final String[] LEGACY_FIXTURE_TABLES = {
+        "iam_tenant",
+        "iam_department",
+        "iam_user",
+        "iam_membership",
+        "iam_authentication_credential",
+        "iam_role",
+        "iam_membership_role",
+        "iam_role_grant",
+        "iam_grant_dimension",
+        "iam_menu",
+        "iam_role_menu"
+    };
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(DockerImageName.parse(
@@ -164,6 +177,54 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
         runBootstrap(FIXTURE_LOGIN_INPUT);
 
         assertCompleteFixture();
+    }
+
+    @Test
+    void v9EightMenuFixtureMigratedThroughV14BootstrapsTransactionally() throws Exception {
+        restoreExactLegacyFixtureAtV9(false);
+
+        migrateToLatest();
+
+        assertV14MigratedLegacyFixture(8);
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+        assertCompleteFixture();
+        assertV14MigrationHistoryPreserved();
+    }
+
+    @Test
+    void v9FourteenButtonFixtureMigratedThroughV14BootstrapsTransactionally() throws Exception {
+        restoreExactLegacyFixtureAtV9(true);
+
+        migrateToLatest();
+
+        assertV14MigratedLegacyFixture(22);
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+        assertCompleteFixture();
+        assertV14MigrationHistoryPreserved();
+    }
+
+    @Test
+    void partialV14MigratedLegacyFixtureStillFailsWithoutMutation() {
+        restoreExactLegacyFixtureAtV9(false);
+        migrateToLatest();
+        jdbc.update("""
+            DELETE FROM iam_role_grant grant_row
+             USING iam_permission permission
+             WHERE grant_row.permission_id=permission.id
+               AND grant_row.tenant_id=1 AND grant_row.role_id=2000
+               AND permission.permission_code='menu:create'
+               AND grant_row.grant_key='migration-v14-menu-create'
+            """);
+
+        assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+
+        assertThat(count("iam_role_grant")).isEqualTo(20);
+        assertThat(count("iam_grant_dimension")).isEqualTo(20);
+        assertThat(count("iam_menu")).isEqualTo(8);
+        assertThat(jdbc.queryForObject(
+            "SELECT password_hash FROM iam_authentication_credential WHERE user_id=100", String.class))
+            .isNull();
     }
 
     @Test
@@ -460,6 +521,115 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
             encoder,
             password);
         bootstrap.run(new DefaultApplicationArguments(new String[0]));
+    }
+
+    private void restoreExactLegacyFixtureAtV9(boolean includeButtons) {
+        flyway(null).clean();
+        flyway("7").migrate();
+        for (String table : LEGACY_FIXTURE_TABLES) {
+            jdbc.execute("CREATE TABLE local_v9_backup_" + table + " AS TABLE " + table);
+        }
+
+        flyway("9").migrate();
+
+        for (String table : LEGACY_FIXTURE_TABLES) {
+            jdbc.execute("INSERT INTO " + table + " SELECT * FROM local_v9_backup_" + table);
+        }
+        jdbc.update("UPDATE iam_menu SET row_version=0 WHERE tenant_id=1");
+        for (String table : LEGACY_FIXTURE_TABLES) {
+            jdbc.execute("DROP TABLE local_v9_backup_" + table);
+        }
+        if (includeButtons) {
+            insertLegacyPermissionButtons();
+        }
+        assertThat(count("iam_permission")).isEqualTo(14);
+        assertThat(count("iam_role_grant")).isEqualTo(14);
+        assertThat(count("iam_grant_dimension")).isEqualTo(14);
+        assertThat(count("iam_menu")).isEqualTo(includeButtons ? 22 : 8);
+        assertThat(count("iam_role_menu")).isEqualTo(8);
+    }
+
+    private void insertLegacyPermissionButtons() {
+        jdbc.update("""
+            INSERT INTO iam_menu(
+                id,tenant_id,parent_id,menu_type,menu_name,route_name,sort_order,auth_code,status,meta_json
+            ) VALUES
+              (6020,1,6001,'BUTTON','View Users','UserView',111,'user:view','ACTIVE',
+               '{"title":"system.user.permission.view"}'::jsonb),
+              (6021,1,6001,'BUTTON','Create User','UserCreate',112,'user:create','ACTIVE',
+               '{"title":"system.user.permission.create"}'::jsonb),
+              (6022,1,6001,'BUTTON','Update User','UserUpdate',113,'user:update','ACTIVE',
+               '{"title":"system.user.permission.update"}'::jsonb),
+              (6023,1,6001,'BUTTON','Delete User','UserDelete',114,'user:delete','ACTIVE',
+               '{"title":"system.user.permission.delete"}'::jsonb),
+              (6024,1,6001,'BUTTON','Disable User','UserDisable',115,'user:disable','ACTIVE',
+               '{"title":"system.user.permission.disable"}'::jsonb),
+              (6025,1,6001,'BUTTON','Assign User Roles','UserAssignRole',116,'user:assign-role','ACTIVE',
+               '{"title":"system.user.permission.assignRole"}'::jsonb),
+              (6026,1,6002,'BUTTON','View Roles','RoleView',121,'role:view','ACTIVE',
+               '{"title":"system.role.permission.view"}'::jsonb),
+              (6027,1,6002,'BUTTON','Create Role','RoleCreate',122,'role:create','ACTIVE',
+               '{"title":"system.role.permission.create"}'::jsonb),
+              (6028,1,6002,'BUTTON','Update Role','RoleUpdate',123,'role:update','ACTIVE',
+               '{"title":"system.role.permission.update"}'::jsonb),
+              (6029,1,6002,'BUTTON','Delete Role','RoleDelete',124,'role:delete','ACTIVE',
+               '{"title":"system.role.permission.delete"}'::jsonb),
+              (6030,1,6003,'BUTTON','View Menus','MenuView',131,'menu:view','ACTIVE',
+               '{"title":"system.menu.permission.view"}'::jsonb),
+              (6031,1,6003,'BUTTON','Manage Menus','MenuManage',132,'menu:manage','ACTIVE',
+               '{"title":"system.menu.permission.manage"}'::jsonb),
+              (6032,1,6004,'BUTTON','View Departments','DepartmentView',141,'department:view','ACTIVE',
+               '{"title":"system.dept.permission.view"}'::jsonb),
+              (6033,1,6004,'BUTTON','Manage Departments','DepartmentManage',142,'department:manage','ACTIVE',
+               '{"title":"system.dept.permission.manage"}'::jsonb)
+            """);
+    }
+
+    private void migrateToLatest() {
+        flyway(null).migrate();
+    }
+
+    private Flyway flyway(String version) {
+        var configuration = Flyway.configure()
+            .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+            .locations("classpath:db/migration")
+            .cleanDisabled(false);
+        if (version != null) {
+            configuration.target(version);
+        }
+        return configuration.load();
+    }
+
+    private void assertV14MigratedLegacyFixture(int expectedMenuCount) {
+        assertThat(count("iam_permission")).isEqualTo(21);
+        assertThat(count("iam_role_grant")).isEqualTo(21);
+        assertThat(count("iam_grant_dimension")).isEqualTo(21);
+        assertThat(count("iam_menu")).isEqualTo(expectedMenuCount);
+        assertThat(jdbc.queryForObject(
+            "SELECT row_version FROM iam_role WHERE id=2000", Long.class)).isOne();
+        assertThat(jdbc.queryForObject(
+            "SELECT permission_version FROM iam_membership WHERE id=1000", Long.class)).isOne();
+    }
+
+    private void assertV14MigrationHistoryPreserved() {
+        assertThat(jdbc.queryForObject(
+            "SELECT row_version FROM iam_role WHERE id=2000", Long.class)).isOne();
+        assertThat(jdbc.queryForObject(
+            "SELECT permission_version FROM iam_membership WHERE id=1000", Long.class)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref='2000'
+               AND action_code='MIGRATE_GRANULAR_ADMIN_PERMISSIONS' AND trace_id='migration-v14'
+            """, Long.class)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='MEMBERSHIP' AND aggregate_ref='1000'
+               AND event_type='PERMISSION_VERSION_CHANGED' AND trace_id='migration-v14'
+            """, Long.class)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant
+             WHERE tenant_id=1 AND role_id=2000 AND grant_key LIKE 'migration-v14-%'
+            """, Long.class)).isZero();
     }
 
     private void assertCompleteFixture() {
