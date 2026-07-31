@@ -1542,6 +1542,12 @@ class AdminApiContractIntegrationTest {
             SELECT count(*) FROM iam_permission_change_outbox
              WHERE tenant_id=1 AND aggregate_type='ROLE' AND aggregate_ref=? AND event_type='ROLE_DELETED'
             """, Long.class, Long.toString(roleId))).isOne();
+        mvc.perform(get("/api/system/role/list")
+                .queryParam("id", Long.toString(roleId))
+                .cookie(cookie).header("Origin", ORIGIN))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items").isEmpty())
+            .andExpect(jsonPath("$.data.total").value(0));
     }
 
     @Test

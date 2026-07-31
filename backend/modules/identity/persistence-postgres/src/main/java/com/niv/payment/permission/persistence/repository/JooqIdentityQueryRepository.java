@@ -67,7 +67,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
             .leftJoin(IAM_ROLE)
                 .on(IAM_ROLE.TENANT_ID.eq(IAM_MEMBERSHIP.TENANT_ID)
                     .and(IAM_ROLE.ID.eq(IAM_MEMBERSHIP_ROLE.ROLE_ID))
-                    .and(IAM_ROLE.STATUS.eq(ACTIVE)))
+                    .and(IAM_ROLE.STATUS.eq(ACTIVE))
+                    .and(IAM_ROLE.DELETED_AT.isNull()))
             .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
                 .and(IAM_MEMBERSHIP.ID.eq(membershipId))
                 .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE)))
@@ -102,7 +103,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
             .join(IAM_ROLE)
                 .on(IAM_ROLE.TENANT_ID.eq(IAM_MEMBERSHIP_ROLE.TENANT_ID)
                     .and(IAM_ROLE.ID.eq(IAM_MEMBERSHIP_ROLE.ROLE_ID))
-                    .and(IAM_ROLE.STATUS.eq(ACTIVE)))
+                    .and(IAM_ROLE.STATUS.eq(ACTIVE))
+                    .and(IAM_ROLE.DELETED_AT.isNull()))
             .join(IAM_ROLE_GRANT)
                 .on(IAM_ROLE_GRANT.TENANT_ID.eq(IAM_ROLE.TENANT_ID)
                     .and(IAM_ROLE_GRANT.ROLE_ID.eq(IAM_ROLE.ID))
@@ -135,7 +137,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
             .join(IAM_ROLE)
                 .on(IAM_ROLE.TENANT_ID.eq(IAM_ROLE_MENU.TENANT_ID)
                     .and(IAM_ROLE.ID.eq(IAM_ROLE_MENU.ROLE_ID))
-                    .and(IAM_ROLE.STATUS.eq(ACTIVE)))
+                    .and(IAM_ROLE.STATUS.eq(ACTIVE))
+                    .and(IAM_ROLE.DELETED_AT.isNull()))
             .join(IAM_MENU)
                 .on(IAM_MENU.TENANT_ID.eq(IAM_ROLE_MENU.TENANT_ID)
                     .and(IAM_MENU.ID.eq(IAM_ROLE_MENU.MENU_ID))
@@ -385,7 +388,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
     }
 
     private Condition roleCondition(long tenantId, IdentityModels.RoleQuery query) {
-        Condition condition = IAM_ROLE.TENANT_ID.eq(tenantId);
+        Condition condition = IAM_ROLE.TENANT_ID.eq(tenantId)
+            .and(IAM_ROLE.DELETED_AT.isNull());
         if (hasText(query.name())) {
             condition = condition.and(IAM_ROLE.ROLE_NAME.containsIgnoreCase(query.name()));
         }
@@ -416,7 +420,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
             .from(IAM_MEMBERSHIP_ROLE)
             .join(IAM_ROLE)
                 .on(IAM_ROLE.TENANT_ID.eq(IAM_MEMBERSHIP_ROLE.TENANT_ID)
-                    .and(IAM_ROLE.ID.eq(IAM_MEMBERSHIP_ROLE.ROLE_ID)))
+                    .and(IAM_ROLE.ID.eq(IAM_MEMBERSHIP_ROLE.ROLE_ID))
+                    .and(IAM_ROLE.DELETED_AT.isNull()))
             .where(IAM_MEMBERSHIP_ROLE.TENANT_ID.eq(tenantId)
                 .and(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID.in(membershipIds)))
             .orderBy(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID, IAM_ROLE.ID)

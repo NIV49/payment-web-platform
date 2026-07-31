@@ -344,7 +344,8 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
             dsl.select(IAM_ROLE.ID, IAM_ROLE.ASSIGNABLE, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.STATUS)
                 .from(IAM_ROLE)
                 .where(IAM_ROLE.TENANT_ID.eq(tenantId)
-                    .and(IAM_ROLE.ID.in(relevantRoleIds)))
+                    .and(IAM_ROLE.ID.in(relevantRoleIds))
+                    .and(IAM_ROLE.DELETED_AT.isNull()))
                 .forEach(row -> roleFacts.put(row.get(IAM_ROLE.ID), new RoleAssignmentPolicy.RoleFacts(
                     row.get(IAM_ROLE.ID),
                     Boolean.TRUE.equals(row.get(IAM_ROLE.ASSIGNABLE)),
@@ -393,7 +394,8 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
                 .and(membershipCondition)
                 .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE))
                 .and(IAM_ROLE.SYSTEM_ROLE.isTrue())
-                .and(IAM_ROLE.STATUS.eq(ACTIVE)))
+                .and(IAM_ROLE.STATUS.eq(ACTIVE))
+                .and(IAM_ROLE.DELETED_AT.isNull()))
             .fetch(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
             .stream()
             .anyMatch(LoginCredentialPolicy::isLoginCapableHash);
