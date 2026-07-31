@@ -122,7 +122,7 @@ POST /api/auth/login
   -> PAYMENT_SESSION HttpOnly Cookie
 ```
 
-登录成功把 `userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/stepUpVerified` 写入 Sa-Token session。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要：仅接受 `$2a/$2b/$2y`、cost 10..14 和 53 字符编码体；非法或过高 cost 摘要改用安全 dummy 路径并返回统一登录失败。V13 把同一规则固化为数据库 CHECK，因此后续 SQL 的 `password_hash IS NOT NULL` 等价于“格式与成本可由当前登录实现验证”。Session 校验仍精确匹配 tenant、membership、user、credential，要求四者均为 `ACTIVE` 并比较 sessionVersion；授权加载另核 permissionVersion，Admin 写事务还会在锁后复核两个版本。任一环节失效都返回 401 `SESSION_INVALID`，服务端注销会话并清 Cookie。
+登录成功把 `userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/stepUpVerified` 写入 Sa-Token session。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要：仅接受 `$2a/$2b/$2y`、cost 10..14 和 53 字符编码体；非法或过高 cost 摘要改用安全 dummy 路径并返回统一登录失败。V13 把同一规则固化为数据库 CHECK，因此后续 SQL 的 `password_hash IS NOT NULL` 等价于“格式与成本可由当前登录实现验证”。Session bridge 精确匹配 tenant、membership、user、credential，要求四者均为 `ACTIVE`，并在一次数据库查询中同时比较 permissionVersion 与 sessionVersion。任一版本失效时，包含 `/auth/codes` 在内的下一个已认证请求都返回 401 `SESSION_INVALID`，服务端注销会话并清 Cookie；Admin 写事务还会在锁后复核两个版本。
 
 Sa-Token 配置：8 小时总超时、30 分钟 active timeout、禁止并发共享、只读 Cookie、不读 Header/Body、HttpOnly、SameSite Strict。生产环境应启用 Secure Cookie。
 
@@ -259,17 +259,19 @@ Role、Department、Menu 的管理读模型显式返回 `rowVersion`；PUT/PATCH
 
 三个迁移都使用 `NOT VALID` 后 `VALIDATE CONSTRAINT`，不静默清洗安全语义不明确的历史数据。
 
-### V14-V15 管理权限展开与滚动兼容
+### V14-V16 管理权限展开与滚动兼容
 
 V14 建立 19 个现代管理权限和 `role:grant-update` 管理面，并把可证明为单一 `TENANT/TENANT_ALL`、无 target、无有效期的旧 manage Grant 展开为细粒度 Grant。V15 修复 V14 的升级兼容缺口：对带有效期、多维度或 target 的旧 Grant 按原始范围和元数据克隆现代等价 Grant；恢复两个旧 manage Permission 供旧二进制滚动读取；递增所有受影响 role 与 membership 版本，并逐角色写审计、逐成员写 Outbox。
 
-旧 Grant 在 V15 期间作为兼容影子保留。现代 RoleGrant GET 忽略且不返回这两个已知影子，第一次 PUT 会原子停用目标角色全部旧/新 ACTIVE Grant 后写入现代全集。旧码不绑定当前 endpoint、不进入 grantable 目录，也没有 ACTIVE BUTTON。最终停用旧 Permission/Grant 需要独立 contract 迁移和 N/N-1 数据库兼容验证，当前不得宣称滚动迁移已经闭环。
+旧 Grant 在 V15 期间作为兼容影子保留。现代 RoleGrant GET 忽略且不返回这两个已知影子；生产默认令 `PAYMENT_LEGACY_ADMINISTRATION_CUTOVER_COMPLETE=false`，因此 GET 返回只读且 PUT 返回 40903。只有 N-1 实例和旧调用方清零、双版本验证与生产审批完成后，部署方才可显式打开开关；第一次 PUT 才会原子停用目标角色全部旧/新 ACTIVE Grant 后写入现代全集。local profile 无 N-1 共存，默认开启用于本地验收。旧码不绑定当前 endpoint、不进入 grantable 目录，也没有 ACTIVE BUTTON。最终停用旧 Permission/Grant 仍需要独立 contract 迁移，当前不得宣称滚动迁移已经闭环。
+
+V16 是只增不改的前向守卫：已执行的 V14/V15 不回写；V16 精确核验 21 条管理 Permission 的固定 ID、code/resource/action、风险、维度、step-up、approval、跨租户模式和状态。目录漂移会阻断升级，不自动修复权限事实。
 
 ### 迁移纪律
 
 - 所有已执行版本不可修改 checksum；
 - 结构和数据修正新增 V4+；
-- 同时测试空库从 V1 全量迁移、V2/V3 序列升级，以及 V8 fixture 隔离的成功与拒绝路径；V9-V13 遇到历史重复路由、非法授权组合、不安全外链、跨租户写 action 或非法 BCrypt 摘要必须拒绝升级；V14/V15 还要覆盖简单和带有效期/多维度/target 的旧 Grant 等价展开、版本、审计和 Outbox，禁止静默丢权；
+- 同时测试空库从 V1 全量迁移、V2/V3 序列升级，以及 V8 fixture 隔离的成功与拒绝路径；V9-V13 遇到历史重复路由、非法授权组合、不安全外链、跨租户写 action 或非法 BCrypt 摘要必须拒绝升级；V14/V15 还要覆盖简单和带有效期/多维度/target 的旧 Grant 等价展开、版本、审计和 Outbox，V16 覆盖目录元数据漂移的失败关闭，禁止静默丢权或自动修复未知权限事实；
 - 密码和固定身份初始化只允许 local profile；已有库先按 [V8 fixture 隔离迁移手册](../../runbooks/iam-v8-fixture-isolation.md) 盘点。无关真实数据可原样保留，只有落入预留 footprint 或依赖 tenant `1` 的历史数据才需要单独的前向迁移；
 - 菜单 component 和 i18n key 属于跨端协议，迁移前要有契约校验。
 

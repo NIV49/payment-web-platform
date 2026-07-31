@@ -137,7 +137,7 @@ stepUpVerified
 
 - tenantId、membershipId、operatorId 不从浏览器 body/query/header 获取；
 - 所有管理查询都强制使用 Session tenantId；
-- Session bridge 以 session 中的 tenantId + membershipId + userId 精确查询，并校验 Tenant、User、Credential、Membership 全部 `ACTIVE`、Credential hash 受 V13 约束满足统一 BCrypt 格式/成本策略以及当前 sessionVersion；权限加载另行比较当前 permissionVersion，Admin 写事务还会在锁后复核两个版本；任一环节失效都返回 401 `SESSION_INVALID`，服务端注销当前会话并清除 Cookie；
+- Session bridge 以 session 中的 tenantId + membershipId + userId 单次精确查询当前 permissionVersion 与 sessionVersion，并校验 Tenant、User、Credential、Membership 全部 `ACTIVE`、Credential hash 受 V13 约束满足统一 BCrypt 格式/成本策略；任一版本失效时，包含 `/auth/codes` 在内的下一个已认证请求立即返回 401 `SESSION_INVALID`，服务端注销当前会话并清除 Cookie；Admin 写事务还会在锁后复核两个版本；
 - Membership 更新、状态变化和终止会递增 Membership 的 sessionVersion 与 permissionVersion；
 - 角色更新、状态变化和删除会递增该角色成员的 permissionVersion；
 - 权限码从当前租户、当前 Membership 的有效 RoleGrant 读取。
@@ -605,17 +605,17 @@ RoleGrant     -> 后端动作和数据范围
 
 两者已在数据库模型和前端交互中分离。角色表单只保存 menuIds，并递归过滤 BUTTON；独立“功能权限”抽屉通过下节 RoleGrant API 读取和替换授权，绝不从 menuIds 推导 Grant。菜单管理树中的 BUTTON 是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
 
-`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。V15 中两个旧 Permission 处于 ACTIVE 兼容状态不等于旧 BUTTON 重新启用。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，并精确识别已经执行 V14+V15 的过渡状态；部分状态与预留键冲突继续失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
+`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。V15 中两个旧 Permission 处于 ACTIVE 兼容状态不等于旧 BUTTON 重新启用。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，并精确识别已经执行 V14+V15 的过渡状态；保留部门字段仍完全匹配时允许其乐观锁 rowVersion 因本地编辑往返而前进，任何字段或关系漂移仍失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
 
 ### 角色授权第一阶段 API
 
 以下端点统一返回 `ApiResponse<T>`，Long ID 仍使用字符串。三者都要求当前会话同时拥有 `role:view` 与 `role:grant-update`，并在数据库事务内重新验证操作者当前持有 ACTIVE `system_role`：
 
 - `GET /api/v1/iam/permissions/grantable`：只返回精确 18 个 NORMAL、SAME_TENANT_ONLY 管理权限；`role:grant-update` 仅属于 system-admin，不可委派；
-- `GET /api/v1/iam/roles/{roleId}/grants`：返回 `{roleId,roleVersion,editable,grants}`；system role 或存在当前页面不能无损表达的授权时 `editable=false`；
-- `PUT /api/v1/iam/roles/{roleId}/grants`：只接受非 system role、全量替换、必填 `expectedVersion` 与非空 `reason`。
+- `GET /api/v1/iam/roles/{roleId}/grants`：返回 `{roleId,roleVersion,editable,grants}`；system role、存在当前页面不能无损表达的授权，或旧管理权限 cutover 尚未完成时 `editable=false`；
+- `PUT /api/v1/iam/roles/{roleId}/grants`：只接受非 system role、全量替换、必填 `expectedVersion` 与非空 `reason`。生产默认关闭；未完成 cutover 时返回 40903 `LEGACY_ADMINISTRATION_CUTOVER_REQUIRED`。
 
-V15 为旧 manage Grant 建立等价的现代 Grant，同时保留旧 Grant 作为滚动兼容影子。GET 不把两个已知兼容影子暴露到现代编辑集合，也不会让它们单独触发只读；第一次 PUT 会在同一事务内停用目标角色全部 ACTIVE Grant（包含兼容影子），再写入请求的现代全集。其他未知权限、高风险、有效期、多维度或带 target 的 Grant 仍使页面只读，禁止静默覆盖。
+V15 为旧 manage Grant 建立等价的现代 Grant，同时保留旧 Grant 作为滚动兼容影子。GET 不把两个已知兼容影子暴露到现代编辑集合。只在所有 N-1 实例和旧调用方已经清零、双版本验证与生产审批完成后，部署方才可显式设置 `PAYMENT_LEGACY_ADMINISTRATION_CUTOVER_COMPLETE=true`；此后第一次 PUT 会在同一事务内停用目标角色全部 ACTIVE Grant（包含兼容影子），再写入请求的现代全集。`local` profile 不存在 N-1 共存，默认打开该开关用于验收。其他未知权限、高风险、有效期、多维度或带 target 的 Grant 仍使页面只读，禁止静默覆盖。
 
 Grant 请求和响应固定为：
 
@@ -765,13 +765,16 @@ V10__enforce_grant_dimension_mode_compatibility.sql
 V11__enforce_menu_external_navigation_safety.sql
 V12__restrict_related_party_mode_to_read_actions.sql
 V13__enforce_login_credential_hash_safety.sql
+V14__granular_administration_permissions.sql
+V15__expand_legacy_administration_permission_compatibility.sql
+V16__enforce_exact_administration_permission_catalog.sql
 ```
 
 语义：
 
 - `local` profile 启用自动迁移，但不启用 `baseline-on-migrate`；
 - 已经手工执行 V1、但没有 `flyway_schema_history` 的旧开发卷不属于升级契约；需要的数据先备份，然后从空库重建；
-- 全新空库正常执行 V1 到 V13；
+- 全新空库正常执行 V1 到 V16；
 - V2/V3 的历史固定身份和菜单只为兼容旧迁移链存在；V8 只在预留 footprint 仍是精确 fixture 时删除它，其他租户、用户、审计、Outbox 和扩展权限原样保留；
 - V3 为预置平台管理员补充 Dashboard、Analytics 和 Workspace 动态路由，保证 `/dashboard` 登录首页可用；
 - V4 把系统菜单 title 修正为 i18n key，并清除一级目录旧 `BasicLayout`；
@@ -779,6 +782,7 @@ V13__enforce_login_credential_hash_safety.sql
 - V9 为 tenant 内 canonical name `lower(COALESCE(NULLIF(BTRIM(route_name), ''), menu_name))` 和 canonical path（小写、去尾斜杠，根 `/` 例外）建唯一索引；preflight 与索引使用同一表达式，发现历史重复时整个迁移原子回滚，不猜测合并；
 - V10 以 Core 相同的 dimension/mode 允许矩阵增加 `CHECK` 并验证历史行；非法历史授权使迁移失败，不自动改权；
 - V11-V13 分别约束菜单外链、跨租户只读 action 和 BCrypt hash；历史非法数据使迁移失败，不做静默清洗；
+- V14 建立细粒度管理权限，V15 前向保留旧 manage Grant 的滚动兼容，V16 在不回写已执行 V14/V15 的前提下精确核验 21 条管理 Permission 的固定 ID、code/resource/action、风险、维度、step-up、approval、跨租户模式和状态；目录漂移使应用升级失败关闭且不自动修复；
 - `LocalIdentityFixtureBootstrap` 只在 `local` profile、Flyway 完成后事务性执行 `db/local/iam-local-bootstrap.sql` 并写入 BCrypt 密码；它允许管理员已有成功登录元数据和无碰撞的额外本地用户/角色/菜单，但密码配置变化、预留键碰撞或 fixture 关系被修改时拒绝启动；
 - 任何环境的迁移都不得依赖 `baseline-on-migrate=true` 自动猜测历史状态。
 
@@ -983,7 +987,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 - 前端所有请求 `withCredentials=true` 且不发送 Authorization marker；
 - `/user/info` 返回 `/dashboard`、空 `desc` 和固定非秘密 `cookie-session` marker；
 - mixed 路由只注册本地 `Profile`，后端与其 name/path 冲突时拒绝合并；
-- `/auth/codes` 对本地平台管理员返回且仅返回本轮 19 个 ACTIVE 管理权限码；
+- `/auth/codes` 对有效本地平台管理员返回且仅返回本轮 19 个 ACTIVE 管理权限码；permissionVersion 失效的旧 Cookie 立即返回 401 `SESSION_INVALID` 并清 Cookie；
 - 用户/角色/菜单/部门接口受后端权限拦截；
 - 未登记的 API method/path 默认返回 403；
 - 用户列表查询字段与本文一致；
