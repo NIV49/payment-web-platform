@@ -109,7 +109,7 @@ PUT /api/v1/iam/roles/{roleId}/grants
 }
 ```
 
-权限：`role:grant:update`。FUND Grant 还要求安全管理员或批准流程。
+权限码格式遵循现有 `resource:action` 两段约束，因此本项目使用 `role:grant-update`。第一阶段还同时要求 `role:view`、ACTIVE system role 操作者与非 system 目标角色；FUND Grant、targets、有效期和批准流程尚未开放。
 
 `riskLevel`、`requiresStepUp`、`requiresApproval` 和 `requiredDimensions` 不属于请求字段，必须从服务端 Permission Catalog 读取并校验。`grantKey` 只用于角色内的幂等定位；同一权限的多组相关范围必须使用不同 key，不能把商户和市场 target 扁平合并。
 

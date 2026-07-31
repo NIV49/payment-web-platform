@@ -1,52 +1,68 @@
 package com.niv.payment.permission.service;
 
-import com.niv.payment.permission.domain.PermissionGrant;
-import com.niv.payment.permission.domain.PermissionDefinition;
-import com.niv.payment.permission.domain.RiskLevel;
-import com.niv.payment.permission.port.PermissionCatalogPort;
+import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.domain.ScopeDimension;
+import com.niv.payment.permission.domain.ScopeMode;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+/** Constrained administration surface for normal, tenant-wide IAM grants. */
 public final class RoleGrantAdministrationService {
-    private final RoleGrantWritePort writePort;
-    private final PermissionCatalogPort permissionCatalog;
+    public static final String GRANT_UPDATE_PERMISSION = "role:grant-update";
+    public static final Set<String> GRANTABLE_CODES = Set.of(
+        "user:view", "user:create", "user:update", "user:delete", "user:disable", "user:assign-role",
+        "role:view", "role:create", "role:update", "role:delete",
+        "menu:view", "menu:create", "menu:update", "menu:delete",
+        "department:view", "department:create", "department:update", "department:delete");
 
-    public RoleGrantAdministrationService(RoleGrantWritePort writePort,
-                                          PermissionCatalogPort permissionCatalog) {
+    private final RoleGrantReadPort readPort;
+    private final RoleGrantWritePort writePort;
+
+    public RoleGrantAdministrationService(RoleGrantReadPort readPort, RoleGrantWritePort writePort) {
+        this.readPort = Objects.requireNonNull(readPort, "readPort");
         this.writePort = Objects.requireNonNull(writePort, "writePort");
-        this.permissionCatalog = Objects.requireNonNull(permissionCatalog, "permissionCatalog");
     }
 
-    public void replace(RoleGrantChangeCommand command) {
+    public List<RoleGrantModels.GrantablePermission> grantablePermissions(
+        long tenantId, AdministrationActor actor) {
+        if (tenantId <= 0) {
+            throw new IllegalArgumentException("Tenant identifier must be positive");
+        }
+        List<RoleGrantModels.GrantablePermission> catalog =
+            readPort.findGrantablePermissions(tenantId, Objects.requireNonNull(actor, "actor"));
+        Set<String> actual = catalog.stream().map(item -> item.code().value())
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (!actual.equals(GRANTABLE_CODES)) {
+            throw new IllegalStateException("Grantable permission catalog is incomplete or unsafe");
+        }
+        return List.copyOf(catalog);
+    }
+
+    public RoleGrantModels.RoleGrants find(long tenantId, AdministrationActor actor, long roleId) {
+        if (tenantId <= 0 || roleId <= 0) {
+            throw new IllegalArgumentException("Tenant and role identifiers must be positive");
+        }
+        return readPort.findRoleGrants(tenantId, Objects.requireNonNull(actor, "actor"), roleId);
+    }
+
+    public RoleGrantModels.RoleGrants replace(RoleGrantChangeCommand command) {
         Objects.requireNonNull(command, "command");
-        Set<Long> grantIds = new HashSet<>();
-        for (PermissionGrant grant : command.grants()) {
-            if (grant.roleId() != command.roleId()) {
-                throw new IllegalArgumentException("Every grant must belong to the role being changed");
+        Set<String> keys = new HashSet<>();
+        Set<String> permissions = new HashSet<>();
+        for (RoleGrantModels.Selection grant : command.grants()) {
+            if (!GRANTABLE_CODES.contains(grant.permission().value())) {
+                throw new IllegalArgumentException("Permission is not grantable from this administration surface");
             }
-            if (!grant.active()) {
-                throw new IllegalArgumentException("Replacement payload cannot contain inactive grants");
+            if (grant.dimension() != ScopeDimension.TENANT || grant.mode() != ScopeMode.TENANT_ALL) {
+                throw new IllegalArgumentException("Only TENANT/TENANT_ALL grants are supported");
             }
-            if (!grantIds.add(grant.id())) {
-                throw new IllegalArgumentException("Duplicate grant identifier in replacement payload");
-            }
-            PermissionDefinition definition = permissionCatalog.require(grant.permission());
-            if (!definition.active()) {
-                throw new IllegalArgumentException("Permission is disabled: " + grant.permission());
-            }
-            if (grant.riskLevel() != definition.riskLevel()
-                || grant.crossTenantMode() != definition.crossTenantMode()
-                || !grant.requiredDimensions().equals(definition.requiredDimensions())
-                || grant.requiresStepUp() != definition.requiresStepUp()
-                || grant.requiresApproval() != definition.requiresApproval()) {
-                throw new IllegalArgumentException("Grant metadata does not match the trusted permission catalog");
-            }
-            if (grant.riskLevel() == RiskLevel.FUND && !grant.requiresStepUp()) {
-                throw new IllegalArgumentException("FUND permissions must explicitly require step-up authentication");
+            if (!keys.add(grant.grantKey()) || !permissions.add(grant.permission().value())) {
+                throw new IllegalArgumentException("Duplicate grant key or permission");
             }
         }
-        writePort.replaceAtomically(command);
+        return writePort.replaceAtomically(command);
     }
 }

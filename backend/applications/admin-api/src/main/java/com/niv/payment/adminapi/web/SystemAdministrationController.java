@@ -233,7 +233,7 @@ public class SystemAdministrationController {
     }
     private RoleResponse role(IdentityModels.Role r) {
         return new RoleResponse(Long.toString(r.id()), r.name(), r.menuIds().stream().map(String::valueOf).toList(),
-            r.status(), r.remark(), r.rowVersion(), r.createdAt().toString());
+            r.status(), r.remark(), r.rowVersion(), r.systemRole(), r.assignable(), r.createdAt().toString());
     }
     private List<DepartmentResponse> departmentTree(List<IdentityModels.Department> rows) {
         return tree(rows, IdentityModels.Department::id, IdentityModels.Department::parentId,
@@ -298,7 +298,7 @@ public class SystemAdministrationController {
                         List<String> roleNames,int status,String identityStatus,long userVersion,String remark,
                         String createTime) { }
     record RoleResponse(String id,String name,List<String> menuIds,int status,String remark,long rowVersion,
-                        String createTime) { }
+                        boolean systemRole,boolean assignable,String createTime) { }
     record DepartmentResponse(String id,String pid,String name,int status,String remark,long rowVersion,String createTime,
                               List<DepartmentResponse> children) { }
     record MenuResponse(String id,String pid,String type,String name,String path,String component,String redirect,

@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MENU;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_PERMISSION;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.ACTIVE;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.DISABLED;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.notFound;
@@ -62,12 +63,14 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         if (!parentAllowed(nodes, menuId, command.parentId(), state)) {
             throw new IllegalArgumentException("Invalid menu parent");
         }
+        String persistedType = menuType(command.type());
+        validateAuthorizationCode(persistedType, command.authCode());
         requireUniqueRoute(tenantId, routeName, routePath, null);
         dsl.insertInto(IAM_MENU)
             .set(IAM_MENU.ID, menuId)
             .set(IAM_MENU.TENANT_ID, tenantId)
             .set(IAM_MENU.PARENT_ID, command.parentId())
-            .set(IAM_MENU.MENU_TYPE, menuType(command.type()))
+            .set(IAM_MENU.MENU_TYPE, persistedType)
             .set(IAM_MENU.MENU_NAME, routeName)
             .set(IAM_MENU.ROUTE_NAME, routeName)
             .set(IAM_MENU.ROUTE_PATH, routePath)
@@ -78,7 +81,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
             .set(IAM_MENU.STATUS, state)
             .set(IAM_MENU.SORT_ORDER, 999)
             .execute();
-        support.audit(tenantId, actor.membershipId(), "MENU", menuId, "CREATE", "menu:manage");
+        support.audit(tenantId, actor.membershipId(), "MENU", menuId, "CREATE", "menu:create");
         return menuId;
     }
 
@@ -98,6 +101,12 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         if (!parentAllowed(nodes, menuId, command.parentId(), state)) {
             throw new IllegalArgumentException("Invalid menu parent");
         }
+        String persistedType = menuType(command.type());
+        if ("BUTTON".equals(persistedType) && nodes.values().stream()
+            .anyMatch(node -> Objects.equals(node.parentId(), menuId))) {
+            throw new IllegalArgumentException("A button cannot be a menu parent");
+        }
+        validateAuthorizationCode(persistedType, command.authCode());
         if (DISABLED.equals(state) && hasActiveDescendants(tenantId, menuId)) {
             throw new IdentityAdministrationService.DataConflictException(
                 "Menu has active descendants");
@@ -105,7 +114,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         requireUniqueRoute(tenantId, routeName, routePath, menuId);
         int updated = dsl.update(IAM_MENU)
             .set(IAM_MENU.PARENT_ID, command.parentId())
-            .set(IAM_MENU.MENU_TYPE, menuType(command.type()))
+            .set(IAM_MENU.MENU_TYPE, persistedType)
             .set(IAM_MENU.MENU_NAME, routeName)
             .set(IAM_MENU.ROUTE_NAME, routeName)
             .set(IAM_MENU.ROUTE_PATH, routePath)
@@ -121,7 +130,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
                 .and(IAM_MENU.ROW_VERSION.eq(expectedVersion)))
             .execute();
         requireSuccessfulMutation(updated, tenantId, menuId);
-        support.audit(tenantId, actor.membershipId(), "MENU", menuId, "UPDATE", "menu:manage");
+        support.audit(tenantId, actor.membershipId(), "MENU", menuId, "UPDATE", "menu:update");
     }
 
     @Override
@@ -142,7 +151,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
                 .and(IAM_MENU.ROW_VERSION.eq(expectedVersion)))
             .execute();
         requireSuccessfulMutation(updated, tenantId, menuId);
-        support.audit(tenantId, actor.membershipId(), "MENU", menuId, "DELETE", "menu:manage");
+        support.audit(tenantId, actor.membershipId(), "MENU", menuId, "DELETE", "menu:delete");
     }
 
     @Override
@@ -173,11 +182,13 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
 
     private boolean parentAllowed(Map<Long, TreeNode> nodes, long menuId, Long parentId, String state) {
         TreeNode parent = parentId == null ? null : nodes.get(parentId);
-        if (parentId != null && (parent == null || (ACTIVE.equals(state) && !ACTIVE.equals(parent.status())))) {
+        if (parentId != null && (parent == null || "BUTTON".equals(parent.type())
+            || (ACTIVE.equals(state) && !ACTIVE.equals(parent.status())))) {
             return false;
         }
         Map<Long, TreeNode> candidate = new LinkedHashMap<>(nodes);
-        candidate.put(menuId, new TreeNode(parentId, state));
+        candidate.put(menuId, new TreeNode(parentId, state,
+            nodes.containsKey(menuId) ? nodes.get(menuId).type() : null));
         return isValidTree(candidate);
     }
 
@@ -206,7 +217,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
 
     private Map<Long, TreeNode> nodes(long tenantId) {
         Map<Long, TreeNode> nodes = new LinkedHashMap<>();
-        var rows = dsl.select(IAM_MENU.ID, IAM_MENU.PARENT_ID, IAM_MENU.STATUS)
+        var rows = dsl.select(IAM_MENU.ID, IAM_MENU.PARENT_ID, IAM_MENU.STATUS, IAM_MENU.MENU_TYPE)
             .from(IAM_MENU)
             .where(IAM_MENU.TENANT_ID.eq(tenantId))
             .limit(MAX_TREE_NODES + 1)
@@ -215,8 +226,19 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
             throw new IdentityAdministrationService.TreeLimitExceededException("Tree node limit exceeded");
         }
         rows.forEach(row -> nodes.put(row.get(IAM_MENU.ID),
-                new TreeNode(row.get(IAM_MENU.PARENT_ID), row.get(IAM_MENU.STATUS))));
+                new TreeNode(row.get(IAM_MENU.PARENT_ID), row.get(IAM_MENU.STATUS), row.get(IAM_MENU.MENU_TYPE))));
         return nodes;
+    }
+
+    private void validateAuthorizationCode(String persistedType, String authCode) {
+        String code = JooqAdministrationSupport.blankToNull(authCode);
+        if ("BUTTON".equals(persistedType) && code == null) {
+            throw new IllegalArgumentException("Button permission code is required");
+        }
+        if (code != null && !dsl.fetchExists(dsl.selectOne().from(IAM_PERMISSION)
+            .where(IAM_PERMISSION.PERMISSION_CODE.eq(code).and(IAM_PERMISSION.STATUS.eq(ACTIVE))))) {
+            throw new IllegalArgumentException("Button permission code is unknown or disabled");
+        }
     }
 
     private static boolean isValidTree(Map<Long, TreeNode> nodes) {
@@ -287,6 +309,6 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         };
     }
 
-    private record TreeNode(Long parentId, String status) {
+    private record TreeNode(Long parentId, String status, String type) {
     }
 }

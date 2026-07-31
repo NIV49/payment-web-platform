@@ -251,6 +251,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 IAM_ROLE.STATUS,
                 IAM_ROLE.REMARK,
                 IAM_ROLE.ROW_VERSION,
+                IAM_ROLE.SYSTEM_ROLE,
+                IAM_ROLE.ASSIGNABLE,
                 IAM_ROLE.CREATED_AT)
             .from(IAM_ROLE)
             .where(condition)
@@ -268,6 +270,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 apiStatus(row.get(IAM_ROLE.STATUS)),
                 row.get(IAM_ROLE.REMARK),
                 row.get(IAM_ROLE.ROW_VERSION),
+                Boolean.TRUE.equals(row.get(IAM_ROLE.SYSTEM_ROLE)),
+                Boolean.TRUE.equals(row.get(IAM_ROLE.ASSIGNABLE)),
                 instant(row.get(IAM_ROLE.CREATED_AT))))
             .toList();
         long total = dsl.selectCount()

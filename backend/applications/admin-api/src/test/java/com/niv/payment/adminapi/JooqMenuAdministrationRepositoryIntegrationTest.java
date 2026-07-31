@@ -108,6 +108,28 @@ class JooqMenuAdministrationRepositoryIntegrationTest {
     }
 
     @Test
+    void buttonCannotBecomeAParentAndMustReferenceAnActiveCatalogPermission() {
+        long button = repository.createMenu(TENANT_A, ACTOR_A,
+            new IdentityModels.MenuCommand(null, "button", "PermissionButton", null, null,
+                null, "user:view", "{}", 1));
+
+        assertThrows(IllegalArgumentException.class, () -> repository.createMenu(
+            TENANT_A, ACTOR_A, command(button, "RejectedButtonChild", "/button-child", 1)));
+        assertThrows(IllegalArgumentException.class, () -> repository.createMenu(
+            TENANT_A, ACTOR_A, new IdentityModels.MenuCommand(null, "button", "UnknownPermissionButton",
+                null, null, null, "unknown:permission", "{}", 1)));
+
+        long parent = repository.createMenu(
+            TENANT_A, ACTOR_A, command(null, "ParentWithChild", "/parent-with-child", 1));
+        repository.createMenu(
+            TENANT_A, ACTOR_A, command(parent, "ExistingChild", "/existing-child", 1));
+        assertThrows(IllegalArgumentException.class, () -> repository.updateMenu(
+            TENANT_A, ACTOR_A, parent,
+            new IdentityModels.MenuCommand(null, "button", "ParentWithChild", null, null,
+                null, "user:view", "{}", 1), 0L));
+    }
+
+    @Test
     void activeDeepDescendantBlocksAncestorDisableAndDelete() {
         long root = repository.createMenu(
             TENANT_A, ACTOR_A, command(null, "DeepRoot", "/deep-root", 1));

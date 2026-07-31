@@ -15,6 +15,7 @@ public final class AdminApiPermissionPolicy {
     private static final Pattern ROLE_STATUS = Pattern.compile("^/api/system/role/[1-9][0-9]*/status$");
     private static final Pattern MENU_ITEM = Pattern.compile("^/api/system/menu/[1-9][0-9]*$");
     private static final Pattern DEPARTMENT_ITEM = Pattern.compile("^/api/system/dept/[1-9][0-9]*$");
+    private static final Pattern ROLE_GRANTS = Pattern.compile("^/api/v1/iam/roles/[1-9][0-9]*/grants$");
 
     public boolean isPublic(String method, String path) {
         return "POST".equals(method) && "/api/auth/login".equals(path);
@@ -38,21 +39,25 @@ public final class AdminApiPermissionPolicy {
             return List.of("role:update");
         }
         if ("DELETE".equals(method) && ROLE_ITEM.matcher(path).matches()) return List.of("role:delete");
+        if ("GET".equals(method) && "/api/v1/iam/permissions/grantable".equals(path)) {
+            return List.of("role:view", "role:grant-update");
+        }
+        if (("GET".equals(method) || "PUT".equals(method)) && ROLE_GRANTS.matcher(path).matches()) {
+            return List.of("role:view", "role:grant-update");
+        }
 
         if ("GET".equals(method) && ("/api/system/menu/list".equals(path)
             || "/api/system/menu/name-exists".equals(path) || "/api/system/menu/path-exists".equals(path))) {
             return List.of("menu:view");
         }
-        if ("POST".equals(method) && "/api/system/menu".equals(path)) return List.of("menu:manage");
-        if (("PUT".equals(method) || "DELETE".equals(method)) && MENU_ITEM.matcher(path).matches()) {
-            return List.of("menu:manage");
-        }
+        if ("POST".equals(method) && "/api/system/menu".equals(path)) return List.of("menu:create");
+        if ("PUT".equals(method) && MENU_ITEM.matcher(path).matches()) return List.of("menu:update");
+        if ("DELETE".equals(method) && MENU_ITEM.matcher(path).matches()) return List.of("menu:delete");
 
         if ("GET".equals(method) && "/api/system/dept/list".equals(path)) return List.of("department:view");
-        if ("POST".equals(method) && "/api/system/dept".equals(path)) return List.of("department:manage");
-        if (("PUT".equals(method) || "DELETE".equals(method)) && DEPARTMENT_ITEM.matcher(path).matches()) {
-            return List.of("department:manage");
-        }
+        if ("POST".equals(method) && "/api/system/dept".equals(path)) return List.of("department:create");
+        if ("PUT".equals(method) && DEPARTMENT_ITEM.matcher(path).matches()) return List.of("department:update");
+        if ("DELETE".equals(method) && DEPARTMENT_ITEM.matcher(path).matches()) return List.of("department:delete");
 
         throw new AccessDeniedException();
     }

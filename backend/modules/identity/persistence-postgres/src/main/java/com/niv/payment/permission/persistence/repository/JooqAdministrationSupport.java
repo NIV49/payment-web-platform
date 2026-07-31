@@ -84,6 +84,36 @@ final class JooqAdministrationSupport {
         }
     }
 
+    void validateActor(long tenantId, AdministrationActor actor) {
+        Objects.requireNonNull(actor, "actor");
+        requirePlatformTenant(tenantId);
+        var currentVersions = dsl.select(
+                IAM_MEMBERSHIP.PERMISSION_VERSION,
+                IAM_MEMBERSHIP.SESSION_VERSION)
+            .from(IAM_MEMBERSHIP)
+            .join(IAM_USER)
+                .on(IAM_USER.ID.eq(IAM_MEMBERSHIP.USER_ID)
+                    .and(IAM_USER.STATUS.eq(ACTIVE)))
+            .join(IAM_AUTHENTICATION_CREDENTIAL)
+                .on(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(IAM_USER.ID)
+                    .and(IAM_AUTHENTICATION_CREDENTIAL.STATUS.eq(ACTIVE))
+                    .and(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH.isNotNull()))
+            .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
+                .and(IAM_MEMBERSHIP.ID.eq(actor.membershipId()))
+                .and(IAM_MEMBERSHIP.USER_ID.eq(actor.expectedUserId()))
+                .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE)))
+            .fetchOne();
+        if (currentVersions == null) {
+            throw new InvalidAuthorizationSubjectException();
+        }
+        if (currentVersions.value1() != actor.expectedPermissionVersion()) {
+            throw new StalePermissionVersionException();
+        }
+        if (currentVersions.value2() != actor.expectedSessionVersion()) {
+            throw new InvalidAuthorizationSubjectException();
+        }
+    }
+
     long nextId() {
         var nextId = IAM_ID_SEQ.nextval();
         Long id = dsl.select(nextId).fetchOne(nextId);

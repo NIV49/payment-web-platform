@@ -236,8 +236,10 @@ class AdminApiContractIntegrationTest {
             .andExpect(jsonPath("$.data.userId").value("100"))
             .andExpect(jsonPath("$.data.homePath").value("/dashboard"));
         mvc.perform(get("/api/auth/codes").cookie(cookie)).andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.length()").value(14))
-            .andExpect(jsonPath("$.data[?(@ == 'user:assign-role')]").exists());
+            .andExpect(jsonPath("$.data.length()").value(19))
+            .andExpect(jsonPath("$.data[?(@ == 'user:assign-role')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'role:grant-update')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'menu:manage')]").doesNotExist());
         String dynamicMenuBody = mvc.perform(get("/api/menu/all").cookie(cookie)).andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].pid").value("0"))
             .andExpect(jsonPath("$.data[0].component").doesNotExist())
@@ -259,7 +261,9 @@ class AdminApiContractIntegrationTest {
         mvc.perform(get("/api/system/role/list?page=1&pageSize=200&status=1").cookie(cookie))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.items[0].status").value(1))
-            .andExpect(jsonPath("$.data.items[0].rowVersion").isNumber());
+            .andExpect(jsonPath("$.data.items[0].rowVersion").isNumber())
+            .andExpect(jsonPath("$.data.items[0].systemRole").isBoolean())
+            .andExpect(jsonPath("$.data.items[0].assignable").isBoolean());
         mvc.perform(get("/api/system/dept/list").cookie(cookie))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].pid").value("0"))
@@ -277,7 +281,214 @@ class AdminApiContractIntegrationTest {
             .containsExactlyInAnyOrder(
                 "user:view", "user:create", "user:update", "user:delete", "user:disable", "user:assign-role",
                 "role:view", "role:create", "role:update", "role:delete",
-                "menu:view", "menu:manage", "department:view", "department:manage");
+                "menu:view", "menu:manage", "menu:create", "menu:update", "menu:delete",
+                "department:view", "department:manage", "department:create", "department:update",
+                "department:delete", "role:grant-update");
+    }
+
+    @Test
+    void roleGrantEndpointsKeepPresentationMenusSeparateAndUseTheFrozenDimensionsContract() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        mvc.perform(get("/api/v1/iam/permissions/grantable").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.length()").value(18))
+            .andExpect(jsonPath("$.data[0].permissionCode").isString())
+            .andExpect(jsonPath("$.data[0].riskLevel").value("NORMAL"))
+            .andExpect(jsonPath("$.data[0].requiredDimensions[0].code").value("TENANT"))
+            .andExpect(jsonPath("$.data[0].requiredDimensions[0].allowedModes[0]").value("TENANT_ALL"))
+            .andExpect(jsonPath("$.data[0].allowedScopeModes").doesNotExist());
+
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Grant Contract Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        List<Long> menuIdsBefore = jdbc.queryForList(
+            "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
+            Long.class, Long.parseLong(roleId));
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roleId").value(roleId))
+            .andExpect(jsonPath("$.data.roleVersion").value(0))
+            .andExpect(jsonPath("$.data.editable").value(true))
+            .andExpect(jsonPath("$.data.grants.length()").value(0));
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("""
+                    {"expectedVersion":0,"reason":"least privilege acceptance",
+                     "grants":[{"grantKey":"user-view","permissionCode":"user:view",
+                       "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roleVersion").value(1))
+            .andExpect(jsonPath("$.data.grants[0].permissionCode").value("user:view"))
+            .andExpect(jsonPath("$.data.grants[0].dimensions[0].code").value("TENANT"))
+            .andExpect(jsonPath("$.data.grants[0].dimensions[0].mode").value("TENANT_ALL"))
+            .andExpect(jsonPath("$.data.grants[0].dimensions[0].targets.length()").value(0))
+            .andExpect(jsonPath("$.data.grants[0].dimension").doesNotExist());
+
+        assertThat(jdbc.queryForList(
+            "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
+            Long.class, Long.parseLong(roleId))).isEqualTo(menuIdsBefore);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
+            """, Long.class, roleId)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE_GRANTS' AND aggregate_ref=?
+            """, Long.class, roleId)).isOne();
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"stale\",\"grants\":[]}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("OPTIMISTIC_LOCK_CONFLICT"));
+        mvc.perform(put("/api/v1/iam/roles/2000/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"forbidden system role\",\"grants\":[]}"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void roleGrantEndpointsRecheckSystemRoleAfterTheHttpPermissionGate() throws Exception {
+        mvc.perform(get("/api/v1/iam/permissions/grantable"))
+            .andExpect(status().isUnauthorized());
+
+        long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long roleViewGrant = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long grantUpdateGrant = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long roleViewDimension = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long grantUpdateDimension = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES (?,1,?,?,'PLATFORM',true,false,'ACTIVE')
+            """, roleId, "grant-gate-" + roleId, "Grant Gate " + roleId);
+        jdbc.update("INSERT INTO iam_membership_role(tenant_id,membership_id,role_id) VALUES(1,802,?)", roleId);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3007,'gate-role-view','ACTIVE'),
+                   (?,1,?,3021,'gate-grant-update','ACTIVE')
+            """, roleViewGrant, roleId, grantUpdateGrant, roleId);
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL'),(?,?,'TENANT','TENANT_ALL')
+            """, roleViewDimension, roleViewGrant, grantUpdateDimension, grantUpdateGrant);
+        try {
+            Cookie restricted = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            mvc.perform(get("/api/v1/iam/permissions/grantable").cookie(restricted))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802 AND role_id=?", roleId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+            jdbc.update("UPDATE iam_membership SET permission_version=permission_version+1 WHERE tenant_id=1 AND id=802");
+        }
+    }
+
+    @Test
+    void roleGrantEndpointsAcceptAnActorWithMultipleActiveSystemRoles() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES (?,1,?,?,'PLATFORM',false,true,'ACTIVE')
+            """, roleId, "second-system-role-" + roleId, "Second System Role " + roleId);
+        jdbc.update("INSERT INTO iam_membership_role(tenant_id,membership_id,role_id) VALUES(1,1000,?)", roleId);
+        try {
+            mvc.perform(get("/api/v1/iam/permissions/grantable").cookie(cookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(18));
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=1000 AND role_id=?",
+                roleId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+        }
+    }
+
+    @Test
+    void unsupportedExistingGrantMakesTheRoleReadOnlyAndRejectsReplacement() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Unsupported Grant Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3021,'unsupported-admin-only','ACTIVE')
+            """, grantId, Long.parseLong(roleId));
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"must reject unsupported\",\"grants\":[]}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+    }
+
+    @Test
+    void outboxFailureRollsBackRoleGrantReplacementAuditAndVersion() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Grant Rollback Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        jdbc.execute("""
+            CREATE FUNCTION fail_selected_role_grant_outbox()
+            RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NEW.aggregate_type='ROLE_GRANTS' AND NEW.aggregate_ref='%s' THEN
+                    RAISE EXCEPTION 'forced role grant outbox failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+            """.formatted(roleId));
+        jdbc.execute("""
+            CREATE TRIGGER trg_fail_selected_role_grant_outbox
+            BEFORE INSERT ON iam_permission_change_outbox
+            FOR EACH ROW EXECUTE FUNCTION fail_selected_role_grant_outbox()
+            """);
+        try {
+            mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                    .header("Origin", ORIGIN).contentType("application/json")
+                    .content("""
+                        {"expectedVersion":0,"reason":"rollback acceptance",
+                         "grants":[{"grantKey":"user-view","permissionCode":"user:view",
+                           "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                        """))
+                .andExpect(status().isInternalServerError());
+        } finally {
+            jdbc.execute("DROP TRIGGER trg_fail_selected_role_grant_outbox ON iam_permission_change_outbox");
+            jdbc.execute("DROP FUNCTION fail_selected_role_grant_outbox()");
+        }
+
+        assertThat(jdbc.queryForObject("SELECT row_version FROM iam_role WHERE id=?", Long.class,
+            Long.parseLong(roleId))).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=?",
+            Long.class, Long.parseLong(roleId))).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
+            """, Long.class, roleId)).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE_GRANTS' AND aggregate_ref=?
+            """, Long.class, roleId)).isZero();
     }
 
     @Test

@@ -3,8 +3,8 @@ package com.niv.payment.permission.service;
 @FunctionalInterface
 public interface RoleGrantWritePort {
     /**
-     * Implementations must replace grants, bump affected membership permission
-     * versions, and append audit/outbox events in one database transaction.
+     * Replaces grants, bumps affected permission versions, and appends audit and
+     * outbox records in one transaction.
      */
-    void replaceAtomically(RoleGrantChangeCommand command);
+    RoleGrantModels.RoleGrants replaceAtomically(RoleGrantChangeCommand command);
 }

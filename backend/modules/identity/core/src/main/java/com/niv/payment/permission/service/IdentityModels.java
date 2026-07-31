@@ -23,7 +23,7 @@ public final class IdentityModels {
     }
 
     public record Role(long id, String name, List<Long> menuIds, int status, String remark,
-                       long rowVersion, Instant createdAt) {
+                       long rowVersion, boolean systemRole, boolean assignable, Instant createdAt) {
         public Role { menuIds = List.copyOf(menuIds); }
     }
 

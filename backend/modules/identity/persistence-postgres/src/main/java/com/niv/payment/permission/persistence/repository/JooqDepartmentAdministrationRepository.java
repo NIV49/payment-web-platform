@@ -70,7 +70,7 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
             .set(IAM_DEPARTMENT.REMARK, JooqAdministrationSupport.blankToNull(command.remark()))
             .execute();
         support.audit(tenantId, actor.membershipId(), "DEPARTMENT", departmentId,
-            "CREATE", "department:manage");
+            "CREATE", "department:create");
         return departmentId;
     }
 
@@ -105,7 +105,7 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
             .execute();
         requireSuccessfulMutation(updated, tenantId, departmentId);
         support.audit(tenantId, actor.membershipId(), "DEPARTMENT", departmentId,
-            "UPDATE", "department:manage");
+            "UPDATE", "department:update");
     }
 
     @Override
@@ -128,7 +128,7 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
             .execute();
         requireSuccessfulMutation(updated, tenantId, departmentId);
         support.audit(tenantId, actor.membershipId(), "DEPARTMENT", departmentId,
-            "DELETE", "department:manage");
+            "DELETE", "department:delete");
     }
 
     private boolean parentAllowed(Map<Long, TreeNode> nodes, long departmentId, Long parentId, String state) {

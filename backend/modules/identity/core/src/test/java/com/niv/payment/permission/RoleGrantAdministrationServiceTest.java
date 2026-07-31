@@ -1,58 +1,115 @@
 package com.niv.payment.permission;
 
+import com.niv.payment.permission.domain.AdministrationActor;
 import com.niv.payment.permission.domain.PermissionCode;
-import com.niv.payment.permission.domain.PermissionDefinition;
-import com.niv.payment.permission.domain.PermissionGrant;
-import com.niv.payment.permission.domain.RiskLevel;
+import com.niv.payment.permission.domain.ScopeDimension;
+import com.niv.payment.permission.domain.ScopeMode;
 import com.niv.payment.permission.service.RoleGrantAdministrationService;
 import com.niv.payment.permission.service.RoleGrantChangeCommand;
-import com.niv.payment.permission.service.RoleGrantWritePort;
+import com.niv.payment.permission.service.RoleGrantModels;
+import com.niv.payment.permission.service.RoleGrantReadPort;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoleGrantAdministrationServiceTest {
+    private static final AdministrationActor ACTOR = new AdministrationActor(5L, 6L, 0L, 0L);
 
     @Test
-    void rejectsFundCatalogEntryThatDoesNotExplicitlyRequireStepUp() {
-        PermissionGrant invalid = new PermissionGrant(1L, 2L, PermissionCode.of("payout:approve"), RiskLevel.FUND,
-            Set.of(), List.of(), false, true, true);
-        RoleGrantAdministrationService service = new RoleGrantAdministrationService(command -> {
-            throw new AssertionError("Invalid change must not reach persistence");
-        }, code -> new PermissionDefinition(code, RiskLevel.FUND, Set.of(), true, true, true));
+    void exposesOnlyTheExactNormalTenantAdministrationCatalog() {
+        var catalog = RoleGrantAdministrationService.GRANTABLE_CODES.stream().sorted()
+            .map(code -> {
+                PermissionCode permission = PermissionCode.of(code);
+                String[] segments = code.split(":", 2);
+                return new RoleGrantModels.GrantablePermission(permission, segments[0], segments[1]);
+            }).toList();
+        var service = new RoleGrantAdministrationService(readPort(catalog), command -> {
+            throw new AssertionError("Write not expected");
+        });
 
-        assertThrows(IllegalArgumentException.class, () -> service.replace(
-            new RoleGrantChangeCommand(3L, 2L, 4L, 5L, List.of(invalid))));
+        assertEquals(18, service.grantablePermissions(3L, ACTOR).size());
     }
 
     @Test
-    void delegatesValidatedReplacementToOneAtomicWriteBoundary() {
-        AtomicBoolean called = new AtomicBoolean();
-        RoleGrantWritePort port = command -> called.set(true);
-        PermissionGrant normal = new PermissionGrant(1L, 2L, PermissionCode.of("order:view"), RiskLevel.NORMAL,
-            Set.of(), List.of(), false, false, true);
+    void failsClosedWhenTheDatabaseCatalogIsIncomplete() {
+        var service = new RoleGrantAdministrationService(readPort(List.of()), command -> {
+            throw new AssertionError("Write not expected");
+        });
 
-        new RoleGrantAdministrationService(port,
-            code -> new PermissionDefinition(code, RiskLevel.NORMAL, Set.of(), false, false, true)).replace(
-            new RoleGrantChangeCommand(3L, 2L, 4L, 5L, List.of(normal)));
+        assertThrows(IllegalStateException.class, () -> service.grantablePermissions(3L, ACTOR));
+    }
+
+    @Test
+    void delegatesAValidatedTenantWideReplacementToOneAtomicWriteBoundary() {
+        AtomicBoolean called = new AtomicBoolean();
+        RoleGrantModels.Selection selection = selection("user-view", "user:view");
+        var service = new RoleGrantAdministrationService(readPort(List.of()), command -> {
+            called.set(true);
+            return new RoleGrantModels.RoleGrants(command.roleId(), command.expectedRoleVersion() + 1,
+                true, command.grants());
+        });
+
+        RoleGrantModels.RoleGrants result = service.replace(new RoleGrantChangeCommand(
+            3L, 2L, 4L, ACTOR, "least privilege", List.of(selection)));
 
         assertTrue(called.get());
+        assertEquals(5L, result.roleVersion());
     }
 
     @Test
-    void rejectsAnAttemptToDowngradeCatalogRiskMetadata() {
-        PermissionGrant forged = new PermissionGrant(1L, 2L, PermissionCode.of("payout:approve"), RiskLevel.NORMAL,
-            Set.of(), List.of(), false, false, true);
-        var service = new RoleGrantAdministrationService(command -> {
-            throw new AssertionError("Forged metadata must not reach persistence");
-        }, code -> new PermissionDefinition(code, RiskLevel.FUND, Set.of(), true, true, true));
+    void rejectsAdminOnlyUnknownAndNonTenantGrantIntentBeforePersistence() {
+        var service = new RoleGrantAdministrationService(readPort(List.of()), command -> {
+            throw new AssertionError("Invalid change must not reach persistence");
+        });
+        assertThrows(IllegalArgumentException.class, () -> service.replace(command(
+            selection("grant-admin", RoleGrantAdministrationService.GRANT_UPDATE_PERMISSION))));
+        assertThrows(IllegalArgumentException.class, () -> service.replace(command(
+            selection("unknown", "payout:view"))));
+        assertThrows(IllegalArgumentException.class, () -> service.replace(command(
+            new RoleGrantModels.Selection("wrong-scope", PermissionCode.of("user:view"),
+                ScopeDimension.DEPARTMENT, ScopeMode.DEPARTMENT))));
+    }
 
-        assertThrows(IllegalArgumentException.class, () -> service.replace(
-            new RoleGrantChangeCommand(3L, 2L, 4L, 5L, List.of(forged))));
+    @Test
+    void rejectsDuplicatePermissionOrGrantKey() {
+        var service = new RoleGrantAdministrationService(readPort(List.of()), command -> {
+            throw new AssertionError("Invalid change must not reach persistence");
+        });
+        assertThrows(IllegalArgumentException.class, () -> service.replace(new RoleGrantChangeCommand(
+            3L, 2L, 4L, ACTOR, "duplicate", List.of(
+                selection("first", "user:view"), selection("second", "user:view")))));
+        assertThrows(IllegalArgumentException.class, () -> service.replace(new RoleGrantChangeCommand(
+            3L, 2L, 4L, ACTOR, "duplicate", List.of(
+                selection("same", "user:view"), selection("same", "role:view")))));
+    }
+
+    private static RoleGrantChangeCommand command(RoleGrantModels.Selection selection) {
+        return new RoleGrantChangeCommand(3L, 2L, 4L, ACTOR, "test", List.of(selection));
+    }
+
+    private static RoleGrantModels.Selection selection(String key, String code) {
+        return new RoleGrantModels.Selection(key, PermissionCode.of(code),
+            ScopeDimension.TENANT, ScopeMode.TENANT_ALL);
+    }
+
+    private static RoleGrantReadPort readPort(List<RoleGrantModels.GrantablePermission> catalog) {
+        return new RoleGrantReadPort() {
+            @Override
+            public List<RoleGrantModels.GrantablePermission> findGrantablePermissions(
+                long tenantId, AdministrationActor actor) {
+                return catalog;
+            }
+
+            @Override
+            public RoleGrantModels.RoleGrants findRoleGrants(
+                long tenantId, AdministrationActor actor, long roleId) {
+                return new RoleGrantModels.RoleGrants(roleId, 0L, true, List.of());
+            }
+        };
     }
 }

@@ -16,12 +16,14 @@ import com.niv.payment.permission.persistence.repository.JooqMembershipVersionRe
 import com.niv.payment.permission.persistence.repository.JooqMenuAdministrationRepository;
 import com.niv.payment.permission.persistence.repository.JooqPermissionGrantRepository;
 import com.niv.payment.permission.persistence.repository.JooqRoleAdministrationRepository;
+import com.niv.payment.permission.persistence.repository.JooqRoleGrantAdministrationRepository;
 import com.niv.payment.permission.persistence.repository.JooqUserAdministrationRepository;
 import com.niv.payment.permission.security.SaTokenSessionBridge;
 import com.niv.payment.permission.security.SaTokenSessionIssuer;
 import com.niv.payment.permission.security.StpUtilSaTokenFacade;
 import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
+import com.niv.payment.permission.service.RoleGrantAdministrationService;
 import org.jooq.DSLContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -65,6 +67,17 @@ public class IdentityConfiguration {
     JooqMenuAdministrationRepository menuAdministrationRepository(
         DSLContext dsl, JooqIdentityQueryRepository queries) {
         return new JooqMenuAdministrationRepository(dsl, queries, RequestTrace::current);
+    }
+
+    @Bean
+    JooqRoleGrantAdministrationRepository roleGrantAdministrationRepository(DSLContext dsl) {
+        return new JooqRoleGrantAdministrationRepository(dsl, RequestTrace::current);
+    }
+
+    @Bean
+    RoleGrantAdministrationService roleGrantAdministrationService(
+        JooqRoleGrantAdministrationRepository repository) {
+        return new RoleGrantAdministrationService(repository, repository);
     }
 
     @Bean

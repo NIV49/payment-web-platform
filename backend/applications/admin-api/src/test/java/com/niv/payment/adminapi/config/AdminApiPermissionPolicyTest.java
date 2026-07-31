@@ -31,10 +31,26 @@ class AdminApiPermissionPolicyTest {
         assertThat(policy.requiredPermissions("GET", "/api/system/role/list")).isEqualTo(List.of("role:view"));
         assertThat(policy.requiredPermissions("PATCH", "/api/system/role/2000/status"))
             .isEqualTo(List.of("role:update"));
+        assertThat(policy.requiredPermissions("GET", "/api/v1/iam/permissions/grantable"))
+            .isEqualTo(List.of("role:view", "role:grant-update"));
+        assertThat(policy.requiredPermissions("GET", "/api/v1/iam/roles/2001/grants"))
+            .isEqualTo(List.of("role:view", "role:grant-update"));
+        assertThat(policy.requiredPermissions("PUT", "/api/v1/iam/roles/2001/grants"))
+            .isEqualTo(List.of("role:view", "role:grant-update"));
         assertThat(policy.requiredPermissions("GET", "/api/system/menu/name-exists"))
             .isEqualTo(List.of("menu:view"));
+        assertThat(policy.requiredPermissions("POST", "/api/system/menu"))
+            .isEqualTo(List.of("menu:create"));
+        assertThat(policy.requiredPermissions("PUT", "/api/system/menu/6001"))
+            .isEqualTo(List.of("menu:update"));
+        assertThat(policy.requiredPermissions("DELETE", "/api/system/menu/6001"))
+            .isEqualTo(List.of("menu:delete"));
+        assertThat(policy.requiredPermissions("POST", "/api/system/dept"))
+            .isEqualTo(List.of("department:create"));
+        assertThat(policy.requiredPermissions("PUT", "/api/system/dept/10"))
+            .isEqualTo(List.of("department:update"));
         assertThat(policy.requiredPermissions("DELETE", "/api/system/dept/10"))
-            .isEqualTo(List.of("department:manage"));
+            .isEqualTo(List.of("department:delete"));
     }
 
     @Test

@@ -35,7 +35,7 @@ class ProductionFixtureIsolationMigrationTest {
     void cleanProductionMigrationKeepsTheProductCatalogButRemovesTheLocalFixture() throws Exception {
         migrateToLatest();
 
-        assertThat(rowCount("iam_permission")).isEqualTo(14);
+        assertThat(rowCount("iam_permission")).isEqualTo(21);
         assertThat(rowCount("iam_tenant")).isZero();
         assertThat(rowCount("iam_department")).isZero();
         assertThat(rowCount("iam_user")).isZero();
@@ -68,7 +68,7 @@ class ProductionFixtureIsolationMigrationTest {
             .isOne();
         assertThat(singleLong("SELECT count(*) FROM iam_permission WHERE id = 9001 AND permission_code = 'payout:view'"))
             .isOne();
-        assertThat(rowCount("iam_permission")).isEqualTo(15);
+        assertThat(rowCount("iam_permission")).isEqualTo(22);
     }
 
     @Test
@@ -85,7 +85,7 @@ class ProductionFixtureIsolationMigrationTest {
         assertThat(rowCount("iam_audit_event")).isOne();
         assertThat(rowCount("iam_permission_change_outbox")).isOne();
         assertThat(rowCount("iam_permission_change_relay_state")).isOne();
-        assertThat(rowCount("iam_permission")).isEqualTo(15);
+        assertThat(rowCount("iam_permission")).isEqualTo(22);
     }
 
     @Test
@@ -217,6 +217,103 @@ class ProductionFixtureIsolationMigrationTest {
         assertThat(singleLong("SELECT count(*) FROM iam_permission WHERE id = 3001 AND description = 'Modified'"))
             .isOne();
         assertThat(rowCount("iam_tenant")).isOne();
+    }
+
+    @Test
+    void granularPermissionMigrationPreservesLegacyRoleCapabilitiesAndLimitsGrantMaintenanceToSystemRole() throws Exception {
+        migrateTo("13");
+        executeUpdate("""
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status)
+            VALUES (50,'migration-platform','Migration Platform','PLATFORM','ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status)
+            VALUES (51,'test','system-actor','System Actor','ACTIVE'),
+                   (52,'test','ordinary-actor','Ordinary Actor','ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_membership(id,tenant_id,user_id,status)
+            VALUES (53,50,51,'ACTIVE'),(54,50,52,'ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES (55,50,'legacy-system-admin','Legacy System Admin','PLATFORM',false,true,'ACTIVE'),
+                   (56,50,'legacy-ordinary-admin','Legacy Ordinary Admin','PLATFORM',true,false,'ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id)
+            VALUES (50,53,55),(50,54,56)
+            """);
+        executeUpdate("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES
+              (5051,50,55,3007,'system-role-view','ACTIVE'),
+              (5052,50,55,3012,'system-menu-manage','ACTIVE'),
+              (5053,50,55,3014,'system-department-manage','ACTIVE'),
+              (5061,50,56,3007,'ordinary-role-view','ACTIVE'),
+              (5062,50,56,3012,'ordinary-menu-manage','ACTIVE'),
+              (5063,50,56,3014,'ordinary-department-manage','ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES
+              (6051,5051,'TENANT','TENANT_ALL'),(6052,5052,'TENANT','TENANT_ALL'),
+              (6053,5053,'TENANT','TENANT_ALL'),(6061,5061,'TENANT','TENANT_ALL'),
+              (6062,5062,'TENANT','TENANT_ALL'),(6063,5063,'TENANT','TENANT_ALL')
+            """);
+
+        migrateToLatest();
+
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=50 AND grant_row.role_id=55 AND grant_row.status='ACTIVE'
+               AND permission.permission_code IN (
+                 'menu:create','menu:update','menu:delete',
+                 'department:create','department:update','department:delete','role:grant-update')
+            """)).isEqualTo(7);
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=50 AND grant_row.role_id=56
+               AND grant_row.status='ACTIVE'
+               AND permission.permission_code IN (
+                 'menu:create','menu:update','menu:delete',
+                 'department:create','department:update','department:delete')
+            """)).isEqualTo(6);
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=50 AND grant_row.role_id=56
+               AND permission.permission_code='role:grant-update'
+            """)).isZero();
+        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=55")).isOne();
+        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=56")).isOne();
+        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=53")).isOne();
+        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=54")).isOne();
+        assertThat(singleLong("SELECT count(*) FROM iam_audit_event WHERE tenant_id=50 AND trace_id='migration-v14'"))
+            .isEqualTo(2);
+        assertThat(singleLong("SELECT count(*) FROM iam_permission_change_outbox WHERE tenant_id=50 AND trace_id='migration-v14'"))
+            .isEqualTo(2);
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_permission
+             WHERE permission_code IN ('menu:manage','department:manage') AND status='DISABLED'
+            """)).isEqualTo(2);
+    }
+
+    @Test
+    void granularPermissionMigrationRejectsAChangedLegacyCatalogWithoutCreatingNewPermissions() throws Exception {
+        migrateTo("13");
+        executeUpdate("UPDATE iam_permission SET status='DISABLED' WHERE id=3012");
+
+        assertThatThrownBy(ProductionFixtureIsolationMigrationTest::migrateToLatest)
+            .hasStackTraceContaining("requires the exact legacy catalog");
+
+        assertThat(singleLong("SELECT count(*) FROM iam_permission WHERE id BETWEEN 3015 AND 3021"))
+            .isZero();
+        assertThat(singleLong("SELECT count(*) FROM iam_permission WHERE id=3012 AND status='DISABLED'"))
+            .isOne();
     }
 
     private static void insertUnrelatedProductionData() throws Exception {

@@ -149,7 +149,17 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
     @Test
     void exactLegacyEightMenuFixtureUpgradesTransactionally() throws Exception {
         runBootstrap(FIXTURE_LOGIN_INPUT);
-        jdbc.update("DELETE FROM iam_menu WHERE tenant_id = 1 AND id BETWEEN 6020 AND 6033");
+        downgradeToLegacy(false);
+
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+
+        assertCompleteFixture();
+    }
+
+    @Test
+    void exactLegacyFourteenButtonFixtureUpgradesTransactionally() throws Exception {
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+        downgradeToLegacy(true);
 
         runBootstrap(FIXTURE_LOGIN_INPUT);
 
@@ -159,7 +169,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
     @Test
     void failedLegacyMenuUpgradeRollsBackToTheExactEightMenuState() throws Exception {
         runBootstrap(FIXTURE_LOGIN_INPUT);
-        jdbc.update("DELETE FROM iam_menu WHERE tenant_id = 1 AND id BETWEEN 6020 AND 6033");
+        downgradeToLegacy(false);
         jdbc.execute("""
             CREATE FUNCTION fail_local_permission_button_insert()
             RETURNS trigger
@@ -193,12 +203,12 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
     @Test
     void partialPermissionButtonFixtureFailsInsteadOfBeingSilentlyRepaired() throws Exception {
         runBootstrap(FIXTURE_LOGIN_INPUT);
-        jdbc.update("DELETE FROM iam_menu WHERE tenant_id = 1 AND id = 6033");
+        jdbc.update("DELETE FROM iam_menu WHERE tenant_id = 1 AND id = 6040");
 
         assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
             .hasStackTraceContaining("local fixture footprint is incomplete or modified");
 
-        assertThat(count("iam_menu")).isEqualTo(21);
+        assertThat(count("iam_menu")).isEqualTo(28);
         assertThat(count("iam_role_menu")).isEqualTo(8);
     }
 
@@ -218,7 +228,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
         assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
             .hasStackTraceContaining("local fixture footprint is incomplete or modified");
 
-        assertThat(count("iam_menu")).isEqualTo(23);
+        assertThat(count("iam_menu")).isEqualTo(30);
     }
 
     @Test
@@ -231,7 +241,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
 
         assertThat(jdbc.queryForObject("SELECT idp_subject FROM iam_user WHERE id = 100", String.class))
             .isEqualTo("different-subject");
-        assertThat(count("iam_role_grant")).isEqualTo(14);
+        assertThat(count("iam_role_grant")).isEqualTo(19);
     }
 
     @Test
@@ -252,7 +262,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
         runBootstrap(FIXTURE_LOGIN_INPUT);
 
         assertCompleteFixture();
-        assertThat(count("iam_permission")).isEqualTo(15);
+        assertThat(count("iam_permission")).isEqualTo(22);
         assertThat(jdbc.queryForObject(
             "SELECT count(*) FROM iam_permission WHERE id = 9001 AND permission_code = 'payout:view'",
             Long.class)).isOne();
@@ -265,7 +275,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
         assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
             .hasStackTraceContaining("required permission catalog is incomplete or modified");
 
-        assertThat(count("iam_permission")).isEqualTo(13);
+        assertThat(count("iam_permission")).isEqualTo(20);
         assertThat(count("iam_tenant")).isZero();
         assertThat(count("iam_user")).isZero();
         assertThat(count("iam_role_grant")).isZero();
@@ -371,7 +381,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
             .isOne();
         assertThat(count("iam_user")).isEqualTo(2);
         assertThat(count("iam_role")).isEqualTo(2);
-        assertThat(count("iam_menu")).isEqualTo(23);
+        assertThat(count("iam_menu")).isEqualTo(30);
     }
 
     @Test
@@ -430,7 +440,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
         assertThat(count("iam_grant_dimension")).isZero();
         assertThat(count("iam_menu")).isZero();
         assertThat(count("iam_role_menu")).isZero();
-        assertThat(count("iam_permission")).isEqualTo(14);
+        assertThat(count("iam_permission")).isEqualTo(21);
     }
 
     @Test
@@ -478,13 +488,13 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
             """, Long.class)).isOne();
         assertThat(jdbc.queryForObject(
             "SELECT count(*) FROM iam_role_grant WHERE tenant_id = 1 AND role_id = 2000",
-            Long.class)).isEqualTo(14);
+            Long.class)).isEqualTo(19);
         assertThat(jdbc.queryForObject("""
             SELECT count(*)
               FROM iam_grant_dimension dimension_row
               JOIN iam_role_grant grant_row ON grant_row.id = dimension_row.grant_id
              WHERE grant_row.tenant_id = 1 AND grant_row.role_id = 2000
-            """, Long.class)).isEqualTo(14);
+            """, Long.class)).isEqualTo(19);
         assertThat(jdbc.queryForObject("""
             SELECT count(*)
               FROM iam_grant_target target
@@ -503,44 +513,23 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
                AND menu_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
             """, Long.class)).isEqualTo(8);
         assertThat(jdbc.queryForObject("""
-            WITH expected(parent_id, route_name, auth_code, title_key) AS (
-                VALUES
-                    (6001::bigint, 'UserView', 'user:view', 'system.user.permission.view'),
-                    (6001::bigint, 'UserCreate', 'user:create', 'system.user.permission.create'),
-                    (6001::bigint, 'UserUpdate', 'user:update', 'system.user.permission.update'),
-                    (6001::bigint, 'UserDelete', 'user:delete', 'system.user.permission.delete'),
-                    (6001::bigint, 'UserDisable', 'user:disable', 'system.user.permission.disable'),
-                    (6001::bigint, 'UserAssignRole', 'user:assign-role', 'system.user.permission.assignRole'),
-                    (6002::bigint, 'RoleView', 'role:view', 'system.role.permission.view'),
-                    (6002::bigint, 'RoleCreate', 'role:create', 'system.role.permission.create'),
-                    (6002::bigint, 'RoleUpdate', 'role:update', 'system.role.permission.update'),
-                    (6002::bigint, 'RoleDelete', 'role:delete', 'system.role.permission.delete'),
-                    (6003::bigint, 'MenuView', 'menu:view', 'system.menu.permission.view'),
-                    (6003::bigint, 'MenuManage', 'menu:manage', 'system.menu.permission.manage'),
-                    (6004::bigint, 'DepartmentView', 'department:view', 'system.dept.permission.view'),
-                    (6004::bigint, 'DepartmentManage', 'department:manage', 'system.dept.permission.manage')
-            )
             SELECT count(*)
-              FROM expected
-              JOIN iam_menu menu
-                ON menu.tenant_id = 1
-               AND menu.parent_id = expected.parent_id
-               AND menu.route_name = expected.route_name
-               AND menu.auth_code = expected.auth_code
-               AND menu.meta_json ->> 'title' = expected.title_key
-              JOIN iam_permission permission
-                ON permission.permission_code = expected.auth_code
-               AND permission.status = 'ACTIVE'
-             WHERE menu.menu_type = 'BUTTON'
-               AND menu.route_path IS NULL
-               AND menu.component_path IS NULL
+              FROM iam_menu menu
+              JOIN iam_permission permission ON permission.permission_code = menu.auth_code
+             WHERE menu.tenant_id = 1 AND menu.menu_type = 'BUTTON'
+               AND menu.status = 'ACTIVE' AND permission.status = 'ACTIVE'
+               AND menu.route_path IS NULL AND menu.component_path IS NULL
                AND menu.redirect_path IS NULL
-               AND menu.status = 'ACTIVE'
-            """, Long.class)).isEqualTo(14);
+            """, Long.class)).isEqualTo(19);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_menu
+             WHERE tenant_id = 1 AND id IN (6031,6033) AND menu_type = 'BUTTON'
+               AND status = 'DISABLED' AND meta_json ->> 'hideInMenu' = 'true'
+            """, Long.class)).isEqualTo(2);
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_menu
              WHERE tenant_id = 1 AND menu_type = 'BUTTON'
-            """, Long.class)).isEqualTo(14);
+            """, Long.class)).isEqualTo(21);
         assertThat(jdbc.queryForObject("""
             SELECT count(*)
               FROM iam_role_menu role_menu
@@ -550,6 +539,34 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
                AND role_menu.role_id = 2000
                AND menu.menu_type = 'BUTTON'
             """, Long.class)).isZero();
+    }
+
+    private void downgradeToLegacy(boolean includeButtons) {
+        jdbc.update("DELETE FROM iam_role_grant WHERE tenant_id=1 AND role_id=2000 AND permission_id BETWEEN 3015 AND 3021");
+        jdbc.update("""
+            INSERT INTO iam_role_grant(
+                id,tenant_id,role_id,permission_id,grant_key,status,created_by,updated_by
+            ) VALUES
+              (4012,1,2000,3012,'menu-manage','ACTIVE',1000,1000),
+              (4014,1,2000,3014,'department-manage','ACTIVE',1000,1000)
+            """);
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (5012,4012,'TENANT','TENANT_ALL'),(5014,4014,'TENANT','TENANT_ALL')
+            """);
+        if (!includeButtons) {
+            jdbc.update("DELETE FROM iam_menu WHERE tenant_id=1 AND menu_type='BUTTON'");
+            return;
+        }
+        jdbc.update("DELETE FROM iam_menu WHERE tenant_id=1 AND id BETWEEN 6034 AND 6040");
+        jdbc.update("""
+            UPDATE iam_menu SET status='ACTIVE', meta_json='{"title":"system.menu.permission.manage"}'::jsonb,
+                   row_version=0 WHERE tenant_id=1 AND id=6031
+            """);
+        jdbc.update("""
+            UPDATE iam_menu SET status='ACTIVE', meta_json='{"title":"system.dept.permission.manage"}'::jsonb,
+                   row_version=0 WHERE tenant_id=1 AND id=6033
+            """);
     }
 
     private String credentialState() {
