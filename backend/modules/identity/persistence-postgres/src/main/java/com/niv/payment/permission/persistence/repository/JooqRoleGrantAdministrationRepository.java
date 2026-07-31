@@ -5,6 +5,7 @@ import com.niv.payment.permission.domain.PermissionCode;
 import com.niv.payment.permission.domain.ScopeDimension;
 import com.niv.payment.permission.domain.ScopeMode;
 import com.niv.payment.permission.service.IdentityAdministrationService;
+import com.niv.payment.permission.service.RoleAssignmentPolicy;
 import com.niv.payment.permission.service.RoleGrantAdministrationService;
 import com.niv.payment.permission.service.RoleGrantChangeCommand;
 import com.niv.payment.permission.service.RoleGrantModels;
@@ -88,7 +89,7 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         support.lockTenant(command.tenantId(), command.actor());
         requireSystemActor(command.tenantId(), command.actor().membershipId(), true);
 
-        var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE)
+        var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.ASSIGNABLE)
             .from(IAM_ROLE)
             .where(IAM_ROLE.TENANT_ID.eq(command.tenantId())
                 .and(IAM_ROLE.ID.eq(command.roleId())))
@@ -99,6 +100,9 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         }
         if (Boolean.TRUE.equals(role.get(IAM_ROLE.SYSTEM_ROLE))) {
             throw new SecurityException("System roles cannot be edited");
+        }
+        if (!Boolean.TRUE.equals(role.get(IAM_ROLE.ASSIGNABLE))) {
+            throw new RoleAssignmentPolicy.RoleNotAssignableException();
         }
         long currentVersion = role.get(IAM_ROLE.ROW_VERSION);
         if (currentVersion != command.expectedRoleVersion()) {
@@ -173,7 +177,8 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             .where(IAM_ROLE.TENANT_ID.eq(command.tenantId())
                 .and(IAM_ROLE.ID.eq(command.roleId()))
                 .and(IAM_ROLE.ROW_VERSION.eq(currentVersion))
-                .and(IAM_ROLE.SYSTEM_ROLE.isFalse()))
+                .and(IAM_ROLE.SYSTEM_ROLE.isFalse())
+                .and(IAM_ROLE.ASSIGNABLE.isTrue()))
             .execute();
         if (roleUpdated != 1) {
             throw new IdentityAdministrationService.OptimisticLockException();
@@ -223,7 +228,7 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
     }
 
     private RoleGrantModels.RoleGrants loadRoleGrants(long tenantId, long roleId) {
-        var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE)
+        var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.ASSIGNABLE)
             .from(IAM_ROLE)
             .where(IAM_ROLE.TENANT_ID.eq(tenantId).and(IAM_ROLE.ID.eq(roleId)))
             .fetchOne();
@@ -249,7 +254,8 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         Map<Long, List<Record>> byGrant = new LinkedHashMap<>();
         rows.forEach(row -> byGrant.computeIfAbsent(row.get(IAM_ROLE_GRANT.ID), ignored -> new ArrayList<>()).add(row));
         List<RoleGrantModels.Selection> selections = new ArrayList<>();
-        boolean editable = !Boolean.TRUE.equals(role.get(IAM_ROLE.SYSTEM_ROLE));
+        boolean editable = !Boolean.TRUE.equals(role.get(IAM_ROLE.SYSTEM_ROLE))
+            && Boolean.TRUE.equals(role.get(IAM_ROLE.ASSIGNABLE));
         for (List<Record> grantRows : byGrant.values()) {
             Record first = grantRows.getFirst();
             String code = first.get(IAM_PERMISSION.PERMISSION_CODE);

@@ -4,6 +4,7 @@ import com.niv.payment.permission.domain.AdministrationActor;
 import com.niv.payment.permission.port.RoleAdministrationPort;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.IdentityModels;
+import com.niv.payment.permission.service.RoleAssignmentPolicy;
 import org.jooq.DSLContext;
 import org.jooq.impl.DSL;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +27,9 @@ import static com.niv.payment.permission.persistence.repository.JooqAdministrati
 
 /** Role and presentation-menu administration. Business grants remain a separate capability. */
 public class JooqRoleAdministrationRepository implements RoleAdministrationPort {
+    private static final Set<String> ROUTABLE_MENU_TYPES =
+        Set.of("DIRECTORY", "PAGE", "EMBEDDED", "LINK");
+
     private final DSLContext dsl;
     private final JooqIdentityQueryRepository queries;
     private final JooqAdministrationSupport support;
@@ -48,6 +52,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
     public long createRole(long tenantId, AdministrationActor actor, IdentityModels.RoleCommand command) {
         support.requirePlatformTenant(tenantId);
         support.lockTenant(tenantId, actor);
+        Set<Long> menuIds = validatedMenus(tenantId, command.menuIds());
         long roleId = support.nextId();
         dsl.insertInto(IAM_ROLE)
             .set(IAM_ROLE.ID, roleId)
@@ -60,7 +65,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
             .set(IAM_ROLE.STATUS, status(command.status()))
             .set(IAM_ROLE.REMARK, JooqAdministrationSupport.blankToNull(command.remark()))
             .execute();
-        replaceMenus(tenantId, roleId, command.menuIds());
+        replaceMenus(tenantId, roleId, menuIds);
         support.audit(tenantId, actor.membershipId(), "ROLE", roleId, "CREATE", "role:create");
         return roleId;
     }
@@ -71,6 +76,8 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
                            IdentityModels.RoleCommand command, long expectedVersion) {
         support.requirePlatformTenant(tenantId);
         support.lockTenant(tenantId, actor);
+        requireOrdinaryRoleVersion(tenantId, roleId, expectedVersion);
+        Set<Long> menuIds = validatedMenus(tenantId, command.menuIds());
         int updated = dsl.update(IAM_ROLE)
             .set(IAM_ROLE.ROLE_NAME, command.name().trim())
             .set(IAM_ROLE.STATUS, status(command.status()))
@@ -80,10 +87,11 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
             .where(IAM_ROLE.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE.ID.eq(roleId))
                 .and(IAM_ROLE.ROW_VERSION.eq(expectedVersion))
-                .and(IAM_ROLE.SYSTEM_ROLE.isFalse()))
+                .and(IAM_ROLE.SYSTEM_ROLE.isFalse())
+                .and(IAM_ROLE.ASSIGNABLE.isTrue()))
             .execute();
-        requireSuccessfulMutation(updated, tenantId, roleId);
-        replaceMenus(tenantId, roleId, command.menuIds());
+        requireSuccessfulMutation(updated);
+        replaceMenus(tenantId, roleId, menuIds);
         bumpRoleMembers(tenantId, roleId);
         support.audit(tenantId, actor.membershipId(), "ROLE", roleId, "UPDATE", "role:update");
     }
@@ -94,6 +102,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
                                  int newStatus, long expectedVersion) {
         support.requirePlatformTenant(tenantId);
         support.lockTenant(tenantId, actor);
+        requireOrdinaryRoleVersion(tenantId, roleId, expectedVersion);
         int updated = dsl.update(IAM_ROLE)
             .set(IAM_ROLE.STATUS, status(newStatus))
             .set(IAM_ROLE.UPDATED_AT, DSL.currentOffsetDateTime())
@@ -101,9 +110,10 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
             .where(IAM_ROLE.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE.ID.eq(roleId))
                 .and(IAM_ROLE.ROW_VERSION.eq(expectedVersion))
-                .and(IAM_ROLE.SYSTEM_ROLE.isFalse()))
+                .and(IAM_ROLE.SYSTEM_ROLE.isFalse())
+                .and(IAM_ROLE.ASSIGNABLE.isTrue()))
             .execute();
-        requireSuccessfulMutation(updated, tenantId, roleId);
+        requireSuccessfulMutation(updated);
         bumpRoleMembers(tenantId, roleId);
         support.audit(tenantId, actor.membershipId(), "ROLE", roleId, "STATUS", "role:update");
     }
@@ -113,6 +123,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
     public void deleteRole(long tenantId, AdministrationActor actor, long roleId, long expectedVersion) {
         support.requirePlatformTenant(tenantId);
         support.lockTenant(tenantId, actor);
+        requireOrdinaryRoleVersion(tenantId, roleId, expectedVersion);
         int updated = dsl.update(IAM_ROLE)
             .set(IAM_ROLE.STATUS, DISABLED)
             .set(IAM_ROLE.UPDATED_AT, DSL.currentOffsetDateTime())
@@ -120,56 +131,76 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
             .where(IAM_ROLE.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE.ID.eq(roleId))
                 .and(IAM_ROLE.ROW_VERSION.eq(expectedVersion))
-                .and(IAM_ROLE.SYSTEM_ROLE.isFalse()))
+                .and(IAM_ROLE.SYSTEM_ROLE.isFalse())
+                .and(IAM_ROLE.ASSIGNABLE.isTrue()))
             .execute();
-        requireSuccessfulMutation(updated, tenantId, roleId);
+        requireSuccessfulMutation(updated);
         bumpRoleMembers(tenantId, roleId);
         support.audit(tenantId, actor.membershipId(), "ROLE", roleId, "DELETE", "role:delete");
     }
 
-    private void replaceMenus(long tenantId, long roleId, List<Long> menuIds) {
-        Set<Long> distinctMenuIds = new LinkedHashSet<>(menuIds);
-        validateMenus(tenantId, distinctMenuIds);
+    private void replaceMenus(long tenantId, long roleId, Set<Long> menuIds) {
         dsl.deleteFrom(IAM_ROLE_MENU)
             .where(IAM_ROLE_MENU.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE_MENU.ROLE_ID.eq(roleId)))
             .execute();
-        if (distinctMenuIds.isEmpty()) {
+        if (menuIds.isEmpty()) {
             return;
         }
         var insert = dsl.insertInto(IAM_ROLE_MENU,
             IAM_ROLE_MENU.TENANT_ID,
             IAM_ROLE_MENU.ROLE_ID,
             IAM_ROLE_MENU.MENU_ID);
-        distinctMenuIds.forEach(menuId -> insert.values(tenantId, roleId, menuId));
+        menuIds.forEach(menuId -> insert.values(tenantId, roleId, menuId));
         insert.execute();
     }
 
-    private void requireSuccessfulMutation(int updated, long tenantId, long roleId) {
-        if (updated == 1) {
-            return;
-        }
-        Long currentVersion = dsl.select(IAM_ROLE.ROW_VERSION)
+    private void requireOrdinaryRoleVersion(long tenantId, long roleId, long expectedVersion) {
+        var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.ASSIGNABLE)
             .from(IAM_ROLE)
             .where(IAM_ROLE.TENANT_ID.eq(tenantId)
-                .and(IAM_ROLE.ID.eq(roleId))
-                .and(IAM_ROLE.SYSTEM_ROLE.isFalse()))
-            .fetchOne(IAM_ROLE.ROW_VERSION);
-        if (currentVersion == null) {
+                .and(IAM_ROLE.ID.eq(roleId)))
+            .forUpdate()
+            .fetchOne();
+        if (role == null) {
             throw notFound("Role");
         }
-        throw new IdentityAdministrationService.OptimisticLockException();
+        if (Boolean.TRUE.equals(role.get(IAM_ROLE.SYSTEM_ROLE))
+            || !Boolean.TRUE.equals(role.get(IAM_ROLE.ASSIGNABLE))) {
+            throw new RoleAssignmentPolicy.RoleNotAssignableException();
+        }
+        if (role.get(IAM_ROLE.ROW_VERSION) != expectedVersion) {
+            throw new IdentityAdministrationService.OptimisticLockException();
+        }
     }
 
-    private void validateMenus(long tenantId, Set<Long> menuIds) {
-        if (menuIds.isEmpty()) {
-            return;
+    private void requireSuccessfulMutation(int updated) {
+        if (updated != 1) {
+            throw new IdentityAdministrationService.OptimisticLockException();
         }
-        int found = dsl.fetchCount(IAM_MENU,
-            IAM_MENU.TENANT_ID.eq(tenantId).and(IAM_MENU.ID.in(menuIds)));
-        if (found != menuIds.size()) {
+    }
+
+    private Set<Long> validatedMenus(long tenantId, List<Long> requestedMenuIds) {
+        Set<Long> menuIds = new LinkedHashSet<>(requestedMenuIds);
+        if (menuIds.isEmpty()) {
+            return menuIds;
+        }
+        var menus = dsl.select(IAM_MENU.ID, IAM_MENU.MENU_TYPE, IAM_MENU.STATUS)
+            .from(IAM_MENU)
+            .where(IAM_MENU.TENANT_ID.eq(tenantId).and(IAM_MENU.ID.in(menuIds)))
+            .forUpdate()
+            .fetch();
+        if (menus.size() != menuIds.size()) {
             throw notFound("Menu");
         }
+        boolean invalidMenu = menus.stream().anyMatch(menu ->
+            !"ACTIVE".equals(menu.get(IAM_MENU.STATUS))
+                || !ROUTABLE_MENU_TYPES.contains(menu.get(IAM_MENU.MENU_TYPE)));
+        if (invalidMenu) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "Role menus must be active routable menus");
+        }
+        return menuIds;
     }
 
     private void bumpRoleMembers(long tenantId, long roleId) {

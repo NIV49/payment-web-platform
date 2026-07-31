@@ -6,6 +6,7 @@ import com.niv.payment.permission.domain.AdministrationActor;
 import com.niv.payment.permission.persistence.repository.JooqRoleAdministrationRepository;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.IdentityModels;
+import com.niv.payment.permission.service.RoleAssignmentPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -350,6 +351,85 @@ class AdminApiContractIntegrationTest {
                 .header("Origin", ORIGIN).contentType("application/json")
                 .content("{\"expectedVersion\":0,\"reason\":\"forbidden system role\",\"grants\":[]}"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void nonAssignableRoleGrantIsReadOnlyAndRejectsReplacement() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES (?,1,?,?,'PLATFORM',false,false,'ACTIVE')
+            """, roleId, "non-assignable-grant-" + roleId, "Non Assignable Grant " + roleId);
+        try {
+            mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.editable").value(false));
+
+            mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN)
+                    .contentType("application/json")
+                    .content("{\"name\":\"Must Stay Protected\",\"menuIds\":[],"
+                        + "\"status\":1,\"expectedVersion\":0}"))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+
+            mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                    .header("Origin", ORIGIN).contentType("application/json")
+                    .content("{\"expectedVersion\":0,\"reason\":\"ordinary workflow denied\",\"grants\":[]}"))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+
+            assertThat(jdbc.queryForMap("""
+                SELECT row_version,assignable,system_role FROM iam_role WHERE tenant_id=1 AND id=?
+                """, roleId))
+                .containsEntry("row_version", 0L)
+                .containsEntry("assignable", false)
+                .containsEntry("system_role", false);
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=?
+                """, Long.class, roleId)).isZero();
+        } finally {
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+        }
+    }
+
+    @Test
+    void roleMenuIdsRejectButtonsAndDisabledMenusWithoutPartialWrites() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String rejectedRoleName = "Button Menu Role";
+
+        mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"" + rejectedRoleName
+                    + "\",\"menuIds\":[\"6020\"],\"status\":1}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role WHERE tenant_id=1 AND role_name=?
+            """, Long.class, rejectedRoleName)).isZero();
+
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Disabled Menu Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Must Not Persist\",\"menuIds\":[\"6031\"],"
+                    + "\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+
+        assertThat(jdbc.queryForMap("""
+            SELECT role_name,row_version FROM iam_role WHERE tenant_id=1 AND id=?
+            """, roleId))
+            .containsEntry("role_name", "Disabled Menu Role")
+            .containsEntry("row_version", 0L);
+        assertThat(jdbc.queryForList("""
+            SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id
+            """, Long.class, roleId)).containsExactly(6001L);
     }
 
     @Test
@@ -1069,6 +1149,61 @@ class AdminApiContractIntegrationTest {
         mvc.perform(delete("/api/system/role/9223372036854775807").queryParam("expectedVersion", "0")
                 .cookie(cookie).header("Origin", ORIGIN))
             .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void ordinaryRoleRepositoryWritesRejectSystemAndNonAssignableRoles() {
+        AdministrationActor actor = administrationActor();
+        List<Long> roleIds = new ArrayList<>();
+        for (int index = 0; index < 6; index++) {
+            long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+            boolean systemRole = index >= 3;
+            boolean assignable = systemRole;
+            jdbc.update("""
+                INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                     assignable,system_role,status)
+                VALUES (?,1,?,?,'PLATFORM',?,?,'ACTIVE')
+                """, roleId, "protected-role-" + roleId, "Protected Role " + roleId,
+                assignable, systemRole);
+            roleIds.add(roleId);
+        }
+
+        try {
+            org.junit.jupiter.api.Assertions.assertAll(
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRole(
+                        1L, actor, roleIds.get(0),
+                        new IdentityModels.RoleCommand("Denied Update", List.of(), 1, null), 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRoleStatus(
+                        1L, actor, roleIds.get(1), 0, 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.deleteRole(
+                        1L, actor, roleIds.get(2), 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRole(
+                        1L, actor, roleIds.get(3),
+                        new IdentityModels.RoleCommand("Denied System Update", List.of(), 1, null), 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRoleStatus(
+                        1L, actor, roleIds.get(4), 0, 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.deleteRole(
+                        1L, actor, roleIds.get(5), 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class));
+
+            for (Long roleId : roleIds) {
+                assertThat(jdbc.queryForMap("""
+                    SELECT role_name,status,row_version FROM iam_role WHERE tenant_id=1 AND id=?
+                    """, roleId))
+                    .containsEntry("role_name", "Protected Role " + roleId)
+                    .containsEntry("status", "ACTIVE")
+                    .containsEntry("row_version", 0L);
+            }
+        } finally {
+            for (Long roleId : roleIds) {
+                jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+            }
+        }
     }
 
     @Test
