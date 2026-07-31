@@ -204,6 +204,54 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
     }
 
     @Test
+    void v14FixtureWithAdvancedDepartmentVersionMigratesToLatestAndBootstraps() throws Exception {
+        restoreExactLegacyFixtureAtV9(false);
+        flyway("14").migrate();
+        jdbc.update("UPDATE iam_department SET row_version=2 WHERE tenant_id=1 AND id=10");
+
+        migrateToLatest();
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+
+        assertCompleteFixture();
+        assertThat(jdbc.queryForObject(
+            "SELECT row_version FROM iam_department WHERE tenant_id=1 AND id=10", Long.class))
+            .isEqualTo(2L);
+    }
+
+    @Test
+    void latestFixtureWithAdvancedDepartmentVersionBootstraps() throws Exception {
+        restoreExactLegacyFixtureAtV9(false);
+        migrateToLatest();
+        jdbc.update("UPDATE iam_department SET row_version=2 WHERE tenant_id=1 AND id=10");
+
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+
+        assertCompleteFixture();
+        assertThat(jdbc.queryForObject(
+            "SELECT row_version FROM iam_department WHERE tenant_id=1 AND id=10", Long.class))
+            .isEqualTo(2L);
+    }
+
+    @Test
+    void advancedDepartmentVersionDoesNotPermitFixtureFieldDrift() {
+        restoreExactLegacyFixtureAtV9(false);
+        migrateToLatest();
+        jdbc.update("""
+            UPDATE iam_department
+               SET department_name='Modified Head Office', row_version=2
+             WHERE tenant_id=1 AND id=10
+            """);
+
+        assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+
+        assertThat(jdbc.queryForObject(
+            "SELECT department_name FROM iam_department WHERE tenant_id=1 AND id=10", String.class))
+            .isEqualTo("Modified Head Office");
+        assertThat(count("iam_role_grant")).isEqualTo(21);
+    }
+
+    @Test
     void partialV14MigratedLegacyFixtureStillFailsWithoutMutation() {
         restoreExactLegacyFixtureAtV9(false);
         migrateToLatest();

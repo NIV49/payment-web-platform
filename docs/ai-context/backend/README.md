@@ -87,7 +87,7 @@ Admin CRUD 的 HTTP PEP 已接入 `DefaultAuthorizationService` 和版本化 Gra
 ### Composition root
 
 - `AdminApiApplication`：唯一 Spring Boot main。
-- `IdentityConfiguration`：jOOQ repository、Identity services、BCrypt、Redis 登录限流和 Sa-Token bridge 组装；Sa-Token 安全属性由 Boot auto-configuration 在 ApplicationContext 创建期绑定，不使用启服后 `ApplicationRunner`。
+- `IdentityConfiguration`：jOOQ repository、Identity services、BCrypt、Redis 登录限流和 Sa-Token bridge 组装；RoleGrant 全量替换受默认关闭的 `payment.permissions.legacy-administration-cutover-complete` 控制；Sa-Token 安全属性由 Boot auto-configuration 在 ApplicationContext 创建期绑定，不使用启服后 `ApplicationRunner`。
 - `LocalIdentityFixtureBootstrap`：仅在 `local` profile、Flyway 完成后事务性装载开发身份和 BCrypt 密码。
 - `SecurityConfiguration`：Cookie 会话校验、可信 Origin、URL 到权限码映射、CORS 与安全响应头。
 - `application.yml`：生产默认 fail-closed 的 DB、Redis、Flyway、jOOQ 和安全配置。
@@ -242,6 +242,7 @@ Role、Department、Menu 的管理读模型显式返回 `rowVersion`；PUT/PATCH
 以前向迁移移除 V2/V3 遗留的固定 Tenant、Admin、Department、Membership、Credential、Role、Grant 和 Menu，同时保留必需的 14 条全局 Permission Catalog。判断范围只覆盖预留 ID、自然键以及与该 fixture/tenant `1` 直接关联的行；其他租户、用户、审计、Outbox 和扩展权限不会阻止迁移，也不会被删除。预留键碰撞、固定数据被修改、必需权限被篡改或缺失、tenant `1` 出现额外依赖关系时，V8 在同一事务中回滚并要求人工分类，禁止用 `ON CONFLICT` 静默拼接真实主体。
 
 本地开发数据不再属于 Flyway 生产路径。`admin-api/src/main/resources/db/local/iam-local-bootstrap.sql` 只由 `local` profile 的 `LocalIdentityFixtureBootstrap` 在 Flyway 后执行。
+精确匹配的预置部门允许 `row_version` 自然递增到任意非负值；ID、租户、父级、编码、名称、状态、备注和预留键碰撞仍按原规则失败关闭。
 
 ### V9 菜单路由唯一性
 
@@ -265,7 +266,7 @@ V14 建立 19 个现代管理权限和 `role:grant-update` 管理面，并把可
 
 旧 Grant 在 V15 期间作为兼容影子保留。现代 RoleGrant GET 忽略且不返回这两个已知影子；生产默认令 `PAYMENT_LEGACY_ADMINISTRATION_CUTOVER_COMPLETE=false`，因此 GET 返回只读且 PUT 返回 40903。只有 N-1 实例和旧调用方清零、双版本验证与生产审批完成后，部署方才可显式打开开关；第一次 PUT 才会原子停用目标角色全部旧/新 ACTIVE Grant 后写入现代全集。local profile 无 N-1 共存，默认开启用于本地验收。旧码不绑定当前 endpoint、不进入 grantable 目录，也没有 ACTIVE BUTTON。最终停用旧 Permission/Grant 仍需要独立 contract 迁移，当前不得宣称滚动迁移已经闭环。
 
-V16 是只增不改的前向守卫：已执行的 V14/V15 不回写；V16 精确核验 21 条管理 Permission 的固定 ID、code/resource/action、风险、维度、step-up、approval、跨租户模式和状态。目录漂移会阻断升级，不自动修复权限事实。
+V16 是只增不改的前向守卫：已执行的 V14/V15 不回写；V16 精确核验 21 条管理 Permission 的固定 ID、code/resource/action、风险、维度、step-up、approval、跨租户模式和状态，额外业务 Permission 不受影响。目录漂移会原子阻断升级，不自动修复权限事实。V15 已提交且可能已经执行，因此 V16 只能让停在 V15 的漂移库无法升级，并由 Schema readiness guard 阻止应用启动；它不能让已成功执行的 V15 事后回滚。
 
 ### 迁移纪律
 
@@ -354,7 +355,7 @@ cd backend
 - `meta_json` 已有容器、深度、key/string 和总 value 硬上限，外链字段也按菜单类型隔离；新增字段仍必须先定义跨端语义和测试，不得把任意 JSON 当成无约束扩展口。
 - `SystemAdministrationController` 同时承担多资源 DTO/映射，继续扩展会形成浅而宽的入口层。
 - Role、Department、Menu 与 User 管理写入已统一执行 optimistic version 契约；Local fixture 仍不是生产 provisioning；命中 V8 预留 footprint 冲突的历史库需要人工前向迁移，无关业务数据不受 V8 影响。
-- 角色 `menuIds` 只是导航/展示，不会生成 RoleGrant；RoleGrant 写 API/UI、版本/缓存闭环、Outbox relay、外部 IdP、MFA/step-up 时效、可信审批证据、关系数据权限、审计 before/after/拒绝/登录失败和生产级可观测性仍是明确阻断项。
+- 角色 `menuIds` 只是导航/展示，不会生成 RoleGrant；RoleGrant 写 API 在生产默认受 legacy cutover 闸门禁用，N-1 清退、UI、正式审批和演练完成前不得打开；Outbox relay、外部 IdP、MFA/step-up 时效、可信审批证据、关系数据权限、审计 before/after/拒绝/登录失败和生产级可观测性仍是明确阻断项。
 - 资金权限核心已有模型和测试，但不得在完成 [迁移计划](../permission/09-migration-plan.md) 的门禁前直接接入真实资金写路径。
 
 ## 11. 改动检查清单

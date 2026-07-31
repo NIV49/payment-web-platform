@@ -25,6 +25,7 @@ import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.RoleGrantAdministrationService;
 import org.jooq.DSLContext;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -76,8 +77,11 @@ public class IdentityConfiguration {
 
     @Bean
     RoleGrantAdministrationService roleGrantAdministrationService(
-        JooqRoleGrantAdministrationRepository repository) {
-        return new RoleGrantAdministrationService(repository, repository);
+        JooqRoleGrantAdministrationRepository repository,
+        @Value("${payment.permissions.legacy-administration-cutover-complete:false}")
+        boolean legacyAdministrationCutoverComplete) {
+        return new RoleGrantAdministrationService(
+            repository, repository, legacyAdministrationCutoverComplete);
     }
 
     @Bean

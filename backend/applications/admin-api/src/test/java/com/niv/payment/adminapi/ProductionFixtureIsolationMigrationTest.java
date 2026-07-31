@@ -402,6 +402,31 @@ class ProductionFixtureIsolationMigrationTest {
     }
 
     @Test
+    void exactAdministrationCatalogGuardRejectsV15FieldTamperingWithoutRepairingIt() throws Exception {
+        migrateTo("15");
+        executeUpdate("UPDATE iam_permission SET risk_level='SENSITIVE' WHERE id=3015");
+        long auditCount = rowCount("iam_audit_event");
+        long outboxCount = rowCount("iam_permission_change_outbox");
+
+        assertThatThrownBy(ProductionFixtureIsolationMigrationTest::migrateToLatest)
+            .hasStackTraceContaining("administration permission catalog is incomplete or modified");
+
+        assertThat(singleLong("""
+            SELECT count(*) FROM flyway_schema_history
+             WHERE version='15' AND success
+            """)).isOne();
+        assertThat(singleLong("""
+            SELECT count(*) FROM flyway_schema_history
+             WHERE version='16' AND success
+            """)).isZero();
+        assertThat(singleLong(
+            "SELECT count(*) FROM iam_permission WHERE id=3015 AND risk_level='SENSITIVE'"))
+            .isOne();
+        assertThat(rowCount("iam_audit_event")).isEqualTo(auditCount);
+        assertThat(rowCount("iam_permission_change_outbox")).isEqualTo(outboxCount);
+    }
+
+    @Test
     void granularPermissionMigrationRejectsAChangedLegacyCatalogWithoutCreatingNewPermissions() throws Exception {
         migrateTo("13");
         executeUpdate("UPDATE iam_permission SET status='DISABLED' WHERE id=3012");

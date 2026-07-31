@@ -20,10 +20,17 @@ public final class RoleGrantAdministrationService {
 
     private final RoleGrantReadPort readPort;
     private final RoleGrantWritePort writePort;
+    private final boolean legacyAdministrationCutoverComplete;
 
     public RoleGrantAdministrationService(RoleGrantReadPort readPort, RoleGrantWritePort writePort) {
+        this(readPort, writePort, false);
+    }
+
+    public RoleGrantAdministrationService(RoleGrantReadPort readPort, RoleGrantWritePort writePort,
+                                          boolean legacyAdministrationCutoverComplete) {
         this.readPort = Objects.requireNonNull(readPort, "readPort");
         this.writePort = Objects.requireNonNull(writePort, "writePort");
+        this.legacyAdministrationCutoverComplete = legacyAdministrationCutoverComplete;
     }
 
     public List<RoleGrantModels.GrantablePermission> grantablePermissions(
@@ -45,11 +52,20 @@ public final class RoleGrantAdministrationService {
         if (tenantId <= 0 || roleId <= 0) {
             throw new IllegalArgumentException("Tenant and role identifiers must be positive");
         }
-        return readPort.findRoleGrants(tenantId, Objects.requireNonNull(actor, "actor"), roleId);
+        RoleGrantModels.RoleGrants current =
+            readPort.findRoleGrants(tenantId, Objects.requireNonNull(actor, "actor"), roleId);
+        if (legacyAdministrationCutoverComplete || !current.editable()) {
+            return current;
+        }
+        return new RoleGrantModels.RoleGrants(
+            current.roleId(), current.roleVersion(), false, current.grants());
     }
 
     public RoleGrantModels.RoleGrants replace(RoleGrantChangeCommand command) {
         Objects.requireNonNull(command, "command");
+        if (!legacyAdministrationCutoverComplete) {
+            throw new LegacyAdministrationCutoverRequiredException();
+        }
         Set<String> keys = new HashSet<>();
         Set<String> permissions = new HashSet<>();
         for (RoleGrantModels.Selection grant : command.grants()) {
@@ -64,5 +80,11 @@ public final class RoleGrantAdministrationService {
             }
         }
         return writePort.replaceAtomically(command);
+    }
+
+    public static final class LegacyAdministrationCutoverRequiredException extends IllegalStateException {
+        public LegacyAdministrationCutoverRequiredException() {
+            super("Role grant replacement is disabled until the legacy administration cutover is complete");
+        }
     }
 }

@@ -179,6 +179,7 @@ stepUpVerified
 | 404 | 40401 | `RESOURCE_NOT_FOUND` | 当前租户下目标资源不存在，或非 API 资源未命中 |
 | 409 | 40901 | `DATA_CONFLICT` | 数据依赖、业务不变量或数据库唯一约束冲突 |
 | 409 | 40902 | `OPTIMISTIC_LOCK_CONFLICT` | 目标仍存在，但 expectedVersion 已落后；调用方必须重载后再决定是否重试 |
+| 409 | 40903 | `LEGACY_ADMINISTRATION_CUTOVER_REQUIRED` | N-1 旧管理权限兼容期尚未结束，RoleGrant 全量替换被部署闸门拒绝 |
 | 413 | 41301 | `PAYLOAD_TOO_LARGE` | mutating `/api/**` 请求体超过 256 KiB（含无 Content-Length 请求） |
 | 422 | 42201 | `IAM_ROLE_NOT_ASSIGNABLE` | 系统角色、不可分配角色、自提权或越权委派被拒绝 |
 | 422 | 42202 | `IAM_LAST_ADMIN_PROTECTED` | 禁用或移除最后一个活动系统管理员被拒绝 |
@@ -605,7 +606,7 @@ RoleGrant     -> 后端动作和数据范围
 
 两者已在数据库模型和前端交互中分离。角色表单只保存 menuIds，并递归过滤 BUTTON；独立“功能权限”抽屉通过下节 RoleGrant API 读取和替换授权，绝不从 menuIds 推导 Grant。菜单管理树中的 BUTTON 是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
 
-`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。V15 中两个旧 Permission 处于 ACTIVE 兼容状态不等于旧 BUTTON 重新启用。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，并精确识别已经执行 V14+V15 的过渡状态；保留部门字段仍完全匹配时允许其乐观锁 rowVersion 因本地编辑往返而前进，任何字段或关系漂移仍失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
+`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。V15 中两个旧 Permission 处于 ACTIVE 兼容状态不等于旧 BUTTON 重新启用。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，并精确识别已经执行 V14+V15 的过渡状态；预置部门的非负 `rowVersion` 可自然推进，但其 ID、租户、父级、编码、名称、状态、备注或预留键发生漂移时仍失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
 
 ### 角色授权第一阶段 API
 
@@ -613,7 +614,7 @@ RoleGrant     -> 后端动作和数据范围
 
 - `GET /api/v1/iam/permissions/grantable`：只返回精确 18 个 NORMAL、SAME_TENANT_ONLY 管理权限；`role:grant-update` 仅属于 system-admin，不可委派；
 - `GET /api/v1/iam/roles/{roleId}/grants`：返回 `{roleId,roleVersion,editable,grants}`；system role、存在当前页面不能无损表达的授权，或旧管理权限 cutover 尚未完成时 `editable=false`；
-- `PUT /api/v1/iam/roles/{roleId}/grants`：只接受非 system role、全量替换、必填 `expectedVersion` 与非空 `reason`。生产默认关闭；未完成 cutover 时返回 40903 `LEGACY_ADMINISTRATION_CUTOVER_REQUIRED`。
+- `PUT /api/v1/iam/roles/{roleId}/grants`：只接受非 system role、全量替换、必填 `expectedVersion` 与非空 `reason`。`payment.permissions.legacy-administration-cutover-complete` 默认为 `false`；未完成 cutover 时返回 40903 `LEGACY_ADMINISTRATION_CUTOVER_REQUIRED`。
 
 V15 为旧 manage Grant 建立等价的现代 Grant，同时保留旧 Grant 作为滚动兼容影子。GET 不把两个已知兼容影子暴露到现代编辑集合。只在所有 N-1 实例和旧调用方已经清零、双版本验证与生产审批完成后，部署方才可显式设置 `PAYMENT_LEGACY_ADMINISTRATION_CUTOVER_COMPLETE=true`；此后第一次 PUT 会在同一事务内停用目标角色全部 ACTIVE Grant（包含兼容影子），再写入请求的现代全集。`local` profile 不存在 N-1 共存，默认打开该开关用于验收。其他未知权限、高风险、有效期、多维度或带 target 的 Grant 仍使页面只读，禁止静默覆盖。
 
@@ -841,7 +842,7 @@ V16__enforce_exact_administration_permission_catalog.sql
 | Cross-tenant model | `SAME_TENANT_ONLY` 默认；只有受控 `READ/VIEW` action 可使用 `RELATED_PARTY_READ`，Core 与 V12 CHECK 双重约束 | 没有 Party/Relationship adapter，运行时仍 fail closed |
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、保留路由冲突即拒绝、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
-| Flyway | V1→V15 fresh/upgrade 可运行；V8 fixture 隔离、V9-V13 拒绝式约束、V14 细粒度展开与 V15 滚动兼容修复已落迁移 | 旧 manage 码的 contract 迁移、生产 migration 审批和备份恢复演练未完成 |
+| Flyway | V1→V16 fresh/upgrade 可运行；V8 fixture 隔离、V9-V13 拒绝式约束、V14/V15 细粒度权限兼容升级和 V16 精确目录守卫已落迁移 | 旧 manage 码的 contract 迁移、生产 migration 审批和备份恢复演练未完成；V16 只能阻断 V15 之后的漂移库，不能让已提交并执行的 V15 自身事后回滚 |
 
 ## 2.3 明确不在本轮实现
 
@@ -945,7 +946,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 6. 管理写 Grant 的 `valid_until` 可能在等待 tenant/actor 锁期间过期，事务内授权重验尚未实现；当前只能通过“管理写权限不得配置有限 `valid_until`”的运维约束临时规避；
 7. 普通角色分配已保护最后管理员、禁止自提权并拒绝 system/non-assignable role；仍缺经过审批、双人执行、可审计的 break-glass provisioning；
 8. 管理资源已用 rowVersion 阻止旧快照覆盖，但用户/角色仍无详情重载 endpoint；发生 40902 时只能关闭旧表单并刷新列表，不能自动合并并发修改；
-9. RoleGrant 管理 API/UI 已实现精确目录的全量替换；超出 TENANT_ALL 的数据维度和正式审批流仍未完成；
+9. RoleGrant 管理 API/UI 已实现精确目录的全量替换，但生产默认由旧管理权限切换闸门禁用；清除全部 N-1 依赖、打开闸门、超出 TENANT_ALL 的数据维度和正式审批流仍未完成；
 10. Merchant、Market、Channel、Customer、AgentRelation、HistoricalSnapshot Provider 未实现；
 11. 数据范围没有在真实订单/报表 Mapper 上完成 tenant + scope 集成测试；
 12. 资金权限目录、step-up、职责分离、审批和审计未实现；

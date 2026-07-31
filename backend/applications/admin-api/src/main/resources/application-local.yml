@@ -16,6 +16,8 @@ spring:
 
 payment:
   time-zone: ${PAYMENT_TIME_ZONE:Asia/Shanghai}
+  permissions:
+    legacy-administration-cutover-complete: ${PAYMENT_LEGACY_ADMINISTRATION_CUTOVER_COMPLETE:true}
   # Public local fixture only. The initializer bean does not exist outside this profile.
   bootstrap-password: ${PAYMENT_BOOTSTRAP_PASSWORD}
   security:

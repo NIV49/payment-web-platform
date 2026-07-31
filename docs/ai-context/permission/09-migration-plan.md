@@ -50,6 +50,8 @@
 
 验证：多角色动作/范围不拼接、RELATED_PARTY_READ 不能包装写 action、非法 BCrypt hash 不能充当备用管理员、最后管理员保护、自提权拒绝。
 
+当前管理权限目录采用 V14 细粒度扩展、V15 N-1 兼容、V16 精确目录守卫的前向链。已执行迁移不可回写：V16 发现固定管理权限元数据漂移时停在 V15 且不修数据，但不能让已经成功执行的 V15 自身事后回滚。N-1 兼容期内 RoleGrant 全量替换必须由默认关闭的部署闸门禁止；只有旧客户端依赖清零并完成发布验证后才可打开。
+
 ## 5. 阶段 3：业务范围 Provider
 
 按顺序接入：
@@ -155,6 +157,7 @@ resourceFingerprint
 - Java 25 / Spring Boot 4.1 / jOOQ / PostgreSQL 18 构建与生成门禁；
 - 生产 Flyway 与 local fixture 隔离；
 - V14/V15 管理权限 expand 迁移保留复杂历史 Grant 的范围、有效期和 target，并推进 role/membership 版本、审计和 Outbox；
+- V16 固定管理权限目录失败关闭守卫，以及默认关闭的 RoleGrant N-1 切换闸门；
 - DataScopePlan 保留 Grant 元组并排除无可信审批证据的 Grant。
 
 它仍不是生产身份或支付权限系统：外部 IdP、MFA 时效、可信审批工作流、超出首阶段 18 项 TENANT/TENANT_ALL 目录的通用 RoleGrant 管理、关系 Provider、真实订单 Mapper、Outbox relay、生产 provisioning/observability 和资金业务规格尚未完成。任何真实资金写路径仍被发布门禁阻断。

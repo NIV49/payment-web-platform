@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -45,6 +46,21 @@ class RoleGrantAdministrationServiceTest {
     }
 
     @Test
+    void disablesGrantEditingAndRejectsReplacementBeforeLegacyCutover() {
+        AtomicBoolean called = new AtomicBoolean();
+        var service = new RoleGrantAdministrationService(readPort(List.of()), command -> {
+            called.set(true);
+            throw new AssertionError("Write must remain disabled before legacy cutover");
+        });
+
+        assertFalse(service.find(3L, ACTOR, 2L).editable());
+        assertThrows(RoleGrantAdministrationService.LegacyAdministrationCutoverRequiredException.class,
+            () -> service.replace(command(
+                selection("user-view", "user:view"))));
+        assertFalse(called.get());
+    }
+
+    @Test
     void delegatesAValidatedTenantWideReplacementToOneAtomicWriteBoundary() {
         AtomicBoolean called = new AtomicBoolean();
         RoleGrantModels.Selection selection = selection("user-view", "user:view");
@@ -52,7 +68,7 @@ class RoleGrantAdministrationServiceTest {
             called.set(true);
             return new RoleGrantModels.RoleGrants(command.roleId(), command.expectedRoleVersion() + 1,
                 true, command.grants());
-        });
+        }, true);
 
         RoleGrantModels.RoleGrants result = service.replace(new RoleGrantChangeCommand(
             3L, 2L, 4L, ACTOR, "least privilege", List.of(selection)));
@@ -65,7 +81,7 @@ class RoleGrantAdministrationServiceTest {
     void rejectsAdminOnlyUnknownAndNonTenantGrantIntentBeforePersistence() {
         var service = new RoleGrantAdministrationService(readPort(List.of()), command -> {
             throw new AssertionError("Invalid change must not reach persistence");
-        });
+        }, true);
         assertThrows(IllegalArgumentException.class, () -> service.replace(command(
             selection("grant-admin", RoleGrantAdministrationService.GRANT_UPDATE_PERMISSION))));
         assertThrows(IllegalArgumentException.class, () -> service.replace(command(
@@ -79,7 +95,7 @@ class RoleGrantAdministrationServiceTest {
     void rejectsDuplicatePermissionOrGrantKey() {
         var service = new RoleGrantAdministrationService(readPort(List.of()), command -> {
             throw new AssertionError("Invalid change must not reach persistence");
-        });
+        }, true);
         assertThrows(IllegalArgumentException.class, () -> service.replace(new RoleGrantChangeCommand(
             3L, 2L, 4L, ACTOR, "duplicate", List.of(
                 selection("first", "user:view"), selection("second", "user:view")))));

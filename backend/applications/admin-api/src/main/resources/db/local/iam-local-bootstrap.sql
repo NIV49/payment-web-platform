@@ -158,7 +158,7 @@ SELECT
     AND (SELECT count(*) FROM iam_department WHERE id=10 OR (tenant_id=1 AND department_code='head-office')) = 1
     AND EXISTS (SELECT 1 FROM iam_department WHERE id=10 AND tenant_id=1 AND parent_id IS NULL
         AND department_code='head-office' AND department_name='Head Office' AND status='ACTIVE'
-        AND remark IS NOT DISTINCT FROM 'Local bootstrap department' AND row_version=0)
+        AND remark IS NOT DISTINCT FROM 'Local bootstrap department' AND row_version>=0)
     AND (SELECT count(*) FROM iam_user WHERE id=100 OR (idp_issuer='local' AND idp_subject='admin')) = 1
     AND EXISTS (SELECT 1 FROM iam_user WHERE id=100 AND idp_issuer='local' AND idp_subject='admin'
         AND display_name='Platform Administrator' AND email_cipher IS NULL AND phone_cipher IS NULL

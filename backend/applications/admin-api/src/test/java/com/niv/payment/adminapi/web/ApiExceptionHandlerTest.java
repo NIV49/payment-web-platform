@@ -4,6 +4,7 @@ import com.niv.payment.permission.port.InvalidAuthorizationSubjectException;
 import com.niv.payment.permission.port.StalePermissionVersionException;
 import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
+import com.niv.payment.permission.service.RoleGrantAdministrationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -59,5 +60,16 @@ class ApiExceptionHandlerTest {
         assertThat(response.getStatusCode().value()).isEqualTo(409);
         assertThat(response.getBody().code()).isEqualTo(40901);
         assertThat(response.getBody().error()).isEqualTo("DATA_CONFLICT");
+    }
+
+    @Test
+    void legacyAdministrationCutoverHasAStableFailClosedConflict() {
+        var handler = new ApiExceptionHandler(mock(AuthenticationService.class));
+
+        var response = handler.legacyAdministrationCutoverRequired();
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(response.getBody().code()).isEqualTo(40903);
+        assertThat(response.getBody().error()).isEqualTo("LEGACY_ADMINISTRATION_CUTOVER_REQUIRED");
     }
 }
