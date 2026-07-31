@@ -68,7 +68,7 @@ class CredentialHashSafetyMigrationTest {
 
         migrateToLatest();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("13");
+        assertThat(currentSuccessfulVersion()).isEqualTo("14");
         assertThat(constraintCount()).isOne();
         assertThat(constraintValidated()).isTrue();
         assertThatThrownBy(() -> insertCredential(9_413_105L, "not-a-bcrypt-hash"))
