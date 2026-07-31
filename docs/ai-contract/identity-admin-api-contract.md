@@ -787,7 +787,7 @@ V16__enforce_exact_administration_permission_catalog.sql
 - V10 以 Core 相同的 dimension/mode 允许矩阵增加 `CHECK` 并验证历史行；非法历史授权使迁移失败，不自动改权；
 - V11-V13 分别约束菜单外链、跨租户只读 action 和 BCrypt hash；历史非法数据使迁移失败，不做静默清洗；
 - V14 建立细粒度管理权限，V15 前向保留旧 manage Grant 的滚动兼容，V16 在不回写已执行 V14/V15 的前提下精确核验 21 条管理 Permission 的固定 ID、code/resource/action、风险、维度、step-up、approval、跨租户模式和状态；目录漂移使应用升级失败关闭且不自动修复；
-- `LocalIdentityFixtureBootstrap` 只在 `local` profile、Flyway 完成后事务性执行 `db/local/iam-local-bootstrap.sql` 并写入 BCrypt 密码；它允许管理员已有成功登录元数据和无碰撞的额外本地用户/角色/菜单，但密码配置变化、预留键碰撞或 fixture 关系被修改时拒绝启动；
+- `LocalIdentityFixtureBootstrap` 只在 `local` profile、Flyway 完成后事务性执行 `db/local/iam-local-bootstrap.sql` 并写入 BCrypt 密码；fixture 归属只按预留 ID、自然键/authCode、预置主体和预置主体自身关系判断，不按 `assigned_by/created_by/updated_by` 或菜单父节点扩大。它允许管理员已有成功登录元数据，以及管理员后续创建且无碰撞的部门、用户、Membership、普通角色、Grant、菜单和普通角色菜单关系；密码配置变化、预留键碰撞、预置行或预置主体自身关系被修改时仍拒绝启动；
 - 任何环境的迁移都不得依赖 `baseline-on-migrate=true` 自动猜测历史状态。
 
 ## 1.15 当前审计和可观测性

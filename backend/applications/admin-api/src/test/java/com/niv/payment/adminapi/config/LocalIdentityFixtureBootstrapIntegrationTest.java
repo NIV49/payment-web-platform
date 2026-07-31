@@ -425,15 +425,21 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
     }
 
     @Test
-    void additionalLocalUsersRolesMenusAndTheirOwnRelationshipsSurviveRestart() throws Exception {
+    void adminCreatedLocalIdentityDataSurvivesRestartWithoutOwningTheFixture() throws Exception {
         runBootstrap(FIXTURE_LOGIN_INPUT);
+        jdbc.update("""
+            INSERT INTO iam_department(
+                id, tenant_id, parent_id, department_code, department_name, status, remark
+            ) VALUES (7001, 1, 10, 'local-engineering', 'Local Engineering', 'ACTIVE',
+                      'Created after local bootstrap')
+            """);
         jdbc.update("""
             INSERT INTO iam_user(id, idp_issuer, idp_subject, display_name, status)
             VALUES (700, 'local', 'developer', 'Local Developer', 'ACTIVE')
             """);
         jdbc.update("""
             INSERT INTO iam_membership(id, tenant_id, user_id, department_id, status)
-            VALUES (7000, 1, 700, 10, 'ACTIVE')
+            VALUES (7000, 1, 700, 7001, 'ACTIVE')
             """);
         jdbc.update("""
             INSERT INTO iam_authentication_credential(user_id, username, password_hash, status)
@@ -447,12 +453,12 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
             """);
         jdbc.update("""
             INSERT INTO iam_membership_role(tenant_id, membership_id, role_id, assigned_by)
-            VALUES (1, 7000, 7100, 7000)
+            VALUES (1, 7000, 7100, 1000)
             """);
         jdbc.update("""
             INSERT INTO iam_role_grant(
                 id, tenant_id, role_id, permission_id, grant_key, status, created_by, updated_by
-            ) VALUES (7300, 1, 7100, 3001, 'local-developer-view', 'ACTIVE', 7000, 7000)
+            ) VALUES (7300, 1, 7100, 3001, 'local-developer-view', 'ACTIVE', 1000, 1000)
             """);
         jdbc.update("""
             INSERT INTO iam_grant_dimension(id, grant_id, dimension_code, scope_mode)
@@ -463,31 +469,48 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
                 id, tenant_id, parent_id, menu_type, menu_name, route_name, route_path,
                 component_path, sort_order, status, meta_json
             ) VALUES (
-                7200, 1, NULL, 'PAGE', 'Local Developer', 'LocalDeveloper',
+                7200, 1, 6000, 'PAGE', 'Local Developer', 'LocalDeveloper',
                 '/local-developer', '/dashboard/workspace/index', 500, 'ACTIVE',
                 '{"title":"local.developer"}'::jsonb
             )
             """);
         jdbc.update("""
             INSERT INTO iam_role_menu(tenant_id, role_id, menu_id)
-            VALUES (1, 7100, 7200)
+            VALUES (1, 7100, 6001), (1, 7100, 7200)
             """);
 
         runBootstrap(FIXTURE_LOGIN_INPUT);
 
         assertCompleteFixture();
         assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_department WHERE id = 7001 AND parent_id = 10", Long.class))
+            .isOne();
+        assertThat(jdbc.queryForObject(
             "SELECT count(*) FROM iam_user WHERE id = 700 AND idp_subject = 'developer'", Long.class))
             .isOne();
         assertThat(jdbc.queryForObject(
-            "SELECT count(*) FROM iam_membership_role WHERE membership_id = 7000 AND role_id = 7100",
+            """
+            SELECT count(*) FROM iam_membership_role
+             WHERE membership_id = 7000 AND role_id = 7100 AND assigned_by = 1000
+            """,
             Long.class)).isOne();
         assertThat(jdbc.queryForObject(
-            "SELECT count(*) FROM iam_role_grant WHERE id = 7300 AND role_id = 7100", Long.class))
+            """
+            SELECT count(*) FROM iam_role_grant
+             WHERE id = 7300 AND role_id = 7100 AND created_by = 1000 AND updated_by = 1000
+            """, Long.class))
             .isOne();
         assertThat(jdbc.queryForObject(
-            "SELECT count(*) FROM iam_menu WHERE id = 7200 AND route_name = 'LocalDeveloper'", Long.class))
+            """
+            SELECT count(*) FROM iam_menu
+             WHERE id = 7200 AND route_name = 'LocalDeveloper' AND parent_id = 6000
+            """, Long.class))
             .isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_menu
+             WHERE tenant_id = 1 AND role_id = 7100 AND menu_id IN (6001,7200)
+            """, Long.class)).isEqualTo(2);
+        assertThat(count("iam_department")).isEqualTo(2);
         assertThat(count("iam_user")).isEqualTo(2);
         assertThat(count("iam_role")).isEqualTo(2);
         assertThat(count("iam_menu")).isEqualTo(30);

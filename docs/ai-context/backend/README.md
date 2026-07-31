@@ -245,6 +245,7 @@ Role、Department、Menu 的管理读模型显式返回 `rowVersion`；PUT/PATCH
 
 本地开发数据不再属于 Flyway 生产路径。`admin-api/src/main/resources/db/local/iam-local-bootstrap.sql` 只由 `local` profile 的 `LocalIdentityFixtureBootstrap` 在 Flyway 后执行。
 精确匹配的预置部门允许 `row_version` 自然递增到任意非负值；ID、租户、父级、编码、名称、状态、备注和预留键碰撞仍按原规则失败关闭。
+Local bootstrap 的 fixture 归属只由预留 ID、预留自然键/authCode、预置主体和预置主体自身关系确定。`assigned_by/created_by/updated_by` 只是审计来源，菜单 `parent_id` 只是树关系，二者都不能把管理员后续创建的数据扩大为 fixture。因而管理员创建的额外部门、用户、Membership、普通角色、Grant、菜单，以及普通角色对预置或新增菜单的合法展示关系会在重启后保留；直接修改预置行，或给预置 Membership/Role 增加非预置授权关系仍失败关闭。
 
 ### V9 菜单路由唯一性
 

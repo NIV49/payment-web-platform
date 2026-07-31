@@ -181,7 +181,7 @@ SELECT
         AND remark IS NOT DISTINCT FROM 'Local bootstrap administration role'
         AND row_version=migration_stage)
     AND (SELECT count(*) FROM iam_membership_role
-        WHERE membership_id=1000 OR role_id=2000 OR assigned_by=1000) = 1
+        WHERE membership_id=1000 OR role_id=2000) = 1
     AND EXISTS (SELECT 1 FROM iam_membership_role WHERE tenant_id=1 AND membership_id=1000
         AND role_id=2000 AND assigned_by IS NOT DISTINCT FROM 1000)
 $$
@@ -243,8 +243,7 @@ $$
 
 CREATE OR REPLACE FUNCTION pg_temp.iam_local_role_menus_are_exact()
 RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
-SELECT (SELECT count(*) FROM iam_role_menu WHERE role_id=2000
-          OR menu_id IN (SELECT id FROM iam_local_final_menu)) = 8
+SELECT (SELECT count(*) FROM iam_role_menu WHERE role_id=2000) = 8
    AND (SELECT count(*) FROM iam_role_menu WHERE tenant_id=1 AND role_id=2000
           AND menu_id IN (6000,6001,6002,6003,6004,6010,6011,6012)) = 8
 $$
@@ -265,7 +264,7 @@ SELECT (pg_temp.iam_local_identity_is_exact(0)
            AND grant_row.valid_from IS NULL AND grant_row.valid_until IS NULL
            AND grant_row.created_by IS NOT DISTINCT FROM 1000
            AND grant_row.updated_by IS NOT DISTINCT FROM 1000) = 19
-   AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000 OR created_by=1000 OR updated_by=1000
+   AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000
           OR id IN (SELECT id+1000 FROM iam_local_final_permission)) = 19
    AND (SELECT count(*) FROM iam_grant_dimension dimension_row
           JOIN iam_local_final_permission expected
@@ -289,8 +288,7 @@ SELECT (pg_temp.iam_local_identity_is_exact(0)
    AND (SELECT count(*) FROM iam_menu WHERE id IN (SELECT id FROM iam_local_final_menu)
           OR (tenant_id=1 AND (route_name IN (SELECT route_name FROM iam_local_final_menu)
           OR route_path IN (SELECT route_path FROM iam_local_final_menu WHERE route_path IS NOT NULL)
-          OR auth_code IN (SELECT auth_code FROM iam_local_final_menu WHERE auth_code IS NOT NULL)
-          OR parent_id IN (SELECT id FROM iam_local_final_menu)))) = 29
+          OR auth_code IN (SELECT auth_code FROM iam_local_final_menu WHERE auth_code IS NOT NULL)))) = 29
 $$
 @@
 
@@ -312,7 +310,7 @@ SELECT pg_temp.iam_local_identity_is_exact(migration_stage)
          AND grant_row.valid_from IS NULL AND grant_row.valid_until IS NULL
          AND grant_row.created_by IS NOT DISTINCT FROM 1000
          AND grant_row.updated_by IS NOT DISTINCT FROM 1000 AND grant_row.row_version=0) = 14
-   AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000 OR created_by=1000 OR updated_by=1000
+   AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000
           OR id BETWEEN 4001 AND 4014) = CASE WHEN migration_stage=2 THEN 21 ELSE 14 END
    AND (migration_stage=0 OR (SELECT count(*) FROM iam_role_grant grant_row
           JOIN iam_local_final_permission expected ON expected.id=grant_row.permission_id
@@ -355,8 +353,7 @@ SELECT pg_temp.iam_local_identity_is_exact(migration_stage)
    AND (SELECT count(*) FROM iam_menu WHERE id IN (SELECT id FROM iam_local_final_menu)
           OR (tenant_id=1 AND (route_name IN (SELECT route_name FROM iam_local_final_menu)
           OR route_path IN (SELECT route_path FROM iam_local_final_menu WHERE route_path IS NOT NULL)
-          OR auth_code IN (SELECT auth_code FROM iam_local_final_menu WHERE auth_code IS NOT NULL)
-          OR parent_id IN (SELECT id FROM iam_local_final_menu)))) = CASE WHEN include_buttons THEN 22 ELSE 8 END
+          OR auth_code IN (SELECT auth_code FROM iam_local_final_menu WHERE auth_code IS NOT NULL)))) = CASE WHEN include_buttons THEN 22 ELSE 8 END
 $$
 @@
 
@@ -389,15 +386,13 @@ BEGIN
         OR EXISTS(SELECT 1 FROM iam_authentication_credential WHERE user_id=100 OR username='admin')
         OR EXISTS(SELECT 1 FROM iam_role WHERE id=2000 OR (tenant_id=1
              AND (role_code='platform-admin' OR role_name='Platform Administrator')))
-        OR EXISTS(SELECT 1 FROM iam_membership_role WHERE membership_id=1000 OR role_id=2000 OR assigned_by=1000)
-        OR EXISTS(SELECT 1 FROM iam_role_grant WHERE role_id=2000 OR created_by=1000 OR updated_by=1000
+        OR EXISTS(SELECT 1 FROM iam_membership_role WHERE membership_id=1000 OR role_id=2000)
+        OR EXISTS(SELECT 1 FROM iam_role_grant WHERE role_id=2000
              OR id IN (SELECT id+1000 FROM iam_local_final_permission) OR id BETWEEN 4001 AND 4014)
         OR EXISTS(SELECT 1 FROM iam_menu WHERE id IN (SELECT id FROM iam_local_final_menu)
              OR (tenant_id=1 AND (route_name IN (SELECT route_name FROM iam_local_final_menu)
-             OR auth_code IN (SELECT auth_code FROM iam_local_final_menu WHERE auth_code IS NOT NULL)
-             OR parent_id IN (SELECT id FROM iam_local_final_menu))))
-        OR EXISTS(SELECT 1 FROM iam_role_menu WHERE role_id=2000 OR menu_id IN
-             (SELECT id FROM iam_local_final_menu))
+             OR auth_code IN (SELECT auth_code FROM iam_local_final_menu WHERE auth_code IS NOT NULL))))
+        OR EXISTS(SELECT 1 FROM iam_role_menu WHERE role_id=2000)
       INTO fixture_footprint_present;
 
     IF fixture_footprint_present AND NOT pg_temp.iam_local_final_fixture_is_exact() THEN
