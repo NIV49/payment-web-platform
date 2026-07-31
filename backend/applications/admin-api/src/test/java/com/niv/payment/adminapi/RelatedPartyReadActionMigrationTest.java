@@ -57,7 +57,7 @@ class RelatedPartyReadActionMigrationTest {
 
         migrateToLatest();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("16");
+        assertThat(currentSuccessfulVersion()).isEqualTo("17");
         assertThat(constraintCount()).isOne();
         assertThat(constraintValidated()).isTrue();
         assertThatThrownBy(() -> insertPermission(
