@@ -353,6 +353,88 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void roleGrantRevocationInvalidatesMemberSessionAndRefreshesAuthorizationCodes() throws Exception {
+        Cookie admin = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(admin).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Revocation Contract Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        List<Long> menuIdsBefore = jdbc.queryForList(
+            "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
+            Long.class, roleId);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,802,?,1000)
+            """, roleId);
+
+        try {
+            long permissionVersionBefore = jdbc.queryForObject("""
+                SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=802
+                """, Long.class);
+            mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(admin)
+                    .header("Origin", ORIGIN).contentType("application/json")
+                    .content("""
+                        {"expectedVersion":0,"reason":"grant acceptance permission",
+                         "grants":[{"grantKey":"acceptance-user-create","permissionCode":"user:create",
+                           "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                        """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roleVersion").value(1));
+            assertThat(jdbc.queryForObject("""
+                SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=802
+                """, Long.class)).isEqualTo(permissionVersionBefore + 1L);
+
+            Cookie restricted = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            mvc.perform(get("/api/auth/codes").cookie(restricted))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0]").value("user:create"));
+
+            mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(admin)
+                    .header("Origin", ORIGIN).contentType("application/json")
+                    .content("{\"expectedVersion\":1,\"reason\":\"revoke acceptance permission\",\"grants\":[]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roleVersion").value(2))
+                .andExpect(jsonPath("$.data.grants.length()").value(0));
+
+            assertThat(jdbc.queryForObject("""
+                SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=802
+                """, Long.class)).isEqualTo(permissionVersionBefore + 2L);
+            assertThat(jdbc.queryForList(
+                "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
+                Long.class, roleId)).isEqualTo(menuIdsBefore);
+            mvc.perform(get("/api/auth/codes").cookie(restricted))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(0));
+            mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(restricted))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("SESSION_INVALID"))
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                    org.hamcrest.Matchers.containsString("PAYMENT_SESSION="),
+                    org.hamcrest.Matchers.containsString("Max-Age=0"))));
+
+            Cookie refreshed = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            mvc.perform(get("/api/auth/codes").cookie(refreshed))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(0));
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_audit_event
+                 WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
+                """, Long.class, Long.toString(roleId))).isEqualTo(2L);
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_permission_change_outbox
+                 WHERE tenant_id=1 AND aggregate_type='ROLE_GRANTS' AND aggregate_ref=?
+                """, Long.class, Long.toString(roleId))).isEqualTo(2L);
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802 AND role_id=?",
+                roleId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+            jdbc.update("UPDATE iam_membership SET permission_version=permission_version+1 WHERE tenant_id=1 AND id=802");
+        }
+    }
+
+    @Test
     void roleGrantEndpointsRecheckSystemRoleAfterTheHttpPermissionGate() throws Exception {
         mvc.perform(get("/api/v1/iam/permissions/grantable"))
             .andExpect(status().isUnauthorized());
@@ -437,6 +519,47 @@ class AdminApiContractIntegrationTest {
                 .content("{\"expectedVersion\":0,\"reason\":\"must reject unsupported\",\"grants\":[]}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+    }
+
+    @Test
+    void legacyCompatibilityShadowDoesNotBlockGranularGrantReplacement() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Legacy Shadow Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        long legacyGrantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long modernGrantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long legacyDimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long modernDimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3012,'legacy-menu-manage','ACTIVE'),
+                   (?,1,?,3015,'modern-menu-create','ACTIVE')
+            """, legacyGrantId, Long.parseLong(roleId), modernGrantId, Long.parseLong(roleId));
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL'),(?,?,'TENANT','TENANT_ALL')
+            """, legacyDimensionId, legacyGrantId, modernDimensionId, modernGrantId);
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(true))
+            .andExpect(jsonPath("$.data.grants.length()").value(1))
+            .andExpect(jsonPath("$.data.grants[0].permissionCode").value("menu:create"));
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"retire legacy shadow\",\"grants\":[]}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roleVersion").value(1))
+            .andExpect(jsonPath("$.data.grants.length()").value(0));
+
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant
+             WHERE tenant_id=1 AND role_id=? AND status='ACTIVE'
+            """, Long.class, Long.parseLong(roleId))).isZero();
     }
 
     @Test

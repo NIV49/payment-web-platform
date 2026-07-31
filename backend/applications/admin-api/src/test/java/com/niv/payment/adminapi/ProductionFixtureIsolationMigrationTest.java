@@ -288,18 +288,117 @@ class ProductionFixtureIsolationMigrationTest {
              WHERE grant_row.tenant_id=50 AND grant_row.role_id=56
                AND permission.permission_code='role:grant-update'
             """)).isZero();
-        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=55")).isOne();
-        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=56")).isOne();
-        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=53")).isOne();
-        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=54")).isOne();
+        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=55")).isEqualTo(2);
+        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=56")).isEqualTo(2);
+        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=53")).isEqualTo(2);
+        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=54")).isEqualTo(2);
         assertThat(singleLong("SELECT count(*) FROM iam_audit_event WHERE tenant_id=50 AND trace_id='migration-v14'"))
             .isEqualTo(2);
         assertThat(singleLong("SELECT count(*) FROM iam_permission_change_outbox WHERE tenant_id=50 AND trace_id='migration-v14'"))
             .isEqualTo(2);
+        assertThat(singleLong("SELECT count(*) FROM iam_audit_event WHERE tenant_id=50 AND trace_id='migration-v15'"))
+            .isEqualTo(2);
+        assertThat(singleLong("SELECT count(*) FROM iam_permission_change_outbox WHERE tenant_id=50 AND trace_id='migration-v15'"))
+            .isEqualTo(2);
         assertThat(singleLong("""
             SELECT count(*) FROM iam_permission
-             WHERE permission_code IN ('menu:manage','department:manage') AND status='DISABLED'
+             WHERE permission_code IN ('menu:manage','department:manage') AND status='ACTIVE'
             """)).isEqualTo(2);
+    }
+
+    @Test
+    void expandMigrationPreservesConstrainedLegacyGrantsAndReactivatesCompatibilityCodes() throws Exception {
+        migrateTo("13");
+        executeUpdate("""
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status)
+            VALUES (90,'constrained-platform','Constrained Platform','PLATFORM','ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_department(id,tenant_id,department_code,department_name,status)
+            VALUES (91,90,'security','Security','ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status)
+            VALUES (92,'test','constrained-actor','Constrained Actor','ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status)
+            VALUES (93,90,92,91,'ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES (94,90,'constrained-admin','Constrained Admin','PLATFORM',true,false,'ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES (90,93,94,93)
+            """);
+        executeUpdate("""
+            INSERT INTO iam_role_grant(
+                id,tenant_id,role_id,permission_id,grant_key,status,valid_from,valid_until,created_by,updated_by
+            ) VALUES
+              (9052,90,94,3012,'constrained-menu-manage','ACTIVE',
+               '2026-01-01T00:00:00Z','2027-01-01T00:00:00Z',93,93),
+              (9053,90,94,3014,'constrained-department-manage','ACTIVE',
+               '2026-01-01T00:00:00Z','2027-01-01T00:00:00Z',93,93)
+            """);
+        executeUpdate("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES
+              (9152,9052,'TENANT','TENANT_ALL'),(9153,9052,'DEPARTMENT','SPECIFIED'),
+              (9154,9053,'TENANT','TENANT_ALL'),(9155,9053,'DEPARTMENT','SPECIFIED')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_grant_target(id,dimension_id,target_ref)
+            VALUES (9252,9153,'91'),(9253,9155,'91')
+            """);
+
+        migrateToLatest();
+
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_permission
+             WHERE permission_code IN ('menu:manage','department:manage') AND status='ACTIVE'
+            """)).isEqualTo(2);
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=90 AND grant_row.role_id=94 AND grant_row.status='ACTIVE'
+               AND grant_row.grant_key LIKE 'v15-%'
+               AND permission.permission_code IN (
+                 'menu:create','menu:update','menu:delete',
+                 'department:create','department:update','department:delete')
+            """)).isEqualTo(6);
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_role_grant grant_row
+             WHERE grant_row.id IN (9052,9053) AND grant_row.status='ACTIVE'
+               AND grant_row.valid_from='2026-01-01T00:00:00Z'
+               AND grant_row.valid_until='2027-01-01T00:00:00Z'
+            """)).isEqualTo(2);
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_role_grant grant_row
+             WHERE grant_row.tenant_id=90 AND grant_row.role_id=94 AND grant_row.grant_key LIKE 'v15-%'
+               AND grant_row.valid_from='2026-01-01T00:00:00Z'
+               AND grant_row.valid_until='2027-01-01T00:00:00Z'
+               AND grant_row.created_by=93 AND grant_row.updated_by=93
+            """)).isEqualTo(6);
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_role_grant grant_row
+             WHERE grant_row.tenant_id=90 AND grant_row.role_id=94 AND grant_row.grant_key LIKE 'v15-%'
+               AND (SELECT count(*) FROM iam_grant_dimension dimension_row
+                     WHERE dimension_row.grant_id=grant_row.id)=2
+               AND (SELECT count(*) FROM iam_grant_target target
+                      JOIN iam_grant_dimension dimension_row ON dimension_row.id=target.dimension_id
+                     WHERE dimension_row.grant_id=grant_row.id AND target.target_ref='91')=1
+            """)).isEqualTo(6);
+        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=94")).isOne();
+        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=93")).isOne();
+        assertThat(singleLong("SELECT count(*) FROM iam_audit_event WHERE tenant_id=90 AND trace_id='migration-v15'"))
+            .isOne();
+        assertThat(singleLong("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=90 AND aggregate_ref='93' AND trace_id='migration-v15'
+            """)).isOne();
     }
 
     @Test

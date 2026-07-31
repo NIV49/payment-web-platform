@@ -148,7 +148,7 @@ UPDATE iam_local_legacy_menu
  WHERE id = 6033
 @@
 
-CREATE OR REPLACE FUNCTION pg_temp.iam_local_identity_is_exact(v14_migrated BOOLEAN)
+CREATE OR REPLACE FUNCTION pg_temp.iam_local_identity_is_exact(migration_stage INTEGER)
 RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
 SELECT
     (SELECT count(*) FROM iam_tenant WHERE id = 1 OR tenant_code = 'platform') = 1
@@ -166,7 +166,7 @@ SELECT
     AND (SELECT count(*) FROM iam_membership WHERE id=1000 OR user_id=100) = 1
     AND EXISTS (SELECT 1 FROM iam_membership WHERE id=1000 AND tenant_id=1 AND user_id=100
         AND department_id IS NOT DISTINCT FROM 10 AND status='ACTIVE'
-        AND permission_version=CASE WHEN v14_migrated THEN 1 ELSE 0 END
+        AND permission_version=migration_stage
         AND session_version=0 AND row_version=0)
     AND (SELECT count(*) FROM iam_authentication_credential WHERE user_id=100 OR username='admin') = 1
     AND EXISTS (SELECT 1 FROM iam_authentication_credential WHERE user_id=100 AND username='admin'
@@ -179,7 +179,7 @@ SELECT
         AND role_name='Platform Administrator' AND applicable_tenant_type='PLATFORM'
         AND NOT assignable AND system_role AND status='ACTIVE'
         AND remark IS NOT DISTINCT FROM 'Local bootstrap administration role'
-        AND row_version=CASE WHEN v14_migrated THEN 1 ELSE 0 END)
+        AND row_version=migration_stage)
     AND (SELECT count(*) FROM iam_membership_role
         WHERE membership_id=1000 OR role_id=2000 OR assigned_by=1000) = 1
     AND EXISTS (SELECT 1 FROM iam_membership_role WHERE tenant_id=1 AND membership_id=1000
@@ -216,6 +216,31 @@ SELECT (SELECT count(*) FROM iam_audit_event
 $$
 @@
 
+CREATE OR REPLACE FUNCTION pg_temp.iam_local_v15_history_is_exact()
+RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
+SELECT (SELECT count(*) FROM iam_audit_event
+         WHERE tenant_id=1 AND operator_membership_id IS NULL
+           AND target_type='ROLE_GRANTS' AND target_ref='2000'
+           AND action_code='EXPAND_LEGACY_ADMIN_PERMISSIONS'
+           AND decision='NOT_APPLICABLE' AND reason_code='MIGRATION'
+           AND permission_code IS NULL AND matched_grant_id IS NULL
+           AND before_value IS NULL
+           AND after_value='{"migration":"V15","clonedGrantCount":0,"legacyCompatibilityActive":true}'::jsonb
+           AND trace_id='migration-v15') = 1
+   AND (SELECT count(*) FROM iam_permission_change_outbox
+         WHERE tenant_id=1 AND aggregate_type='MEMBERSHIP' AND aggregate_ref='1000'
+           AND event_type='PERMISSION_VERSION_CHANGED'
+           AND payload='{"membershipId":"1000","permissionVersion":2,"reason":"V15_LEGACY_ADMIN_PERMISSION_EXPANSION"}'::jsonb
+           AND aggregate_version=2 AND schema_version=1
+           AND partition_key='1:1000' AND trace_id='migration-v15') = 1
+   AND (SELECT count(*) FROM iam_permission_change_relay_state relay
+          JOIN iam_permission_change_outbox outbox ON outbox.id=relay.event_record_id
+         WHERE outbox.tenant_id=1 AND outbox.aggregate_type='MEMBERSHIP'
+           AND outbox.aggregate_ref='1000' AND outbox.event_type='PERMISSION_VERSION_CHANGED'
+           AND outbox.aggregate_version=2 AND outbox.trace_id='migration-v15') = 1
+$$
+@@
+
 CREATE OR REPLACE FUNCTION pg_temp.iam_local_role_menus_are_exact()
 RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
 SELECT (SELECT count(*) FROM iam_role_menu WHERE role_id=2000
@@ -227,9 +252,10 @@ $$
 
 CREATE OR REPLACE FUNCTION pg_temp.iam_local_final_fixture_is_exact()
 RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
-SELECT (pg_temp.iam_local_identity_is_exact(false)
-        OR (pg_temp.iam_local_identity_is_exact(true)
-            AND pg_temp.iam_local_v14_history_is_exact()))
+SELECT (pg_temp.iam_local_identity_is_exact(0)
+        OR (pg_temp.iam_local_identity_is_exact(2)
+            AND pg_temp.iam_local_v14_history_is_exact()
+            AND pg_temp.iam_local_v15_history_is_exact()))
    AND pg_temp.iam_local_role_menus_are_exact()
    AND (SELECT count(*) FROM iam_role_grant grant_row
           JOIN iam_local_final_permission expected
@@ -270,11 +296,14 @@ $$
 
 CREATE OR REPLACE FUNCTION pg_temp.iam_local_legacy_fixture_is_exact(
     include_buttons BOOLEAN,
-    v14_migrated BOOLEAN
+    migration_stage INTEGER
 )
 RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
-SELECT pg_temp.iam_local_identity_is_exact(v14_migrated)
-   AND (NOT v14_migrated OR pg_temp.iam_local_v14_history_is_exact())
+SELECT pg_temp.iam_local_identity_is_exact(migration_stage)
+   AND (migration_stage=0 OR (
+       migration_stage=2
+       AND pg_temp.iam_local_v14_history_is_exact()
+       AND pg_temp.iam_local_v15_history_is_exact()))
    AND pg_temp.iam_local_role_menus_are_exact()
    AND (SELECT count(*) FROM iam_role_grant grant_row JOIN iam_local_legacy_permission expected
           ON grant_row.id=expected.id+1000 AND grant_row.permission_id=expected.id
@@ -284,8 +313,8 @@ SELECT pg_temp.iam_local_identity_is_exact(v14_migrated)
          AND grant_row.created_by IS NOT DISTINCT FROM 1000
          AND grant_row.updated_by IS NOT DISTINCT FROM 1000 AND grant_row.row_version=0) = 14
    AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000 OR created_by=1000 OR updated_by=1000
-          OR id BETWEEN 4001 AND 4014) = CASE WHEN v14_migrated THEN 21 ELSE 14 END
-   AND (NOT v14_migrated OR (SELECT count(*) FROM iam_role_grant grant_row
+          OR id BETWEEN 4001 AND 4014) = CASE WHEN migration_stage=2 THEN 21 ELSE 14 END
+   AND (migration_stage=0 OR (SELECT count(*) FROM iam_role_grant grant_row
           JOIN iam_local_final_permission expected ON expected.id=grant_row.permission_id
          WHERE expected.id BETWEEN 3015 AND 3021
            AND grant_row.tenant_id=1 AND grant_row.role_id=2000
@@ -296,7 +325,7 @@ SELECT pg_temp.iam_local_identity_is_exact(v14_migrated)
    AND (SELECT count(*) FROM iam_grant_dimension dimension_row JOIN iam_local_legacy_permission expected
           ON dimension_row.id=expected.id+2000 AND dimension_row.grant_id=expected.id+1000
          WHERE dimension_row.dimension_code='TENANT' AND dimension_row.scope_mode='TENANT_ALL') = 14
-   AND (NOT v14_migrated OR (SELECT count(*) FROM iam_grant_dimension dimension_row
+   AND (migration_stage=0 OR (SELECT count(*) FROM iam_grant_dimension dimension_row
           JOIN iam_role_grant grant_row ON grant_row.id=dimension_row.grant_id
           JOIN iam_local_final_permission expected ON expected.id=grant_row.permission_id
          WHERE expected.id BETWEEN 3015 AND 3021
@@ -308,7 +337,7 @@ SELECT pg_temp.iam_local_identity_is_exact(v14_migrated)
           LEFT JOIN iam_role_grant grant_row ON grant_row.id=dimension_row.grant_id
          WHERE dimension_row.id BETWEEN 5001 AND 5014
             OR dimension_row.grant_id BETWEEN 4001 AND 4014
-            OR grant_row.role_id=2000) = CASE WHEN v14_migrated THEN 21 ELSE 14 END
+            OR grant_row.role_id=2000) = CASE WHEN migration_stage=2 THEN 21 ELSE 14 END
    AND NOT EXISTS (SELECT 1 FROM iam_grant_target target JOIN iam_grant_dimension dimension_row
           ON dimension_row.id=target.dimension_id JOIN iam_role_grant grant_row
           ON grant_row.id=dimension_row.grant_id
@@ -336,9 +365,9 @@ DECLARE
     fixture_footprint_present BOOLEAN;
     legacy_without_buttons BOOLEAN;
     legacy_with_buttons BOOLEAN;
-    v14_legacy_without_buttons BOOLEAN;
-    v14_legacy_with_buttons BOOLEAN;
-    v14_migrated BOOLEAN;
+    v15_legacy_without_buttons BOOLEAN;
+    v15_legacy_with_buttons BOOLEAN;
+    migrated BOOLEAN;
 BEGIN
     IF (SELECT count(*) FROM iam_local_final_permission expected JOIN iam_permission permission
           ON permission.id=expected.id AND permission.permission_code=expected.permission_code
@@ -348,8 +377,8 @@ BEGIN
          AND permission.status='ACTIVE' AND permission.description IS NOT DISTINCT FROM expected.description
          AND permission.cross_tenant_mode='SAME_TENANT_ONLY') <> 19
        OR (SELECT count(*) FROM iam_permission WHERE
-          (id=3012 AND permission_code='menu:manage' AND status='DISABLED')
-          OR (id=3014 AND permission_code='department:manage' AND status='DISABLED')) <> 2 THEN
+          (id=3012 AND permission_code='menu:manage' AND status='ACTIVE')
+          OR (id=3014 AND permission_code='department:manage' AND status='ACTIVE')) <> 2 THEN
         RAISE EXCEPTION 'Local bootstrap refused: required permission catalog is incomplete or modified';
     END IF;
 
@@ -372,19 +401,19 @@ BEGIN
       INTO fixture_footprint_present;
 
     IF fixture_footprint_present AND NOT pg_temp.iam_local_final_fixture_is_exact() THEN
-        legacy_without_buttons := pg_temp.iam_local_legacy_fixture_is_exact(false, false);
-        legacy_with_buttons := pg_temp.iam_local_legacy_fixture_is_exact(true, false);
-        v14_legacy_without_buttons := pg_temp.iam_local_legacy_fixture_is_exact(false, true);
-        v14_legacy_with_buttons := pg_temp.iam_local_legacy_fixture_is_exact(true, true);
+        legacy_without_buttons := pg_temp.iam_local_legacy_fixture_is_exact(false, 0);
+        legacy_with_buttons := pg_temp.iam_local_legacy_fixture_is_exact(true, 0);
+        v15_legacy_without_buttons := pg_temp.iam_local_legacy_fixture_is_exact(false, 2);
+        v15_legacy_with_buttons := pg_temp.iam_local_legacy_fixture_is_exact(true, 2);
         IF NOT legacy_without_buttons AND NOT legacy_with_buttons
-           AND NOT v14_legacy_without_buttons AND NOT v14_legacy_with_buttons THEN
+           AND NOT v15_legacy_without_buttons AND NOT v15_legacy_with_buttons THEN
             RAISE EXCEPTION 'Local bootstrap refused: local fixture footprint is incomplete or modified';
         END IF;
 
-        v14_migrated := v14_legacy_without_buttons OR v14_legacy_with_buttons;
-        legacy_with_buttons := legacy_with_buttons OR v14_legacy_with_buttons;
+        migrated := v15_legacy_without_buttons OR v15_legacy_with_buttons;
+        legacy_with_buttons := legacy_with_buttons OR v15_legacy_with_buttons;
 
-        IF v14_migrated THEN
+        IF migrated THEN
             DELETE FROM iam_role_grant grant_row
              USING iam_local_final_permission expected
              WHERE grant_row.tenant_id=1 AND grant_row.role_id=2000
@@ -483,7 +512,7 @@ SELECT setval('iam_id_seq', GREATEST(10000,(SELECT last_value FROM iam_id_seq),
     COALESCE((SELECT max(id) FROM iam_audit_event),0),COALESCE((SELECT max(id) FROM iam_permission_change_outbox),0)),true)
 @@
 
-DROP FUNCTION pg_temp.iam_local_legacy_fixture_is_exact(BOOLEAN, BOOLEAN)
+DROP FUNCTION pg_temp.iam_local_legacy_fixture_is_exact(BOOLEAN, INTEGER)
 @@
 DROP FUNCTION pg_temp.iam_local_final_fixture_is_exact()
 @@
@@ -492,5 +521,8 @@ DROP FUNCTION pg_temp.iam_local_role_menus_are_exact()
 DROP FUNCTION pg_temp.iam_local_v14_history_is_exact()
 @@
 
-DROP FUNCTION pg_temp.iam_local_identity_is_exact(BOOLEAN)
+DROP FUNCTION pg_temp.iam_local_v15_history_is_exact()
+@@
+
+DROP FUNCTION pg_temp.iam_local_identity_is_exact(INTEGER)
 @@

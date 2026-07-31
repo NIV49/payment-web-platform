@@ -41,6 +41,9 @@ import static com.niv.payment.permission.persistence.repository.JooqAdministrati
 
 /** Atomic jOOQ boundary for the deliberately constrained tenant-wide role grant editor. */
 public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort, RoleGrantWritePort {
+    private static final Set<String> LEGACY_COMPATIBILITY_CODES =
+        Set.of("menu:manage", "department:manage");
+
     private final DSLContext dsl;
     private final JooqAdministrationSupport support;
     private final Supplier<String> traceIdSupplier;
@@ -239,7 +242,8 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             .leftJoin(IAM_GRANT_DIMENSION).on(IAM_GRANT_DIMENSION.GRANT_ID.eq(IAM_ROLE_GRANT.ID))
             .where(IAM_ROLE_GRANT.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE_GRANT.ROLE_ID.eq(roleId))
-                .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE)))
+                .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE))
+                .and(IAM_PERMISSION.PERMISSION_CODE.notIn(LEGACY_COMPATIBILITY_CODES)))
             .orderBy(IAM_ROLE_GRANT.GRANT_KEY, IAM_GRANT_DIMENSION.DIMENSION_CODE)
             .fetch();
         Map<Long, List<Record>> byGrant = new LinkedHashMap<>();

@@ -185,10 +185,10 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
 
         migrateToLatest();
 
-        assertV14MigratedLegacyFixture(8);
+        assertExpandedMigratedLegacyFixture(8);
         runBootstrap(FIXTURE_LOGIN_INPUT);
         assertCompleteFixture();
-        assertV14MigrationHistoryPreserved();
+        assertMigrationHistoryPreserved();
     }
 
     @Test
@@ -197,10 +197,10 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
 
         migrateToLatest();
 
-        assertV14MigratedLegacyFixture(22);
+        assertExpandedMigratedLegacyFixture(22);
         runBootstrap(FIXTURE_LOGIN_INPUT);
         assertCompleteFixture();
-        assertV14MigrationHistoryPreserved();
+        assertMigrationHistoryPreserved();
     }
 
     @Test
@@ -600,22 +600,26 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
         return configuration.load();
     }
 
-    private void assertV14MigratedLegacyFixture(int expectedMenuCount) {
+    private void assertExpandedMigratedLegacyFixture(int expectedMenuCount) {
         assertThat(count("iam_permission")).isEqualTo(21);
         assertThat(count("iam_role_grant")).isEqualTo(21);
         assertThat(count("iam_grant_dimension")).isEqualTo(21);
         assertThat(count("iam_menu")).isEqualTo(expectedMenuCount);
         assertThat(jdbc.queryForObject(
-            "SELECT row_version FROM iam_role WHERE id=2000", Long.class)).isOne();
+            "SELECT row_version FROM iam_role WHERE id=2000", Long.class)).isEqualTo(2);
         assertThat(jdbc.queryForObject(
-            "SELECT permission_version FROM iam_membership WHERE id=1000", Long.class)).isOne();
+            "SELECT permission_version FROM iam_membership WHERE id=1000", Long.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission
+             WHERE permission_code IN ('menu:manage','department:manage') AND status='ACTIVE'
+            """, Long.class)).isEqualTo(2);
     }
 
-    private void assertV14MigrationHistoryPreserved() {
+    private void assertMigrationHistoryPreserved() {
         assertThat(jdbc.queryForObject(
-            "SELECT row_version FROM iam_role WHERE id=2000", Long.class)).isOne();
+            "SELECT row_version FROM iam_role WHERE id=2000", Long.class)).isEqualTo(2);
         assertThat(jdbc.queryForObject(
-            "SELECT permission_version FROM iam_membership WHERE id=1000", Long.class)).isOne();
+            "SELECT permission_version FROM iam_membership WHERE id=1000", Long.class)).isEqualTo(2);
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_audit_event
              WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref='2000'
@@ -625,6 +629,16 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
             SELECT count(*) FROM iam_permission_change_outbox
              WHERE tenant_id=1 AND aggregate_type='MEMBERSHIP' AND aggregate_ref='1000'
                AND event_type='PERMISSION_VERSION_CHANGED' AND trace_id='migration-v14'
+            """, Long.class)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref='2000'
+               AND action_code='EXPAND_LEGACY_ADMIN_PERMISSIONS' AND trace_id='migration-v15'
+            """, Long.class)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='MEMBERSHIP' AND aggregate_ref='1000'
+               AND event_type='PERMISSION_VERSION_CHANGED' AND trace_id='migration-v15'
             """, Long.class)).isOne();
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_role_grant
