@@ -646,6 +646,8 @@ grantable 元数据使用绑定维度与模式的对象数组：
 
 请求不得提交风险、审批或 step-up 元数据；服务端从 ACTIVE Permission Catalog 校验并补齐。第一阶段拒绝 targets、有效期、FUND、approval 和非 TENANT/TENANT_ALL 授权。PUT 在同一事务内锁 tenant/actor/role，替换 grants/dimensions，递增 role rowVersion 与受影响 Membership permissionVersion，并追加 before/after audit 与 append-only outbox；`iam_role_menu` 保持不变。
 
+第一阶段授权 UI 还要维护当前管理页面的可执行依赖：用户新增同时需要 `user:view/department:view/role:view`；用户完整编辑同时需要 `user:view/user:update/user:disable/user:assign-role/department:view/role:view`；角色新增或编辑同时需要 `role:view/menu:view`；菜单和部门写操作分别依赖同资源的 view 权限。选择动作权限时 UI 自动补齐这些依赖，取消依赖时移除已不可用的动作；已有缺依赖组合会明确告警并禁止保存，不能把“成功写入但页面和 API 不可用”当成有效授权。
+
 ## 1.11 Department API
 
 | Endpoint | Request/response |

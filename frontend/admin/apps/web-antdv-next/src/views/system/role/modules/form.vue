@@ -76,11 +76,12 @@ const [Drawer, drawerApi] = useVbenDrawer({
   async onOpenChange(isOpen) {
     if (isOpen) {
       const data = drawerApi.getData<SystemRoleApi.SystemRole>();
-      formApi.resetForm();
+      const existingRole = data?.id ? data : undefined;
+      formApi.reset();
 
-      if (data) {
-        formData.value = data;
-        id.value = data.id;
+      if (existingRole) {
+        formData.value = existingRole;
+        id.value = existingRole.id;
       } else {
         formData.value = undefined;
         id.value = undefined;
@@ -91,11 +92,12 @@ const [Drawer, drawerApi] = useVbenDrawer({
       }
       // Wait for Vue to flush DOM updates (form fields mounted)
       await nextTick();
-      if (data) {
-        preservedButtonMenuIds.value = data.menuIds.filter((menuId) =>
+      if (existingRole) {
+        const currentMenuIds = existingRole.menuIds ?? [];
+        preservedButtonMenuIds.value = currentMenuIds.filter((menuId) =>
           buttonMenuIds.value.has(menuId),
         );
-        formApi.setValues({ ...data, menuIds: data.menuIds ?? [] });
+        formApi.setValues({ ...existingRole, menuIds: currentMenuIds });
       } else {
         preservedButtonMenuIds.value = [];
         formApi.setValues({ menuIds: [], status: 1 });

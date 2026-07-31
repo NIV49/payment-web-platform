@@ -8,7 +8,10 @@ import {
   buildTenantRoleGrants,
   canConfigureRoleGrants,
   canMutateRole,
+  findMissingPermissionDependencies,
   mergeRoleNavigationMenuIds,
+  permissionDependencies,
+  reconcilePermissionSelection,
   ROLE_LIST_SEARCH_BEHAVIOR,
 } from './grant-contract';
 
@@ -64,11 +67,65 @@ describe('role grant frontend contract', () => {
     ]);
   });
 
+  it('adds the permissions required to make create and edit actions usable', () => {
+    expect(reconcilePermissionSelection([], 'user:create', true)).toEqual([
+      'user:create',
+      'user:view',
+      'department:view',
+      'role:view',
+    ]);
+    expect(reconcilePermissionSelection([], 'user:update', true)).toEqual([
+      'user:update',
+      'user:view',
+      'user:disable',
+      'user:assign-role',
+      'department:view',
+      'role:view',
+    ]);
+    expect(permissionDependencies('role:create')).toEqual([
+      'role:view',
+      'menu:view',
+    ]);
+  });
+
+  it('removes actions that become unusable when a dependency is removed', () => {
+    expect(
+      reconcilePermissionSelection(
+        [
+          'user:update',
+          'user:view',
+          'user:disable',
+          'user:assign-role',
+          'department:view',
+          'role:view',
+        ],
+        'role:view',
+        false,
+      ),
+    ).toEqual(['user:view', 'user:disable', 'department:view']);
+  });
+
+  it('reports existing invalid combinations without silently rewriting them', () => {
+    expect(findMissingPermissionDependencies(['user:update'])).toEqual([
+      {
+        missing: [
+          'user:view',
+          'user:disable',
+          'user:assign-role',
+          'department:view',
+          'role:view',
+        ],
+        permissionCode: 'user:update',
+      },
+    ]);
+  });
+
   it('preserves legacy BUTTON menu relationships during navigation edits', () => {
     expect(mergeRoleNavigationMenuIds(['10', '11'], ['90', '11'])).toEqual([
       '10',
       '11',
       '90',
     ]);
+    expect(mergeRoleNavigationMenuIds(undefined, [])).toEqual([]);
   });
 });

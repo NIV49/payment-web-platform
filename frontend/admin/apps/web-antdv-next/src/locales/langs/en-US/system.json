@@ -138,6 +138,8 @@
     "grantReason": "Change reason",
     "grantReasonPlaceholder": "Enter the reason for this permission change",
     "grantReasonRequired": "Enter a permission change reason",
+    "grantRequires": "Requires {0}",
+    "grantDependencyMissing": "This selection is unusable because dependencies are missing: {0}",
     "grantSaveSuccess": "Functional permissions saved",
     "retry": "Retry"
   }

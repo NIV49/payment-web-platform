@@ -26,7 +26,12 @@ import {
 } from '#/api/system/role-grant';
 import { $t } from '#/locales';
 
-import { buildTenantRoleGrants } from '../grant-contract';
+import {
+  buildTenantRoleGrants,
+  findMissingPermissionDependencies,
+  permissionDependencies,
+  reconcilePermissionSelection,
+} from '../grant-contract';
 
 const emits = defineEmits<{
   success: [];
@@ -41,6 +46,17 @@ const loading = ref(false);
 const loadFailed = ref(false);
 
 const editable = computed(() => grantDetail.value?.editable === true);
+const dependencyViolations = computed(() =>
+  findMissingPermissionDependencies(selectedPermissionCodes.value),
+);
+const dependencyViolationSummary = computed(() =>
+  dependencyViolations.value
+    .map(
+      ({ missing, permissionCode }) =>
+        `${permissionCode} -> ${missing.join(', ')}`,
+    )
+    .join('; '),
+);
 const groupedPermissions = computed(() => {
   const groups = new Map<string, IamRoleGrantApi.GrantablePermission[]>();
   for (const permission of grantablePermissions.value) {
@@ -60,6 +76,14 @@ const [Drawer, drawerApi] = useVbenDrawer({
     const normalizedReason = reason.value.trim();
     if (!normalizedReason) {
       message.warning($t('system.role.grantReasonRequired'));
+      return;
+    }
+    if (dependencyViolations.value.length > 0) {
+      message.warning(
+        $t('system.role.grantDependencyMissing', [
+          dependencyViolationSummary.value,
+        ]),
+      );
       return;
     }
     drawerApi.lock();
@@ -117,10 +141,11 @@ async function loadGrants() {
 }
 
 function togglePermission(permissionCode: string, checked: boolean) {
-  const next = new Set(selectedPermissionCodes.value);
-  if (checked) next.add(permissionCode);
-  else next.delete(permissionCode);
-  selectedPermissionCodes.value = [...next];
+  selectedPermissionCodes.value = reconcilePermissionSelection(
+    selectedPermissionCodes.value,
+    permissionCode,
+    checked,
+  );
 }
 
 function clearAll() {
@@ -160,6 +185,17 @@ const drawerTitle = computed(() =>
           v-else-if="grantDetail && !editable"
           show-icon
           :title="$t('system.role.grantReadOnly')"
+          type="warning"
+        />
+
+        <Alert
+          v-else-if="dependencyViolations.length > 0"
+          show-icon
+          :title="
+            $t('system.role.grantDependencyMissing', [
+              dependencyViolationSummary,
+            ])
+          "
           type="warning"
         />
 
@@ -209,6 +245,20 @@ const drawerTitle = computed(() =>
                 <span>{{ permission.permissionCode }}</span>
                 <Tag class="ml-2" color="blue">
                   {{ permission.riskLevel }}
+                </Tag>
+                <Tag
+                  v-if="
+                    permissionDependencies(permission.permissionCode).length > 0
+                  "
+                  class="ml-2"
+                >
+                  {{
+                    $t('system.role.grantRequires', [
+                      permissionDependencies(permission.permissionCode).join(
+                        ', ',
+                      ),
+                    ])
+                  }}
                 </Tag>
               </Checkbox>
             </div>

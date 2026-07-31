@@ -138,6 +138,8 @@
     "grantReason": "变更原因",
     "grantReasonPlaceholder": "请输入本次权限变更原因",
     "grantReasonRequired": "请输入权限变更原因",
+    "grantRequires": "依赖 {0}",
+    "grantDependencyMissing": "存在不可用的权限组合，缺少依赖：{0}",
     "grantSaveSuccess": "功能权限已保存",
     "retry": "重试"
   }
