@@ -140,6 +140,7 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 .on(IAM_MENU.TENANT_ID.eq(IAM_ROLE_MENU.TENANT_ID)
                     .and(IAM_MENU.ID.eq(IAM_ROLE_MENU.MENU_ID))
                     .and(IAM_MENU.STATUS.eq(ACTIVE))
+                    .and(IAM_MENU.DELETED_AT.isNull())
                     .and(IAM_MENU.MENU_TYPE.in("DIRECTORY", "PAGE", "EMBEDDED", "LINK")))
             .where(IAM_ROLE_MENU.TENANT_ID.eq(tenantId)
                 .and(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID.eq(membershipId)))
@@ -163,10 +164,12 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 IAM_MENU.META_JSON,
                 IAM_MENU.STATUS,
                 IAM_MENU.ROW_VERSION,
+                IAM_MENU.SYSTEM_MANAGED,
                 IAM_MENU.SORT_ORDER)
             .from(IAM_MENU)
             .where(IAM_MENU.TENANT_ID.eq(tenantId)
                 .and(IAM_MENU.STATUS.eq(ACTIVE))
+                .and(IAM_MENU.DELETED_AT.isNull())
                 .and(IAM_MENU.MENU_TYPE.in("DIRECTORY", "PAGE", "EMBEDDED", "LINK")))
             .orderBy(IAM_MENU.SORT_ORDER, IAM_MENU.ID)
             .limit(MAX_TREE_NODES + 1)
@@ -217,6 +220,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 IAM_DEPARTMENT.DEPARTMENT_NAME,
                 IAM_MEMBERSHIP.STATUS,
                 IAM_MEMBERSHIP.ROW_VERSION,
+                IAM_USER.ROW_VERSION,
+                IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION,
                 IAM_USER.REMARK,
                 IAM_MEMBERSHIP.CREATED_AT)
             .from(IAM_MEMBERSHIP)
@@ -225,7 +230,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 .on(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(IAM_USER.ID))
             .leftJoin(IAM_DEPARTMENT)
                 .on(IAM_DEPARTMENT.TENANT_ID.eq(IAM_MEMBERSHIP.TENANT_ID)
-                    .and(IAM_DEPARTMENT.ID.eq(IAM_MEMBERSHIP.DEPARTMENT_ID)))
+                    .and(IAM_DEPARTMENT.ID.eq(IAM_MEMBERSHIP.DEPARTMENT_ID))
+                    .and(IAM_DEPARTMENT.DELETED_AT.isNull()))
             .where(condition)
             .orderBy(IAM_MEMBERSHIP.CREATED_AT.desc(), IAM_MEMBERSHIP.ID.desc())
             .limit(query.pageSize())
@@ -286,6 +292,15 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
     }
 
     public List<IdentityModels.Department> findDepartments(long tenantId) {
+        return findDepartments(tenantId, false);
+    }
+
+    public List<IdentityModels.Department> findDepartments(long tenantId, boolean selectableOnly) {
+        Condition condition = IAM_DEPARTMENT.TENANT_ID.eq(tenantId)
+            .and(IAM_DEPARTMENT.DELETED_AT.isNull());
+        if (selectableOnly) {
+            condition = condition.and(IAM_DEPARTMENT.STATUS.eq(ACTIVE));
+        }
         return dsl.select(
                 IAM_DEPARTMENT.ID,
                 IAM_DEPARTMENT.PARENT_ID,
@@ -293,9 +308,10 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 IAM_DEPARTMENT.STATUS,
                 IAM_DEPARTMENT.REMARK,
                 IAM_DEPARTMENT.ROW_VERSION,
+                IAM_DEPARTMENT.SYSTEM_MANAGED,
                 IAM_DEPARTMENT.CREATED_AT)
             .from(IAM_DEPARTMENT)
-            .where(IAM_DEPARTMENT.TENANT_ID.eq(tenantId))
+            .where(condition)
             .orderBy(IAM_DEPARTMENT.CREATED_AT, IAM_DEPARTMENT.ID)
             .limit(MAX_TREE_NODES + 1)
             .fetch(row -> new IdentityModels.Department(
@@ -305,10 +321,20 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 apiStatus(row.get(IAM_DEPARTMENT.STATUS)),
                 row.get(IAM_DEPARTMENT.REMARK),
                 row.get(IAM_DEPARTMENT.ROW_VERSION),
+                Boolean.TRUE.equals(row.get(IAM_DEPARTMENT.SYSTEM_MANAGED)),
                 instant(row.get(IAM_DEPARTMENT.CREATED_AT))));
     }
 
     public List<IdentityModels.Menu> findMenus(long tenantId) {
+        return findMenus(tenantId, false);
+    }
+
+    public List<IdentityModels.Menu> findMenus(long tenantId, boolean selectableOnly) {
+        Condition condition = IAM_MENU.TENANT_ID.eq(tenantId)
+            .and(IAM_MENU.DELETED_AT.isNull());
+        if (selectableOnly) {
+            condition = condition.and(IAM_MENU.STATUS.eq(ACTIVE));
+        }
         return dsl.select(
                 IAM_MENU.ID,
                 IAM_MENU.PARENT_ID,
@@ -322,9 +348,10 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 IAM_MENU.META_JSON,
                 IAM_MENU.STATUS,
                 IAM_MENU.ROW_VERSION,
+                IAM_MENU.SYSTEM_MANAGED,
                 IAM_MENU.SORT_ORDER)
             .from(IAM_MENU)
-            .where(IAM_MENU.TENANT_ID.eq(tenantId))
+            .where(condition)
             .orderBy(IAM_MENU.SORT_ORDER, IAM_MENU.ID)
             .limit(MAX_TREE_NODES + 1)
             .fetch(this::menu);
@@ -411,6 +438,7 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
             .where(IAM_ROLE_MENU.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE_MENU.ROLE_ID.in(roleIds))
                 .and(IAM_MENU.STATUS.eq(ACTIVE))
+                .and(IAM_MENU.DELETED_AT.isNull())
                 .and(IAM_MENU.MENU_TYPE.in("DIRECTORY", "PAGE", "EMBEDDED", "LINK")))
             .orderBy(IAM_ROLE_MENU.ROLE_ID, IAM_ROLE_MENU.MENU_ID)
             .forEach(row -> result.computeIfAbsent(row.get(IAM_ROLE_MENU.ROLE_ID), ignored -> new ArrayList<>())
@@ -431,6 +459,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
             apiStatus(row.get(IAM_MEMBERSHIP.STATUS)),
             row.get(IAM_USER.STATUS),
             row.get(IAM_MEMBERSHIP.ROW_VERSION),
+            row.get(IAM_USER.ROW_VERSION),
+            row.get(IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION),
             row.get(IAM_USER.REMARK),
             instant(row.get(IAM_MEMBERSHIP.CREATED_AT)));
     }
@@ -448,7 +478,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
             row.get(IAM_MENU.AUTH_CODE),
             json(row.get(IAM_MENU.META_JSON)),
             apiStatus(row.get(IAM_MENU.STATUS)),
-            row.get(IAM_MENU.ROW_VERSION));
+            row.get(IAM_MENU.ROW_VERSION),
+            Boolean.TRUE.equals(row.get(IAM_MENU.SYSTEM_MANAGED)));
     }
 
     private static String menuTypeForApi(String value) {

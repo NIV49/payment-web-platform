@@ -70,8 +70,16 @@ public final class IdentityAdministrationService {
         return boundedTree(departments.findDepartments(tenantId),
             IdentityModels.Department::id, IdentityModels.Department::parentId);
     }
+    public List<IdentityModels.Department> departments(long tenantId, boolean selectableOnly) {
+        return boundedTree(departments.findDepartments(tenantId, selectableOnly),
+            IdentityModels.Department::id, IdentityModels.Department::parentId);
+    }
     public List<IdentityModels.Menu> menus(long tenantId) {
         return boundedTree(menus.findMenus(tenantId), IdentityModels.Menu::id, IdentityModels.Menu::parentId);
+    }
+    public List<IdentityModels.Menu> menus(long tenantId, boolean selectableOnly) {
+        return boundedTree(menus.findMenus(tenantId, selectableOnly),
+            IdentityModels.Menu::id, IdentityModels.Menu::parentId);
     }
 
     public long createUser(long tenantId, AdministrationActor actor, IdentityModels.UserCreateCommand command) {
@@ -148,6 +156,19 @@ public final class IdentityAdministrationService {
         validCollectionSize(command.roleIds(), MAX_ROLES_PER_MEMBERSHIP, "roleIds");
         command.roleIds().forEach(IdentityAdministrationService::positiveId); validStatus(command.status());
         if (command.userVersion() < 0) throw new InvalidCommandException("userVersion is invalid");
+        boolean identityUpdate = command.username() != null || command.name() != null
+            || command.identityVersion() != null || command.credentialVersion() != null
+            || command.remark() != null;
+        if (identityUpdate) {
+            requiredText(command.username(), "Username");
+            requiredText(command.name(), "Name");
+            if (command.identityVersion() == null || command.identityVersion() < 0) {
+                throw new InvalidCommandException("identityVersion is invalid");
+            }
+            if (command.credentialVersion() == null || command.credentialVersion() < 0) {
+                throw new InvalidCommandException("credentialVersion is invalid");
+            }
+        }
     }
     private static void validateRole(IdentityModels.RoleCommand command) {
         Objects.requireNonNull(command, "command"); requiredText(command.name(), "Role name");

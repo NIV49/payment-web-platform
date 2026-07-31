@@ -18,7 +18,10 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_DEPARTMENT;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_GRANT_DIMENSION;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_GRANT_TARGET;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_ROLE_GRANT;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.ACTIVE;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.DISABLED;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.notFound;
@@ -43,6 +46,11 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
     @Override
     public List<IdentityModels.Department> findDepartments(long tenantId) {
         return queries.findDepartments(tenantId);
+    }
+
+    @Override
+    public List<IdentityModels.Department> findDepartments(long tenantId, boolean selectableOnly) {
+        return queries.findDepartments(tenantId, selectableOnly);
     }
 
     @Override
@@ -84,6 +92,7 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
         if (!nodes.containsKey(departmentId)) {
             throw notFound("Department");
         }
+        requireUserManaged(nodes.get(departmentId));
         String state = status(command.status());
         if (!parentAllowed(nodes, departmentId, command.parentId(), state)) {
             throw new IllegalArgumentException("Invalid or inactive department parent");
@@ -101,7 +110,8 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
             .set(IAM_DEPARTMENT.ROW_VERSION, IAM_DEPARTMENT.ROW_VERSION.plus(1L))
             .where(IAM_DEPARTMENT.TENANT_ID.eq(tenantId)
                 .and(IAM_DEPARTMENT.ID.eq(departmentId))
-                .and(IAM_DEPARTMENT.ROW_VERSION.eq(expectedVersion)))
+                .and(IAM_DEPARTMENT.ROW_VERSION.eq(expectedVersion))
+                .and(IAM_DEPARTMENT.DELETED_AT.isNull()))
             .execute();
         requireSuccessfulMutation(updated, tenantId, departmentId);
         support.audit(tenantId, actor.membershipId(), "DEPARTMENT", departmentId,
@@ -114,17 +124,24 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
                                  long expectedVersion) {
         support.requirePlatformTenant(tenantId);
         support.lockTenant(tenantId, actor);
-        if (hasDependents(tenantId, departmentId)) {
+        TreeNode target = nodes(tenantId).get(departmentId);
+        if (target == null) {
+            throw notFound("Department");
+        }
+        requireUserManaged(target);
+        if (hasDeletionDependents(tenantId, departmentId)) {
             throw new IdentityAdministrationService.DataConflictException(
-                "Department has active dependents");
+                "Department has live children, memberships, or grants");
         }
         int updated = dsl.update(IAM_DEPARTMENT)
             .set(IAM_DEPARTMENT.STATUS, DISABLED)
+            .set(IAM_DEPARTMENT.DELETED_AT, DSL.currentOffsetDateTime())
             .set(IAM_DEPARTMENT.UPDATED_AT, DSL.currentOffsetDateTime())
             .set(IAM_DEPARTMENT.ROW_VERSION, IAM_DEPARTMENT.ROW_VERSION.plus(1L))
             .where(IAM_DEPARTMENT.TENANT_ID.eq(tenantId)
                 .and(IAM_DEPARTMENT.ID.eq(departmentId))
-                .and(IAM_DEPARTMENT.ROW_VERSION.eq(expectedVersion)))
+                .and(IAM_DEPARTMENT.ROW_VERSION.eq(expectedVersion))
+                .and(IAM_DEPARTMENT.DELETED_AT.isNull()))
             .execute();
         requireSuccessfulMutation(updated, tenantId, departmentId);
         support.audit(tenantId, actor.membershipId(), "DEPARTMENT", departmentId,
@@ -137,7 +154,8 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
             return false;
         }
         Map<Long, TreeNode> candidate = new LinkedHashMap<>(nodes);
-        candidate.put(departmentId, new TreeNode(parentId, state));
+        candidate.put(departmentId, new TreeNode(parentId, state,
+            nodes.containsKey(departmentId) && nodes.get(departmentId).systemManaged()));
         return isValidTree(candidate);
     }
 
@@ -148,7 +166,8 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
         Long currentVersion = dsl.select(IAM_DEPARTMENT.ROW_VERSION)
             .from(IAM_DEPARTMENT)
             .where(IAM_DEPARTMENT.TENANT_ID.eq(tenantId)
-                .and(IAM_DEPARTMENT.ID.eq(departmentId)))
+                .and(IAM_DEPARTMENT.ID.eq(departmentId))
+                .and(IAM_DEPARTMENT.DELETED_AT.isNull()))
             .fetchOne(IAM_DEPARTMENT.ROW_VERSION);
         if (currentVersion == null) {
             throw notFound("Department");
@@ -174,18 +193,51 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
                 .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE))));
     }
 
+    private boolean hasDeletionDependents(long tenantId, long departmentId) {
+        Map<Long, TreeNode> nodes = nodes(tenantId);
+        Set<Long> subtree = subtree(nodes, departmentId);
+        if (subtree.size() > 1) {
+            return true;
+        }
+        boolean hasMembership = dsl.fetchExists(dsl.selectOne()
+            .from(IAM_MEMBERSHIP)
+            .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
+                .and(IAM_MEMBERSHIP.DEPARTMENT_ID.eq(departmentId))
+                .and(IAM_MEMBERSHIP.STATUS.ne("TERMINATED"))));
+        if (hasMembership) {
+            return true;
+        }
+        return dsl.fetchExists(dsl.selectOne()
+            .from(IAM_GRANT_TARGET)
+            .join(IAM_GRANT_DIMENSION)
+                .on(IAM_GRANT_DIMENSION.ID.eq(IAM_GRANT_TARGET.DIMENSION_ID))
+            .join(IAM_ROLE_GRANT)
+                .on(IAM_ROLE_GRANT.ID.eq(IAM_GRANT_DIMENSION.GRANT_ID))
+            .where(IAM_ROLE_GRANT.TENANT_ID.eq(tenantId)
+                .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE))
+                .and(IAM_ROLE_GRANT.VALID_FROM.isNull()
+                    .or(IAM_ROLE_GRANT.VALID_FROM.le(DSL.currentOffsetDateTime())))
+                .and(IAM_ROLE_GRANT.VALID_UNTIL.isNull()
+                    .or(IAM_ROLE_GRANT.VALID_UNTIL.gt(DSL.currentOffsetDateTime())))
+                .and(IAM_GRANT_DIMENSION.DIMENSION_CODE.eq("DEPARTMENT"))
+                .and(IAM_GRANT_TARGET.TARGET_REF.eq(Long.toString(departmentId)))));
+    }
+
     private Map<Long, TreeNode> nodes(long tenantId) {
         Map<Long, TreeNode> nodes = new LinkedHashMap<>();
-        var rows = dsl.select(IAM_DEPARTMENT.ID, IAM_DEPARTMENT.PARENT_ID, IAM_DEPARTMENT.STATUS)
+        var rows = dsl.select(IAM_DEPARTMENT.ID, IAM_DEPARTMENT.PARENT_ID,
+                IAM_DEPARTMENT.STATUS, IAM_DEPARTMENT.SYSTEM_MANAGED)
             .from(IAM_DEPARTMENT)
-            .where(IAM_DEPARTMENT.TENANT_ID.eq(tenantId))
+            .where(IAM_DEPARTMENT.TENANT_ID.eq(tenantId)
+                .and(IAM_DEPARTMENT.DELETED_AT.isNull()))
             .limit(MAX_TREE_NODES + 1)
             .fetch();
         if (rows.size() > MAX_TREE_NODES) {
             throw new IdentityAdministrationService.TreeLimitExceededException("Tree node limit exceeded");
         }
         rows.forEach(row -> nodes.put(row.get(IAM_DEPARTMENT.ID),
-                new TreeNode(row.get(IAM_DEPARTMENT.PARENT_ID), row.get(IAM_DEPARTMENT.STATUS))));
+                new TreeNode(row.get(IAM_DEPARTMENT.PARENT_ID), row.get(IAM_DEPARTMENT.STATUS),
+                    Boolean.TRUE.equals(row.get(IAM_DEPARTMENT.SYSTEM_MANAGED)))));
         return nodes;
     }
 
@@ -225,6 +277,13 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
         return Set.copyOf(result);
     }
 
-    private record TreeNode(Long parentId, String status) {
+    private static void requireUserManaged(TreeNode node) {
+        if (node.systemManaged()) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "System-managed department cannot be modified");
+        }
+    }
+
+    private record TreeNode(Long parentId, String status, boolean systemManaged) {
     }
 }

@@ -150,9 +150,11 @@ public class SystemAdministrationController {
     }
 
     @GetMapping("/dept/list")
-    ApiResponse<List<DepartmentResponse>> departments(HttpServletRequest request) {
+    ApiResponse<List<DepartmentResponse>> departments(
+        @RequestParam(value = "selectableOnly", defaultValue = "false") boolean selectableOnly,
+        HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        return ApiResponse.success(departmentTree(identities.departments(subject.tenantId())));
+        return ApiResponse.success(departmentTree(identities.departments(subject.tenantId(), selectableOnly)));
     }
 
     @PostMapping("/dept")
@@ -181,9 +183,11 @@ public class SystemAdministrationController {
     }
 
     @GetMapping("/menu/list")
-    ApiResponse<List<MenuResponse>> menus(HttpServletRequest request) {
+    ApiResponse<List<MenuResponse>> menus(
+        @RequestParam(value = "selectableOnly", defaultValue = "false") boolean selectableOnly,
+        HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
-        return ApiResponse.success(menuTree(identities.menus(subject.tenantId())));
+        return ApiResponse.success(menuTree(identities.menus(subject.tenantId(), selectableOnly)));
     }
 
     @GetMapping("/menu/name-exists")
@@ -229,7 +233,7 @@ public class SystemAdministrationController {
     private UserResponse user(IdentityModels.User u) {
         return new UserResponse(Long.toString(u.id()), u.username(), u.name(), id(u.departmentId()), u.departmentName(),
             u.roleIds().stream().map(String::valueOf).toList(), u.roleNames(), u.status(), u.identityStatus(),
-            u.userVersion(), u.remark(), u.createdAt().toString());
+            u.userVersion(), u.identityVersion(), u.credentialVersion(), u.remark(), u.createdAt().toString());
     }
     private RoleResponse role(IdentityModels.Role r) {
         return new RoleResponse(Long.toString(r.id()), r.name(), r.menuIds().stream().map(String::valueOf).toList(),
@@ -238,7 +242,8 @@ public class SystemAdministrationController {
     private List<DepartmentResponse> departmentTree(List<IdentityModels.Department> rows) {
         return tree(rows, IdentityModels.Department::id, IdentityModels.Department::parentId,
             (item, children) -> new DepartmentResponse(Long.toString(item.id()), id(item.parentId()), item.name(),
-                item.status(), item.remark(), item.rowVersion(), item.createdAt().toString(), children));
+                item.status(), item.remark(), item.rowVersion(), item.systemManaged(),
+                item.createdAt().toString(), children));
     }
     private List<MenuResponse> menuTree(List<IdentityModels.Menu> rows) {
         return tree(rows, IdentityModels.Menu::id, IdentityModels.Menu::parentId, (item, children) -> {
@@ -246,7 +251,8 @@ public class SystemAdministrationController {
             try { meta=json.readValue(item.metaJson(), new TypeReference<>(){}); }
             catch (JacksonException e) { throw new IllegalStateException("Stored menu metadata is invalid", e); }
             return new MenuResponse(Long.toString(item.id()), id(item.parentId()), item.type(), item.name(), item.path(),
-                item.component(), item.redirect(), item.authCode(), meta, item.status(), item.rowVersion(), children);
+                item.component(), item.redirect(), item.authCode(), meta, item.status(), item.rowVersion(),
+                item.systemManaged(), children);
         });
     }
 
@@ -295,14 +301,14 @@ public class SystemAdministrationController {
     record PageResponse<T>(List<T> items,long total) { }
     record IdResponse(String id) { }
     record UserResponse(String id,String username,String name,String deptId,String deptName,List<String> roleIds,
-                        List<String> roleNames,int status,String identityStatus,long userVersion,String remark,
-                        String createTime) { }
+                        List<String> roleNames,int status,String identityStatus,long userVersion,
+                        long identityVersion,long credentialVersion,String remark,String createTime) { }
     record RoleResponse(String id,String name,List<String> menuIds,int status,String remark,long rowVersion,
                         boolean systemRole,boolean assignable,String createTime) { }
-    record DepartmentResponse(String id,String pid,String name,int status,String remark,long rowVersion,String createTime,
-                              List<DepartmentResponse> children) { }
+    record DepartmentResponse(String id,String pid,String name,int status,String remark,long rowVersion,
+                              boolean systemManaged,String createTime,List<DepartmentResponse> children) { }
     record MenuResponse(String id,String pid,String type,String name,String path,String component,String redirect,
-                        String authCode,Map<String,Object> meta,int status,long rowVersion,
+                        String authCode,Map<String,Object> meta,int status,long rowVersion,boolean systemManaged,
                         List<MenuResponse> children) { }
     record UserStatusResponse(long userVersion) { }
 
@@ -313,11 +319,23 @@ public class SystemAdministrationController {
         IdentityModels.UserCreateCommand command(){ return new IdentityModels.UserCreateCommand(username,name,
             longId(deptId),roleIds.stream().map(SystemAdministrationController::longId).toList(),status,remark); }
     }
-    record MembershipUpdateRequest(@NotBlank @Pattern(regexp="[1-9][0-9]*") String deptId,
+    record MembershipUpdateRequest(@Size(max=100) String username,@Size(max=128) String name,
+        @NotBlank @Pattern(regexp="[1-9][0-9]*") String deptId,
         @NotNull @Size(max=256) List<@Pattern(regexp="[1-9][0-9]{0,18}") String> roleIds,
-        @NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion) {
-        IdentityModels.MembershipUpdateCommand command(){ return new IdentityModels.MembershipUpdateCommand(
-            longId(deptId),roleIds.stream().map(SystemAdministrationController::longId).toList(),status,userVersion); }
+        @NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion,
+        @Min(0) Long identityVersion,@Min(0) Long credentialVersion,@Size(max=500) String remark) {
+        IdentityModels.MembershipUpdateCommand command(){
+            List<Long> roles=roleIds.stream().map(SystemAdministrationController::longId).toList();
+            if(identityVersion==null && credentialVersion==null) {
+                return new IdentityModels.MembershipUpdateCommand(longId(deptId),roles,status,userVersion);
+            }
+            return new IdentityModels.MembershipUpdateCommand(username,name,longId(deptId),roles,
+                status,userVersion,identityVersion,credentialVersion,remark);
+        }
+
+        MembershipUpdateRequest(String deptId, List<String> roleIds, Integer status, Long userVersion) {
+            this(null, null, deptId, roleIds, status, userVersion, null, null, null);
+        }
     }
     record UserStatusRequest(@NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion) { }
     record RoleRequest(@NotBlank @Size(max=128) String name,@NotNull @Size(max=2048) List<@Pattern(regexp="[1-9][0-9]{0,18}") String> menuIds,

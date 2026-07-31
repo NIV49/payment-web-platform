@@ -50,6 +50,11 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
     }
 
     @Override
+    public List<IdentityModels.Menu> findMenus(long tenantId, boolean selectableOnly) {
+        return queries.findMenus(tenantId, selectableOnly);
+    }
+
+    @Override
     @Transactional
     public long createMenu(long tenantId, AdministrationActor actor, IdentityModels.MenuCommand command) {
         support.requirePlatformTenant(tenantId);
@@ -97,6 +102,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         if (!nodes.containsKey(menuId)) {
             throw notFound("Menu");
         }
+        requireUserManaged(nodes.get(menuId));
         String state = status(command.status());
         String routeName = command.name().trim();
         String routePath = JooqAdministrationSupport.blankToNull(command.path());
@@ -129,7 +135,8 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
             .set(IAM_MENU.ROW_VERSION, IAM_MENU.ROW_VERSION.plus(1L))
             .where(IAM_MENU.TENANT_ID.eq(tenantId)
                 .and(IAM_MENU.ID.eq(menuId))
-                .and(IAM_MENU.ROW_VERSION.eq(expectedVersion)))
+                .and(IAM_MENU.ROW_VERSION.eq(expectedVersion))
+                .and(IAM_MENU.DELETED_AT.isNull()))
             .execute();
         requireSuccessfulMutation(updated, tenantId, menuId);
         support.audit(tenantId, actor.membershipId(), "MENU", menuId, "UPDATE", "menu:update");
@@ -140,17 +147,24 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
     public void deleteMenu(long tenantId, AdministrationActor actor, long menuId, long expectedVersion) {
         support.requirePlatformTenant(tenantId);
         support.lockTenant(tenantId, actor);
-        if (hasActiveDescendants(tenantId, menuId)) {
+        TreeNode target = nodes(tenantId).get(menuId);
+        if (target == null) {
+            throw notFound("Menu");
+        }
+        requireUserManaged(target);
+        if (hasLiveDescendants(tenantId, menuId)) {
             throw new IdentityAdministrationService.DataConflictException(
-                "Menu has active descendants");
+                "Menu has live descendants");
         }
         int updated = dsl.update(IAM_MENU)
             .set(IAM_MENU.STATUS, DISABLED)
+            .set(IAM_MENU.DELETED_AT, DSL.currentOffsetDateTime())
             .set(IAM_MENU.UPDATED_AT, DSL.currentOffsetDateTime())
             .set(IAM_MENU.ROW_VERSION, IAM_MENU.ROW_VERSION.plus(1L))
             .where(IAM_MENU.TENANT_ID.eq(tenantId)
                 .and(IAM_MENU.ID.eq(menuId))
-                .and(IAM_MENU.ROW_VERSION.eq(expectedVersion)))
+                .and(IAM_MENU.ROW_VERSION.eq(expectedVersion))
+                .and(IAM_MENU.DELETED_AT.isNull()))
             .execute();
         requireSuccessfulMutation(updated, tenantId, menuId);
         support.audit(tenantId, actor.membershipId(), "MENU", menuId, "DELETE", "menu:delete");
@@ -164,6 +178,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
             IAM_MENU.ROUTE_NAME,
             IAM_MENU.MENU_NAME);
         var condition = IAM_MENU.TENANT_ID.eq(tenantId)
+            .and(IAM_MENU.DELETED_AT.isNull())
             .and(effectiveRouteName.equalIgnoreCase(name.trim()));
         if (excludedId != null) {
             condition = condition.and(IAM_MENU.ID.ne(excludedId));
@@ -174,6 +189,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
     @Override
     public boolean menuPathExists(long tenantId, String path, Long excludedId) {
         var condition = IAM_MENU.TENANT_ID.eq(tenantId)
+            .and(IAM_MENU.DELETED_AT.isNull())
             .and(normalizedRoutePath(IAM_MENU.ROUTE_PATH)
                 .equalIgnoreCase(stripTrailingSlashes(path.trim())));
         if (excludedId != null) {
@@ -190,7 +206,8 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         }
         Map<Long, TreeNode> candidate = new LinkedHashMap<>(nodes);
         candidate.put(menuId, new TreeNode(parentId, state,
-            nodes.containsKey(menuId) ? nodes.get(menuId).type() : null));
+            nodes.containsKey(menuId) ? nodes.get(menuId).type() : null,
+            nodes.containsKey(menuId) && nodes.get(menuId).systemManaged()));
         return isValidTree(candidate);
     }
 
@@ -201,7 +218,8 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         Long currentVersion = dsl.select(IAM_MENU.ROW_VERSION)
             .from(IAM_MENU)
             .where(IAM_MENU.TENANT_ID.eq(tenantId)
-                .and(IAM_MENU.ID.eq(menuId)))
+                .and(IAM_MENU.ID.eq(menuId))
+                .and(IAM_MENU.DELETED_AT.isNull()))
             .fetchOne(IAM_MENU.ROW_VERSION);
         if (currentVersion == null) {
             throw notFound("Menu");
@@ -219,16 +237,18 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
 
     private Map<Long, TreeNode> nodes(long tenantId) {
         Map<Long, TreeNode> nodes = new LinkedHashMap<>();
-        var rows = dsl.select(IAM_MENU.ID, IAM_MENU.PARENT_ID, IAM_MENU.STATUS, IAM_MENU.MENU_TYPE)
+        var rows = dsl.select(IAM_MENU.ID, IAM_MENU.PARENT_ID, IAM_MENU.STATUS,
+                IAM_MENU.MENU_TYPE, IAM_MENU.SYSTEM_MANAGED)
             .from(IAM_MENU)
-            .where(IAM_MENU.TENANT_ID.eq(tenantId))
+            .where(IAM_MENU.TENANT_ID.eq(tenantId).and(IAM_MENU.DELETED_AT.isNull()))
             .limit(MAX_TREE_NODES + 1)
             .fetch();
         if (rows.size() > MAX_TREE_NODES) {
             throw new IdentityAdministrationService.TreeLimitExceededException("Tree node limit exceeded");
         }
         rows.forEach(row -> nodes.put(row.get(IAM_MENU.ID),
-                new TreeNode(row.get(IAM_MENU.PARENT_ID), row.get(IAM_MENU.STATUS), row.get(IAM_MENU.MENU_TYPE))));
+                new TreeNode(row.get(IAM_MENU.PARENT_ID), row.get(IAM_MENU.STATUS),
+                    row.get(IAM_MENU.MENU_TYPE), Boolean.TRUE.equals(row.get(IAM_MENU.SYSTEM_MANAGED)))));
         return nodes;
     }
 
@@ -284,6 +304,24 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
             .anyMatch(node -> ACTIVE.equals(node.status()));
     }
 
+    private boolean hasLiveDescendants(long tenantId, long menuId) {
+        Map<Long, TreeNode> nodes = nodes(tenantId);
+        Set<Long> subtree = new HashSet<>();
+        subtree.add(menuId);
+        boolean changed;
+        do {
+            changed = false;
+            for (Map.Entry<Long, TreeNode> entry : nodes.entrySet()) {
+                if (entry.getValue().parentId() != null
+                    && subtree.contains(entry.getValue().parentId())
+                    && subtree.add(entry.getKey())) {
+                    changed = true;
+                }
+            }
+        } while (changed);
+        return subtree.size() > 1;
+    }
+
     private static JSONB json(String value) {
         return JSONB.valueOf(value == null || value.isBlank() ? "{}" : value);
     }
@@ -314,6 +352,13 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         };
     }
 
-    private record TreeNode(Long parentId, String status, String type) {
+    private static void requireUserManaged(TreeNode node) {
+        if (node.systemManaged()) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "System-managed menu cannot be modified");
+        }
+    }
+
+    private record TreeNode(Long parentId, String status, String type, boolean systemManaged) {
     }
 }

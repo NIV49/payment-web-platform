@@ -7,6 +7,11 @@ import java.util.List;
 
 public interface MenuAdministrationPort {
     List<IdentityModels.Menu> findMenus(long tenantId);
+    default List<IdentityModels.Menu> findMenus(long tenantId, boolean selectableOnly) {
+        return findMenus(tenantId).stream()
+            .filter(menu -> !selectableOnly || menu.status() == 1)
+            .toList();
+    }
     long createMenu(long tenantId, AdministrationActor actor, IdentityModels.MenuCommand command);
     void updateMenu(long tenantId, AdministrationActor actor, long menuId,
                     IdentityModels.MenuCommand command, long expectedVersion);
