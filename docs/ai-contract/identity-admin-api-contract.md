@@ -404,7 +404,9 @@ AdministrationActor(
 
 锁后发现任一主体状态或版本漂移时，接口返回 401 `SESSION_INVALID`，注销服务端会话并清 Cookie。它关闭了主体禁用、密码失效和版本撤权发生在事务排队期间的写入窗口。
 
-已知未关闭边界：完整 RoleGrant 鉴权仍由写事务之前的 HTTP PEP 完成。若用于管理写操作的 Grant 设置了有限 `valid_until`，它可能在请求等待 tenant/actor 锁期间过期，而 permissionVersion 不变，随后写入仍可能执行。这是明确的生产 **NO-GO / Required** 项，不得描述为已修复。过渡期间，所有能授权 Admin 写 endpoint 的 Grant 不得使用有限 `valid_until`；正式实现必须在取得写锁后使用同一可信数据库时间重验授权，或引入可验证且受时间约束的事务授权凭据。
+`PUT /api/v1/iam/roles/{roleId}/grants` 在锁定 tenant、actor、目标 role 和 ACTIVE system role 后，使用单条 PostgreSQL `statement_timestamp()` 查询重新验证操作者同时持有有效的 `role:view` 与 `role:grant-update`；只接受 NORMAL、SAME_TENANT_ONLY、精确 `TENANT/TENANT_ALL`、无 target、无 step-up/approval 的授权。真实双连接测试覆盖等待 tenant 锁期间 `valid_until` 过期以及任一权限缺失，失败时角色版本、Grant、审计和 Outbox 均不改变。
+
+该关闭范围只覆盖 RoleGrant 替换写入。User、Role、Menu、Department 的其他写接口仍主要依赖事务前 HTTP PEP；若其管理权限 Grant 设置有限 `valid_until`，仍可能在等待写锁期间过期而 permissionVersion 不变。这一剩余边界继续是生产 **NO-GO / Required**，过渡期不得给这些管理写权限配置有限有效期。
 
 本轮没有 `role:assign`、订单权限或资金权限。`role:grant-update` 只保护本节定义的受限角色授权管理 API，不允许作为普通角色的可分配权限。
 
@@ -616,7 +618,7 @@ RoleGrant     -> 后端动作和数据范围
 
 ### 角色授权第一阶段 API
 
-以下端点统一返回 `ApiResponse<T>`，Long ID 仍使用字符串。三者都要求当前会话同时拥有 `role:view` 与 `role:grant-update`，并在数据库事务内重新验证操作者当前持有 ACTIVE `system_role`：
+以下端点统一返回 `ApiResponse<T>`，Long ID 仍使用字符串。三者都要求当前会话同时拥有 `role:view` 与 `role:grant-update`，并验证操作者当前持有 ACTIVE `system_role`；其中 PUT 还执行上一节定义的锁后事务内权限重验：
 
 - `GET /api/v1/iam/permissions/grantable`：只返回精确 18 个 NORMAL、SAME_TENANT_ONLY 管理权限；`role:grant-update` 仅属于 system-admin，不可委派；
 - `GET /api/v1/iam/roles/{roleId}/grants`：返回 `{roleId,roleVersion,editable,grants}`；system role、`assignable=false`、存在当前页面不能无损表达的授权，或旧管理权限 cutover 尚未完成时 `editable=false`；
@@ -835,7 +837,7 @@ V16__enforce_exact_administration_permission_catalog.sql
 12. 所有管理写入仅允许 ACTIVE PLATFORM Tenant；
 13. local Flyway 不推断 baseline，缺少 history 的旧手工开发卷必须重建；
 14. 原型不连接任何资金写链路；
-15. 管理写操作必须携带可信 Session 捕获的 actor 身份与两个版本，并在写锁后复核；有限过期 Grant 在事务内重验完成前不得用于管理写授权。
+15. 管理写操作必须携带可信 Session 捕获的 actor 身份与两个版本，并在写锁后复核；RoleGrant PUT 已事务内重验两项入口权限，其他管理写接口完成同等重验前不得使用有限过期 Grant 授权。
 16. 产品访问模式为 `mixed`；后端 `/menu/all` 继续拥有业务路由，本地只允许显式白名单路由参与合并。
 17. 框架侧 `UserInfo` 必须包含 `userId/avatar/desc/token`；`token` 只能是固定非秘密 `cookie-session` marker，不能返回 Sa-Token 或 refresh credential。
 18. refresh credential 的目标传输方式是独立 HttpOnly Cookie，禁止 body/header 和 JavaScript 可读存储；rotation、重放检测、并发、TTL、撤销、退出联动和 IdP 兼容批准前不得开启 `/auth/refresh`。
@@ -953,7 +955,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 3. 新建用户没有可用的密码激活、邀请、首次改密或管理员重置流程；
 4. Cookie Secure 的生产强制、代理拓扑、TTL、Redis 故障和会话撤权未演练；
 5. CSRF/Origin/CORS 策略尚未经过真实部署安全测试；
-6. 管理写 Grant 的 `valid_until` 可能在等待 tenant/actor 锁期间过期，事务内授权重验尚未实现；当前只能通过“管理写权限不得配置有限 `valid_until`”的运维约束临时规避；
+6. RoleGrant PUT 已关闭 `valid_until` 在等待锁期间过期的竞态；User、Role、Menu、Department 其他管理写接口尚未执行同等事务内授权重验，仍需通过“这些管理写权限不得配置有限 `valid_until`”的运维约束临时规避；
 7. 普通角色分配已保护最后管理员、禁止自提权并拒绝 system/non-assignable role；仍缺经过审批、双人执行、可审计的 break-glass provisioning；
 8. 管理资源已用 rowVersion 阻止旧快照覆盖，但用户/角色仍无详情重载 endpoint；发生 40902 时只能关闭旧表单并刷新列表，不能自动合并并发修改；
 9. RoleGrant 管理 API/UI 已实现精确目录的全量替换，但生产默认由旧管理权限切换闸门禁用；清除全部 N-1 依赖、打开闸门、超出 TENANT_ALL 的数据维度和正式审批流仍未完成；
@@ -1019,5 +1021,5 @@ RoleGrant(permissionCode + dimensions + constraints)
 - V8 生产 fixture 隔离、local-only bootstrap 和禁止自动 baseline 的边界已明确；
 - V10 与 Core 使用同一 DimensionScope 允许矩阵，历史非法组合拒绝迁移而不自动改权；
 - 前端 lifecycle 不使用 `npx`/`pnpm dlx`；根 CI 执行 lint、产品 app typecheck、unit、production-safety 和 product build；
-- finite `valid_until` 的写锁等待 TOCTOU 被明确保留为生产阻断项，过渡期禁止给管理写权限配置有限过期时间；
+- RoleGrant PUT 已用锁后数据库时间重验关闭 finite `valid_until` 竞态；其他管理写接口的同类 TOCTOU 仍是生产阻断项，过渡期禁止给这些权限配置有限过期时间；
 - 未实现能力和生产阻断项没有被描述为已完成。

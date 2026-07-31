@@ -191,7 +191,7 @@ SystemAdministrationController
 
 Controller 从可信 Session 构造 `AdministrationActor(membershipId, expectedUserId, expectedPermissionVersion, expectedSessionVersion)`，不接受浏览器提供这些字段。每个 Admin 写事务先锁定并校验当前 ACTIVE PLATFORM tenant，再以 `FOR UPDATE` 锁定 actor 对应的 Membership、User 和 Credential tuple；写入前重新确认 userId 归属关系、四态、受 V13 保证的可验证 BCrypt 凭证，以及 permissionVersion/sessionVersion。最后管理员判定还会在 Java 侧复用 `LoginCredentialPolicy`，即使数据库约束被旁路，非法 hash 也不能冒充备用管理员。任何主体状态或版本漂移都返回 401 `SESSION_INVALID`，注销会话并清 Cookie。
 
-这解决的是“主体/版本检查与写入”之间的并发撤权窗口，不等于把完整权限判定移入事务。HTTP PEP 对 RoleGrant 有效期的判定仍发生在获取写锁之前：有限 `valid_until` 可能在请求等待 tenant/actor 锁时过期，而版本没有变化，随后写入仍可能执行。该 TOCTOU 尚未修复，是生产 **NO-GO / Required** 项。临时运维约束是：所有可授权 Admin 写 endpoint 的 Grant 不得设置有限 `valid_until`；正式方案必须在写事务锁后基于同一数据库时间重新确认授权，或引入可验证且受时间约束的事务授权凭据。
+主体/版本复核本身不等于完整权限判定。RoleGrant PUT 额外在锁定 tenant、actor、目标 role 和 ACTIVE system role 后，以单条 PostgreSQL `statement_timestamp()` 查询重新验证 `role:view` 与 `role:grant-update`，并拒绝非 NORMAL/SAME_TENANT_ONLY、非精确 `TENANT/TENANT_ALL`、带 target、step-up 或 approval 的入口授权；双连接测试证明等待锁期间过期会 fail closed。User、Role、Menu、Department 其他管理写接口尚未执行同等权限重验，有限 `valid_until` 的同类 TOCTOU 对这些接口仍是生产 **NO-GO / Required**；过渡期不得给这些写权限设置有限有效期。
 
 创建用户是“全局 Identity + 当前 Tenant Membership”用例；新 User 固定为 `PENDING_ACTIVATION`，Credential 固定为 `DISABLED` 且无 password hash，Membership 只按请求预配置。API 用 `identityStatus` 与 Membership `status` 分开表达；当前没有生产邀请/密码设置/激活流程。更新用户只允许修改当前 Membership 的部门、角色、状态和 `row_version`，不会修改全局 username、display name、remark 或 credential。用户角色全集先校验同租户存在性，再由基于 added/removed diff 的策略判断可分配性：新分配只接受 ACTIVE、assignable、非 system 角色；已有禁用普通角色可保留，只有活动系统管理员可将其移除，非系统管理员即使自身持有同一禁用角色也不能获得清理权；受保护角色不能通过普通流程增删。用户更新、状态更新和逻辑删除都使用 membership `row_version` 乐观锁。角色菜单变化推进相关 membership 的 `permission_version`。
 
@@ -352,7 +352,7 @@ cd backend
 
 - Admin API 已有默认拒绝的 method/path 权限注册表和完整授权服务，但仍是手工登记；新增 endpoint 必须同步策略与回归测试。
 - Admin CRUD 使用服务端构造的 tenant 资源上下文；跨租户 Party/Relationship、订单授权视图和列表 DataScopePlan 尚未接入。
-- Admin 写事务会锁定 tenant 和 actor tuple 并复核主体状态、密码可用性及 session/permission 两个版本；但 finite `valid_until` 在等待写锁期间过期的授权 TOCTOU 尚未关闭。生产前必须完成事务内授权复核；过渡期间禁止给管理写权限配置有限过期时间。
+- Admin 写事务会锁定 tenant 和 actor tuple 并复核主体状态、密码可用性及 session/permission 两个版本；RoleGrant PUT 还会在锁后用数据库时间重验两项入口权限。其他管理写接口尚未关闭 finite `valid_until` 的同类 TOCTOU，过渡期间禁止给这些权限配置有限过期时间。
 - `cross_tenant_mode` 已落库，但当前没有权限被标为 `RELATED_PARTY_READ`，也没有关系适配器，因此现有运行时不会开放跨租户访问。
 - menu component 由前后端白名单与契约测试共同约束，发布新组件时仍需同步两端清单。
 - `meta_json` 已有容器、深度、key/string 和总 value 硬上限，外链字段也按菜单类型隔离；新增字段仍必须先定义跨端语义和测试，不得把任意 JSON 当成无约束扩展口。

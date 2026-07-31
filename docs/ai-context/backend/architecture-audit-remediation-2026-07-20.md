@@ -26,13 +26,13 @@
 | P0-1 共享序列被 V3 回拨 | 已关闭 | V5 前向修复同时比较 sequence 当前值与所有共享表最大 ID；V2→latest PG18 升级测试 | 长期每表 identity/UUIDv7 随新域设计 |
 | P0-2 跨租户产品模型与硬拒绝冲突 | Core/存储边界已关闭，业务接入未完成 | `resource owner tenant` 与授权工作区分离；仅受控 `READ/VIEW` action 可配置 `RELATED_PARTY_READ`，并且还要有显式商户/客户范围和可信关系证据；Core 的 PermissionDefinition/PermissionGrant/授权服务三层拒绝非只读 action，V12 CHECK 阻断直接 SQL 与历史错配；FUND 永远同租户 | Party/Relationship adapter、历史关系快照和订单查询尚未实现，因此运行时继续 fail closed |
 | P0-3 完整授权内核未接 HTTP | Admin 已关闭 | `AdminSecurityInterceptor -> AdminAuthorizationEnforcer -> DefaultAuthorizationService -> versioned GrantSnapshot`；未知 method/path 默认拒绝 | 支付详情/列表尚无真实 endpoint；不能把 Admin PEP 宣称为支付数据权限完成 |
-| P0-4 角色分配可越权、最后管理员可被删 | 主体/版本并发路径已关闭，时间型 Grant 仍未关闭 | system/non-assignable/disabled role 拒绝；禁止自提权和越过操作者委派上限；最后可登录的活动 system admin 保护只计算符合统一 BCrypt 格式/成本策略的凭证；`PUT user` 统一要求 update/disable/assign-role；可信 Session 生成包含 userId、membershipId、permissionVersion、sessionVersion 的 `AdministrationActor`，写事务锁定 tenant + actor tuple 后复核主体与两个版本 | finite `valid_until` 可在等待写锁期间过期，见下方 Required 项；双人 break-glass provisioning 尚未实现 |
+| P0-4 角色分配可越权、最后管理员可被删 | 主体/版本并发路径已关闭，RoleGrant PUT 时间竞态已关闭 | system/non-assignable/disabled role 拒绝；禁止自提权和越过操作者委派上限；最后可登录的活动 system admin 保护只计算符合统一 BCrypt 格式/成本策略的凭证；`PUT user` 统一要求 update/disable/assign-role；可信 Session 生成包含 userId、membershipId、permissionVersion、sessionVersion 的 `AdministrationActor`，写事务锁定 tenant + actor tuple 后复核主体与两个版本；RoleGrant PUT 锁后用数据库时间重验两项权限 | 其他管理写接口仍有 finite `valid_until` 边界；双人 break-glass provisioning 尚未实现 |
 | P0-5 支付实施规格/旧系统证据缺失 | 未关闭 | 目标架构只保留为约束和评审输入 | 状态机、账本、金额精度、API/事件/渠道契约、旧新映射、迁移/回滚演练未定版；禁止开始真实资金链 |
 | P1 身份/租户语义混乱 | 原型边界已关闭 | UserCreate 与 MembershipUpdate 拆分；租户内 PUT 不修改全局 User/Credential；多 Membership 登录要求选 workspace；新建身份固定为 `PENDING_ACTIVATION`、Credential 固定为 `DISABLED` 且无 password hash，列表/API 独立返回 `identityStatus` | 外部 OIDC IdP、邀请/密码设置/激活/重置、MFA 和全局身份管理 API 未实现；当前没有可用的生产激活流程 |
 | P1 Session 只查 Membership | 已关闭 | Sa-Token 安全属性由 Boot auto-configuration 在 ApplicationContext 创建期绑定；Session 查询精确匹配 tenant + membership + user，并检查 Tenant/User/Credential/Membership 四态、受 V13 约束的可验证 BCrypt hash 与 sessionVersion；Core 登录也在调用 verifier 前执行同一 `LoginCredentialPolicy`；授权加载另核 permissionVersion；主体/版本失效均返回 401 `SESSION_INVALID` | 生产 Session/Redis 故障演练未完成 |
 | P1 登录限流可被轮换账号或并发绕过 | 已关闭当前本地边界 | Redis Lua 在密码校验前原子预留 client 全局桶与 client/username 桶；15 分钟窗口分别限制 30/5；两个 key 共用 client digest hash tag，在 Redis Cluster 中同槽执行；真实 Valkey 并发回归覆盖原子性、账号轮换与成功释放 | 分布式攻击、代理地址基数、可观测性和生产故障演练仍未完成 |
 | P1 Grant 缓存越过时间边界/并发读 | 已关闭（保守策略） | Snapshot 保存最近 future `valid_from/valid_until`；Loader 与 Redis adapter 双层保证 temporal boundary 快照不被接受或写入缓存，每个请求都以单条 PostgreSQL 查询的 MVCC 视图和 `statement_timestamp()` 为判定点，彻底排除 DB/应用时钟偏差；无时间边界的 cache-hit 返回前再次读取 permissionVersion，版本变化时丢弃旧命中并有界重试一次；4096 明细硬上限 | cache-hit 的最终版本复核是读路径线性化点：此前已提交撤权必须生效，此后提交属于已进入处理的请求；Admin 写仍由事务锁后 actor/version 复核。分布式变更通知与 relay 未完成 |
-| Required 管理写授权跨事务时间窗 | **未关闭 / 生产阻断** | 已识别准确边界：HTTP PEP 先判断 Grant，写事务随后等待 tenant/actor 锁；主体状态和版本会在锁后复核 | finite `valid_until` 可能在等待锁期间过期但版本不变，写入仍可继续。临时要求管理写权限 Grant 不得设置有限 `valid_until`；正式方案必须事务内重验授权或使用可验证的事务授权凭据 |
+| Required 管理写授权跨事务时间窗 | **RoleGrant PUT 已关闭；其他管理写仍阻断** | RoleGrant PUT 在 tenant/actor/目标/system role 锁后以 `statement_timestamp()` 重验 `role:view` 与 `role:grant-update`，双连接测试覆盖过期和缺权限且证明零写入 | User、Role、Menu、Department 仍可能在等待锁期间跨过 finite `valid_until`；过渡期这些写权限不得设置有限有效期，正式方案仍需同等事务内重验或可信事务授权凭据 |
 | P1 客户端伪造审批人即可放行 | 已关闭为 fail-closed | `requiresApproval` 在没有可信 workflow evidence 时不授权，也不进入 DataScopePlan | 真正审批工作流、资源指纹、金额币种、过期/防重放未实现 |
 | P1 固定生产 fixture | 已关闭默认路径 | V8 只删除精确预留 footprint；无关真实 IAM/审计/Outbox/扩展权限保留；碰撞、修改或 tenant 1 额外依赖时事务回滚；local profile 后置 bootstrap | 命中预留 footprint 冲突的历史库按 runbook 编写前向迁移 |
 | P1 可变 Outbox 不兼容 Debezium | Schema 关闭，运行闭环未完成 | V7 append-only event facts + 独立 relay state，禁止 update/delete 事实行 | relay、Kafka/Inbox、告警、重放 Runbook 未实现 |
@@ -52,8 +52,8 @@
 
 但生产结论仍是 **NO-GO**。以下闭环缺一不可：
 
-1. 管理写授权 finite `valid_until` 的锁等待 TOCTOU；
-2. RoleGrant 写 API/UI、版本推进与授权变更完整闭环；
+1. User、Role、Menu、Department 管理写授权 finite `valid_until` 的锁等待 TOCTOU（RoleGrant PUT 已关闭）；
+2. RoleGrant 生产 cutover 的 N-1 清零、双版本验证与审批；
 3. 审计 before/after、拒绝事件和登录失败事件；
 4. 外部 IdP、MFA、邀请/激活/重置与可信审批工作流；
 5. 商户/市场/渠道/客户/历史关系数据权限 Provider 及真实业务查询集成；

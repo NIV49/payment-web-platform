@@ -6,8 +6,8 @@
 
 | 未闭环能力 | 当前事实 | 生产前必须完成 |
 | --- | --- | --- |
-| finite `valid_until` 管理写授权 | HTTP PEP 与写锁之间仍有纯时间 TOCTOU | 写事务锁后用可信数据库时间重验，或使用绑定 actor/permission/resource 的可验证短时授权凭据 |
-| RoleGrant 写闭环 | 角色 UI/API 只管 `menuIds`，新角色不会因菜单选择自动获得业务授权 | 独立 RoleGrant API/UI、版本推进、缓存失效、委派上限与并发测试；不得从 menuIds 暗推 Grant |
+| finite `valid_until` 管理写授权 | RoleGrant PUT 已锁后重验；User/Role/Menu/Department 仍有 HTTP PEP 与写锁之间的纯时间 TOCTOU | 为其余管理写入口补同等数据库时间重验，或使用绑定 actor/permission/resource 的可验证短时授权凭据 |
+| RoleGrant 写闭环 | 第一阶段 API/UI、版本推进、审计、Outbox、锁后入口权限重验已实现；默认 production cutover 开关仍关闭 | 清零 N-1 旧调用方、完成双版本验证和生产审批后显式打开 cutover；不得从 menuIds 暗推 Grant |
 | 权限与安全审计 | 成功 IAM 写有 trace，但 after 仍是空 JSON | 真实 before/after、拒绝事件、登录失败、reason、检索/告警和跨进程 correlation |
 | 身份与敏感操作 | 只有本地账密原型，新建身份默认不可登录；缺少可信 workflow evidence | 外部 IdP、MFA/step-up、邀请/激活/重置、可信审批、防重放与 break-glass 双人流程 |
 | 关系数据权限 | Core 只有 fail-closed 模型，未连接真实商户/市场/渠道/客户/历史关系 | Provider、历史快照和真实业务查询中的 tenant + scope 集成测试 |
@@ -20,15 +20,17 @@
 
 当前 HTTP PEP 会在进入 User/Role/Menu/Department 写事务前验证 RoleGrant。事务内已经通过包含 userId、membershipId、permissionVersion、sessionVersion 的 `AdministrationActor` 锁定 tenant 和 actor 的 Membership/User/Credential tuple，并复核四态、受 V13 保证的可验证 BCrypt 凭证与两个版本，因此禁用主体或推进版本不能在排队期间悄悄放行。
 
-尚未关闭的是时间本身：有限 `valid_until` 可能在请求通过 PEP 后、等待写锁期间过期，但 permissionVersion 不会因为时钟经过而自动变化。写事务锁后没有重新判定 Grant 时间窗，因此仍可能执行一次已经过期的管理写操作。
+RoleGrant PUT 已关闭该边界：它在锁定 tenant、actor、目标 role 和 ACTIVE system role 后，以单条 PostgreSQL `statement_timestamp()` 查询重验 `role:view` 与 `role:grant-update`；等待锁期间过期或任一权限缺失都会回滚且不写角色版本、Grant、审计或 Outbox。
 
-治理结论：这是生产 **NO-GO / Required**，不是“已修复”。过渡期禁止给任何可授权 Admin 写 endpoint 的 Grant 设置有限 `valid_until`；正式关闭必须在写事务取得锁后用可信数据库时间重新验证授权，或者引入可验证、绑定 actor/permission/resource 且带短时效的事务授权凭据，并补真实 PostgreSQL 锁等待并发测试。
+尚未关闭的是 User、Role、Menu、Department 其他写接口：有限 `valid_until` 仍可能在请求通过 PEP 后、等待写锁期间过期，但 permissionVersion 不会因为时钟经过而自动变化。
+
+治理结论：RoleGrant PUT 的具体竞态已修复，但其余入口仍是生产 **NO-GO / Required**。过渡期禁止给 User、Role、Menu、Department 写权限设置有限 `valid_until`；正式关闭必须在各写事务取得锁后用可信数据库时间重新验证授权，或者引入可验证、绑定 actor/permission/resource 且带短时效的事务授权凭据，并补真实 PostgreSQL 锁等待并发测试。
 
 ## 已解决：Grant 时间边界受应用时钟影响且 cache-hit 可越过已提交撤权
 
 带 `valid_from/valid_until` 的 GrantSnapshot 仍记录最近 temporal boundary，但只要 `refreshAfter` 非空，Loader 与 Redis adapter 都拒绝缓存读写；每次授权都重新执行 PostgreSQL 单条查询，以同一 MVCC statement snapshot 和 `statement_timestamp()` 同时判断 Membership 版本、Grant 有效期及授权明细。应用节点不再用自己的 Clock 比较数据库绝对时间，时钟无论超前还是落后都不参与授权判断。
 
-无时间边界的快照仍可使用版本化 Redis key。cache-hit 返回前会再次读取 permissionVersion：最终复核前已经提交的撤权会使旧命中失效，并按新版本有界重试一次；最终复核后才提交的撤权属于已经进入处理的请求。该线性化语义不替代管理写事务内的 tenant/actor 锁和版本复核，也不关闭上文 finite `valid_until` 在 HTTP PEP 与写锁之间的时间 TOCTOU。
+无时间边界的快照仍可使用版本化 Redis key。cache-hit 返回前会再次读取 permissionVersion：最终复核前已经提交的撤权会使旧命中失效，并按新版本有界重试一次；最终复核后才提交的撤权属于已经进入处理的请求。该线性化语义不替代管理写事务内的 tenant/actor 锁和版本复核；RoleGrant PUT 已独立执行锁后权限重验，其余管理写入口仍保留上文时间边界。
 
 ## 已解决：生产关闭 Flyway 时 Web 进程可在旧 Schema 上启动
 
