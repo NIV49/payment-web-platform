@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { RoleRequestIdentity } from '../role-request-guard';
+
 import type { SystemRoleApi } from '#/api/system/role';
 import type { IamRoleGrantApi } from '#/api/system/role-grant';
 
@@ -32,6 +34,7 @@ import {
   permissionDependencies,
   reconcilePermissionSelection,
 } from '../grant-contract';
+import { createRoleRequestGuard } from '../role-request-guard';
 
 const emits = defineEmits<{
   success: [];
@@ -44,6 +47,8 @@ const selectedPermissionCodes = ref<string[]>([]);
 const reason = ref('');
 const loading = ref(false);
 const loadFailed = ref(false);
+const loadGuard = createRoleRequestGuard();
+const appliedLoadIdentity = ref<RoleRequestIdentity>();
 
 const editable = computed(() => grantDetail.value?.editable === true);
 const dependencyViolations = computed(() =>
@@ -72,7 +77,19 @@ const groupedPermissions = computed(() => {
 
 const [Drawer, drawerApi] = useVbenDrawer({
   async onConfirm() {
-    if (!editable.value || !role.value || !grantDetail.value) return;
+    const currentRole = role.value;
+    const currentDetail = grantDetail.value;
+    const currentLoadIdentity = appliedLoadIdentity.value;
+    if (
+      !editable.value ||
+      !currentRole ||
+      !currentDetail ||
+      currentDetail.roleId !== currentRole.id ||
+      !currentLoadIdentity ||
+      !loadGuard.isCurrent(currentLoadIdentity, currentRole.id)
+    ) {
+      return;
+    }
     const normalizedReason = reason.value.trim();
     if (!normalizedReason) {
       message.warning($t('system.role.grantReasonRequired'));
@@ -88,55 +105,81 @@ const [Drawer, drawerApi] = useVbenDrawer({
     }
     drawerApi.lock();
     try {
-      await replaceRoleGrants(role.value.id, {
-        expectedVersion: grantDetail.value.roleVersion,
+      await replaceRoleGrants(currentRole.id, {
+        expectedVersion: currentDetail.roleVersion,
         grants: buildTenantRoleGrants(selectedPermissionCodes.value),
         reason: normalizedReason,
       });
+      if (!loadGuard.isCurrent(currentLoadIdentity, role.value?.id)) return;
       message.success($t('system.role.grantSaveSuccess'));
       emits('success');
       drawerApi.close();
     } catch (error) {
+      if (!loadGuard.isCurrent(currentLoadIdentity, role.value?.id)) return;
       if (isOptimisticLockConflict(error)) {
         emits('success');
         drawerApi.close();
       }
     } finally {
-      drawerApi.unlock();
+      if (loadGuard.isCurrent(currentLoadIdentity, role.value?.id)) {
+        drawerApi.unlock();
+      }
     }
   },
-  async onOpenChange(isOpen) {
-    if (!isOpen) return;
-    role.value = drawerApi.getData<SystemRoleApi.SystemRole>();
-    reason.value = '';
+  onOpenChange(isOpen) {
+    loadGuard.invalidate();
+    appliedLoadIdentity.value = undefined;
+    grantablePermissions.value = [];
+    grantDetail.value = undefined;
     selectedPermissionCodes.value = [];
-    await loadGrants();
+    reason.value = '';
+    loading.value = false;
+    loadFailed.value = false;
+    drawerApi.unlock();
+    drawerApi.setState({ showConfirmButton: false });
+    if (!isOpen) {
+      role.value = undefined;
+      return;
+    }
+    role.value = drawerApi.getData<SystemRoleApi.SystemRole>();
+    void loadGrants();
   },
 });
 
 async function loadGrants() {
-  if (!role.value) return;
+  const currentRole = role.value;
+  if (!currentRole) return;
+  const loadIdentity = loadGuard.begin(currentRole.id);
   loading.value = true;
   loadFailed.value = false;
+  appliedLoadIdentity.value = undefined;
   drawerApi.setState({ showConfirmButton: false });
   try {
     const [permissions, detail] = await Promise.all([
       getGrantablePermissions(),
-      getRoleGrants(role.value.id),
+      getRoleGrants(currentRole.id),
     ]);
+    if (!loadGuard.isCurrent(loadIdentity, role.value?.id)) return;
+    if (detail.roleId !== currentRole.id) {
+      throw new Error('Role grant response does not match the active role');
+    }
     grantablePermissions.value = permissions;
     grantDetail.value = detail;
     selectedPermissionCodes.value = detail.grants.map(
       ({ permissionCode }) => permissionCode,
     );
+    appliedLoadIdentity.value = loadIdentity;
     drawerApi.setState({ showConfirmButton: detail.editable });
   } catch {
+    if (!loadGuard.isCurrent(loadIdentity, role.value?.id)) return;
     loadFailed.value = true;
     grantablePermissions.value = [];
     grantDetail.value = undefined;
     drawerApi.setState({ showConfirmButton: false });
   } finally {
-    loading.value = false;
+    if (loadGuard.isCurrent(loadIdentity, role.value?.id)) {
+      loading.value = false;
+    }
   }
 }
 

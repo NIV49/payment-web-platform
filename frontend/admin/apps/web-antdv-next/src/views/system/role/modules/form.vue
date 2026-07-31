@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { RoleRequestIdentity } from '../role-request-guard';
+
 import type { SystemMenuApi } from '#/api/system/menu';
 import type { SystemRoleApi } from '#/api/system/role';
 
@@ -7,7 +9,7 @@ import { computed, nextTick, ref } from 'vue';
 import { Tree, useVbenDrawer } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 
-import { Alert, Spin } from 'antdv-next';
+import { Alert, Button, Spin } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
 import { isOptimisticLockConflict } from '#/api/error-contract';
@@ -20,8 +22,11 @@ import {
   filterAvailableNavigationMenuIds,
   filterNavigableMenuTree,
 } from '../menu-tree';
+import { createRoleRequestGuard } from '../role-request-guard';
 
 const emits = defineEmits(['success']);
+
+const NEW_ROLE_SCOPE = 'new-role';
 
 const formData = ref<SystemRoleApi.SystemRole>();
 
@@ -32,85 +37,161 @@ const [Form, formApi] = useVbenForm({
 
 const menuOptions = ref<SystemMenuApi.SystemMenu[]>([]);
 const loadingMenuOptions = ref(false);
+const menuOptionsLoadFailed = ref(false);
+const formReady = ref(false);
+const requestGuard = createRoleRequestGuard();
+const appliedRequestIdentity = ref<RoleRequestIdentity>();
 
 const id = ref();
 const [Drawer, drawerApi] = useVbenDrawer({
   async onConfirm() {
-    const { valid } = await formApi.validate();
-    if (!valid) return;
-    const values = await formApi.getValues<SystemRoleApi.RoleSaveParams>();
-    drawerApi.lock();
     const currentRole = formData.value;
-    let request;
-    if (id.value) {
-      if (!currentRole) {
-        drawerApi.unlock();
+    const currentScope = currentRole?.id ?? NEW_ROLE_SCOPE;
+    const currentRequestIdentity = appliedRequestIdentity.value;
+    if (
+      !formReady.value ||
+      !currentRequestIdentity ||
+      !requestGuard.isCurrent(currentRequestIdentity, currentScope) ||
+      (currentRole ? id.value !== currentRole.id : id.value !== undefined)
+    ) {
+      return;
+    }
+    const { valid } = await formApi.validate();
+    if (
+      !valid ||
+      !requestGuard.isCurrent(currentRequestIdentity, currentScope)
+    ) {
+      return;
+    }
+    const values = await formApi.getValues<SystemRoleApi.RoleSaveParams>();
+    if (!requestGuard.isCurrent(currentRequestIdentity, currentScope)) return;
+    drawerApi.lock();
+    try {
+      await (currentRole
+        ? updateRole(currentRole.id, {
+            ...values,
+            expectedVersion: currentRole.rowVersion,
+          })
+        : createRole(values));
+      if (!requestGuard.isCurrent(currentRequestIdentity, currentScope)) {
         return;
       }
-      request = updateRole(id.value, {
-        ...values,
-        expectedVersion: currentRole.rowVersion,
-      });
-    } else {
-      request = createRole(values);
-    }
-    request
-      .then(() => {
+      emits('success');
+      drawerApi.close();
+    } catch (error) {
+      if (!requestGuard.isCurrent(currentRequestIdentity, currentScope)) {
+        return;
+      }
+      if (isOptimisticLockConflict(error)) {
         emits('success');
         drawerApi.close();
-      })
-      .catch((error) => {
+      }
+    } finally {
+      if (requestGuard.isCurrent(currentRequestIdentity, currentScope)) {
         drawerApi.unlock();
-        if (isOptimisticLockConflict(error)) {
-          emits('success');
-          drawerApi.close();
-        }
-      });
-  },
-
-  async onOpenChange(isOpen) {
-    if (isOpen) {
-      const data = drawerApi.getData<SystemRoleApi.SystemRole>();
-      const existingRole = data?.id ? data : undefined;
-      formApi.reset();
-
-      if (existingRole) {
-        formData.value = existingRole;
-        id.value = existingRole.id;
-      } else {
-        formData.value = undefined;
-        id.value = undefined;
-      }
-
-      if (menuOptions.value.length === 0) {
-        await loadMenuOptions();
-      }
-      // Wait for Vue to flush DOM updates (form fields mounted)
-      await nextTick();
-      if (existingRole) {
-        const currentMenuIds = existingRole.menuIds ?? [];
-        formApi.setValues({
-          ...existingRole,
-          menuIds: filterAvailableNavigationMenuIds(
-            currentMenuIds,
-            menuOptions.value,
-          ),
-        });
-      } else {
-        formApi.setValues({ menuIds: [], status: 1 });
       }
     }
+  },
+
+  onOpenChange(isOpen) {
+    requestGuard.invalidate();
+    appliedRequestIdentity.value = undefined;
+    formReady.value = false;
+    loadingMenuOptions.value = false;
+    menuOptionsLoadFailed.value = false;
+    drawerApi.unlock();
+    drawerApi.setState({ showConfirmButton: false });
+    if (!isOpen) {
+      formData.value = undefined;
+      id.value = undefined;
+      return;
+    }
+    const data = drawerApi.getData<SystemRoleApi.SystemRole>();
+    const existingRole = data?.id ? data : undefined;
+    formApi.reset();
+    formData.value = existingRole;
+    id.value = existingRole?.id;
+    void initializeForm(existingRole);
   },
 });
 
-async function loadMenuOptions() {
+async function initializeForm(existingRole?: SystemRoleApi.SystemRole) {
+  const scope = existingRole?.id ?? NEW_ROLE_SCOPE;
+  const requestIdentity = requestGuard.begin(scope);
   loadingMenuOptions.value = true;
+  menuOptionsLoadFailed.value = false;
+  appliedRequestIdentity.value = undefined;
+  drawerApi.setState({ showConfirmButton: false });
   try {
-    const res = await getMenuList();
-    menuOptions.value = filterNavigableMenuTree(res);
+    let nextMenuOptions = menuOptions.value;
+    if (nextMenuOptions.length === 0) {
+      nextMenuOptions = filterNavigableMenuTree(await getMenuList());
+    }
+    if (
+      !requestGuard.isCurrent(
+        requestIdentity,
+        formData.value?.id ?? NEW_ROLE_SCOPE,
+      )
+    ) {
+      return;
+    }
+    menuOptions.value = nextMenuOptions;
+    await nextTick();
+    if (
+      !requestGuard.isCurrent(
+        requestIdentity,
+        formData.value?.id ?? NEW_ROLE_SCOPE,
+      )
+    ) {
+      return;
+    }
+    await formApi.setValues(
+      existingRole
+        ? {
+            ...existingRole,
+            menuIds: filterAvailableNavigationMenuIds(
+              existingRole.menuIds ?? [],
+              nextMenuOptions,
+            ),
+          }
+        : { menuIds: [], status: 1 },
+    );
+    if (
+      !requestGuard.isCurrent(
+        requestIdentity,
+        formData.value?.id ?? NEW_ROLE_SCOPE,
+      )
+    ) {
+      return;
+    }
+    appliedRequestIdentity.value = requestIdentity;
+    formReady.value = true;
+    drawerApi.setState({ showConfirmButton: true });
+  } catch {
+    if (
+      !requestGuard.isCurrent(
+        requestIdentity,
+        formData.value?.id ?? NEW_ROLE_SCOPE,
+      )
+    ) {
+      return;
+    }
+    menuOptionsLoadFailed.value = true;
+    drawerApi.setState({ showConfirmButton: false });
   } finally {
-    loadingMenuOptions.value = false;
+    if (
+      requestGuard.isCurrent(
+        requestIdentity,
+        formData.value?.id ?? NEW_ROLE_SCOPE,
+      )
+    ) {
+      loadingMenuOptions.value = false;
+    }
   }
+}
+
+function retryInitializeForm() {
+  void initializeForm(formData.value);
 }
 
 const getDrawerTitle = computed(() => {
@@ -121,6 +202,19 @@ const getDrawerTitle = computed(() => {
 </script>
 <template>
   <Drawer :title="getDrawerTitle">
+    <Alert
+      v-if="menuOptionsLoadFailed"
+      class="mb-4"
+      show-icon
+      :title="$t('system.role.navigationMenuLoadFailed')"
+      type="error"
+    >
+      <template #action>
+        <Button size="small" @click="retryInitializeForm">
+          {{ $t('system.role.retry') }}
+        </Button>
+      </template>
+    </Alert>
     <Alert
       class="mb-4"
       show-icon

@@ -147,7 +147,7 @@ views/system/*/list.vue
 
 权限按钮通过 action `auth` 或 Cell renderer 的 `auth` 调用 `useAccess().hasAccessByCodes`。这只决定前端是否显示；服务端仍须授权。
 
-用户和角色查询表单只在显式查询或重置时提交；部门树选择是独立的即时筛选，并只发送标量 `deptId`。用户新建表单只提供 ACTIVE、assignable、非 system 的角色；只有 `user:create` 而没有 `user:assign-role` 时仍显式提交空 `roleIds`，允许创建无角色用户。用户抽屉只读取一页 `pageSize=200` 的 ACTIVE 角色作为初始候选，并以最多 8 个并发精确补取首屏未覆盖的当前角色；下拉输入按 300ms 防抖执行服务端名称搜索，以请求序号丢弃旧响应，并固定保留当前及已选角色，不再随租户角色总量串行翻页。初始目录或当前角色补取失败时隐藏确认并默认拒绝；搜索失败保留上一次有效选项。已有 system/non-assignable 或目录已缺失的角色只读保留，已有禁用普通角色可原样保留；只有 `/user/info.systemAdministrator=true` 时才显示为可移除，且不能被新增给其他用户。角色表单的 `menuIds` 只管理 ACTIVE 导航节点，不保留 BUTTON 或 DISABLED 的历史 ID；独立“功能权限”抽屉通过 `/api/v1/iam/roles/{roleId}/grants` 管理精确的 RoleGrant。抽屉明确展示复合操作的依赖权限，勾选动作时补齐依赖，取消依赖时移除已不可用的动作，并拒绝保存历史遗留的缺依赖组合。system/non-assignable 角色不可变更，包含当前页面无法无损表达的 Grant 时抽屉只读。
+用户和角色查询表单只在显式查询或重置时提交；部门树选择是独立的即时筛选，并只发送标量 `deptId`。用户新建表单只提供 ACTIVE、assignable、非 system 的角色；只有 `user:create` 而没有 `user:assign-role` 时仍显式提交空 `roleIds`，允许创建无角色用户。用户抽屉只读取一页 `pageSize=200` 的 ACTIVE 角色作为初始候选，并以最多 8 个并发精确补取首屏未覆盖的当前角色；下拉输入按 300ms 防抖执行服务端名称搜索，以请求序号丢弃旧响应，并固定保留当前及已选角色，不再随租户角色总量串行翻页。初始目录或当前角色补取失败时隐藏确认并默认拒绝；搜索失败保留上一次有效选项。已有 system/non-assignable 或目录已缺失的角色只读保留，已有禁用普通角色可原样保留；只有 `/user/info.systemAdministrator=true` 时才显示为可移除，且不能被新增给其他用户。角色表单的 `menuIds` 只管理 ACTIVE 导航节点，不保留 BUTTON 或 DISABLED 的历史 ID；独立“功能权限”抽屉通过 `/api/v1/iam/roles/{roleId}/grants` 管理精确的 RoleGrant。角色编辑与功能权限抽屉的异步加载和保存均以打开序号及精确 `roleId` 双重校验，关闭、重试或切换角色后必须丢弃旧响应，并在初始化失败时隐藏确认按钮。功能权限抽屉明确展示复合操作的依赖权限，勾选动作时补齐依赖，取消依赖时移除已不可用的动作，并拒绝保存历史遗留的缺依赖组合。system/non-assignable 角色不可变更，包含当前页面无法无损表达的 Grant 时抽屉只读。
 
 ## 6. API 与类型约定
 
