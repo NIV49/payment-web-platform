@@ -16,8 +16,10 @@ import org.jooq.Field;
 import org.jooq.JSONB;
 import org.jooq.Record;
 import org.jooq.impl.DSL;
+import org.jooq.impl.SQLDataType;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -44,6 +46,8 @@ import static com.niv.payment.permission.persistence.repository.JooqAdministrati
 public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort, RoleGrantWritePort {
     private static final Set<String> LEGACY_COMPATIBILITY_CODES =
         Set.of("menu:manage", "department:manage");
+    private static final Set<String> REQUIRED_TRANSACTIONAL_PERMISSIONS = Set.of(
+        "role:view", RoleGrantAdministrationService.GRANT_UPDATE_PERMISSION);
 
     private final DSLContext dsl;
     private final JooqAdministrationSupport support;
@@ -87,7 +91,6 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
     @Transactional
     public RoleGrantModels.RoleGrants replaceAtomically(RoleGrantChangeCommand command) {
         support.lockTenant(command.tenantId(), command.actor());
-        requireSystemActor(command.tenantId(), command.actor().membershipId(), true);
 
         var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.ASSIGNABLE)
             .from(IAM_ROLE)
@@ -98,6 +101,8 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         if (role == null) {
             throw notFound("Role");
         }
+        requireSystemActor(command.tenantId(), command.actor().membershipId(), true);
+        requireTransactionalPermissions(command.tenantId(), command.actor().membershipId());
         if (Boolean.TRUE.equals(role.get(IAM_ROLE.SYSTEM_ROLE))) {
             throw new SecurityException("System roles cannot be edited");
         }
@@ -335,6 +340,54 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             : query.fetchAny() != null;
         if (!systemActor) {
             throw new SecurityException("An active system role is required");
+        }
+    }
+
+    private void requireTransactionalPermissions(long tenantId, long membershipId) {
+        var membershipRole = IAM_MEMBERSHIP_ROLE.as("authorization_membership_role");
+        var role = IAM_ROLE.as("authorization_role");
+        var grant = IAM_ROLE_GRANT.as("authorization_grant");
+        var permission = IAM_PERMISSION.as("authorization_permission");
+        var dimension = IAM_GRANT_DIMENSION.as("authorization_dimension");
+        var extraDimension = IAM_GRANT_DIMENSION.as("authorization_extra_dimension");
+        var target = IAM_GRANT_TARGET.as("authorization_target");
+        Field<OffsetDateTime> evaluatedAt = DSL.function(
+            DSL.name("statement_timestamp"), SQLDataType.OFFSETDATETIME);
+
+        Set<String> effectivePermissions = dsl.selectDistinct(permission.PERMISSION_CODE)
+            .from(membershipRole)
+            .join(role).on(role.TENANT_ID.eq(membershipRole.TENANT_ID)
+                .and(role.ID.eq(membershipRole.ROLE_ID))
+                .and(role.STATUS.eq(ACTIVE)))
+            .join(grant).on(grant.TENANT_ID.eq(role.TENANT_ID)
+                .and(grant.ROLE_ID.eq(role.ID))
+                .and(grant.STATUS.eq(ACTIVE))
+                .and(grant.VALID_FROM.isNull().or(grant.VALID_FROM.le(evaluatedAt)))
+                .and(grant.VALID_UNTIL.isNull().or(grant.VALID_UNTIL.gt(evaluatedAt))))
+            .join(permission).on(permission.ID.eq(grant.PERMISSION_ID)
+                .and(permission.STATUS.eq(ACTIVE))
+                .and(permission.PERMISSION_CODE.in(REQUIRED_TRANSACTIONAL_PERMISSIONS))
+                .and(permission.RISK_LEVEL.eq("NORMAL"))
+                .and(permission.CROSS_TENANT_MODE.eq("SAME_TENANT_ONLY"))
+                .and(permission.REQUIRED_DIMENSIONS.eq(new String[]{"TENANT"}))
+                .and(permission.REQUIRES_STEP_UP.isFalse())
+                .and(permission.REQUIRES_APPROVAL.isFalse()))
+            .join(dimension).on(dimension.GRANT_ID.eq(grant.ID)
+                .and(dimension.DIMENSION_CODE.eq(ScopeDimension.TENANT.name()))
+                .and(dimension.SCOPE_MODE.eq(ScopeMode.TENANT_ALL.name())))
+            .where(membershipRole.TENANT_ID.eq(tenantId)
+                .and(membershipRole.MEMBERSHIP_ID.eq(membershipId))
+                .andNotExists(DSL.selectOne()
+                    .from(extraDimension)
+                    .where(extraDimension.GRANT_ID.eq(grant.ID)
+                        .and(extraDimension.ID.ne(dimension.ID))))
+                .andNotExists(DSL.selectOne()
+                    .from(target)
+                    .where(target.DIMENSION_ID.eq(dimension.ID))))
+            .fetchSet(permission.PERMISSION_CODE);
+        if (!effectivePermissions.equals(REQUIRED_TRANSACTIONAL_PERMISSIONS)) {
+            throw new SecurityException(
+                "Current role grant administration permissions are required");
         }
     }
 
