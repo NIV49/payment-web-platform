@@ -37,29 +37,38 @@ describe('user role assignment contract', () => {
     ]);
   });
 
-  it('shows existing protected roles as disabled options when editing', () => {
+  it('keeps an existing disabled ordinary role removable while protected roles stay disabled', () => {
     expect(
       buildRoleAssignmentOptions(
         roles,
-        ['system', 'protected', 'unknown'],
-        ['System role', 'Protected role', 'Historical role'],
+        ['system', 'protected', 'disabled', 'unknown'],
+        ['System role', 'Protected role', 'Disabled role', 'Historical role'],
       ),
     ).toEqual([
       { disabled: false, label: 'Role ordinary', value: 'ordinary' },
       { disabled: true, label: 'Role system', value: 'system' },
       { disabled: true, label: 'Role protected', value: 'protected' },
+      { disabled: false, label: 'Role disabled', value: 'disabled' },
       { disabled: true, label: 'Historical role', value: 'unknown' },
     ]);
   });
 
-  it('preserves protected and unknown existing ids while ordinary roles remain editable', () => {
+  it('preserves protected and unknown ids while existing disabled ordinary roles remain editable', () => {
+    expect(
+      mergeRoleAssignmentIds(
+        ['ordinary', 'disabled'],
+        ['system', 'protected', 'disabled', 'unknown'],
+        roles,
+      ),
+    ).toEqual(['system', 'protected', 'unknown', 'ordinary', 'disabled']);
     expect(
       mergeRoleAssignmentIds(
         ['ordinary'],
-        ['system', 'protected', 'unknown'],
+        ['system', 'protected', 'disabled', 'unknown'],
         roles,
       ),
     ).toEqual(['system', 'protected', 'unknown', 'ordinary']);
     expect(mergeRoleAssignmentIds([], ['ordinary'], roles)).toEqual([]);
+    expect(mergeRoleAssignmentIds(['disabled'], [], roles)).toEqual([]);
   });
 });

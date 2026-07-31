@@ -1076,6 +1076,104 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void disabledOrdinaryRoleCanBePreservedOrRemovedButCannotBeNewlyAssigned() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Disabled Assignment Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        String username = "disabled-role-user-" + roleId;
+        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"name\":\"Disabled Role User\","
+                    + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":0}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long userId = Long.parseLong(JsonPath.read(userBody, "$.data.id"));
+        long membershipId = jdbc.queryForObject("""
+            SELECT id FROM iam_membership WHERE tenant_id=1 AND user_id=?
+            """, Long.class, userId);
+
+        try {
+            mvc.perform(patch("/api/system/role/" + roleId + "/status").cookie(cookie).header("Origin", ORIGIN)
+                    .contentType("application/json")
+                    .content("{\"status\":0,\"expectedVersion\":0}"))
+                .andExpect(status().isOk());
+            mvc.perform(get("/api/system/user/list?page=1&pageSize=20&username=" + username).cookie(cookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].roleIds[0]").value(Long.toString(roleId)));
+
+            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN)
+                    .contentType("application/json")
+                    .content("{\"deptId\":\"10\",\"roleIds\":[\"" + roleId
+                        + "\"],\"status\":0,\"userVersion\":0}"))
+                .andExpect(status().isOk());
+            assertThat(jdbc.queryForList("""
+                SELECT role_id FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=? ORDER BY role_id
+                """, Long.class, membershipId)).containsExactly(roleId);
+
+            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN)
+                    .contentType("application/json")
+                    .content("{\"deptId\":\"10\",\"roleIds\":[],\"status\":0,\"userVersion\":1}"))
+                .andExpect(status().isOk());
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=?
+                """, Long.class, membershipId)).isZero();
+
+            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN)
+                    .contentType("application/json")
+                    .content("{\"deptId\":\"10\",\"roleIds\":[\"" + roleId
+                        + "\"],\"status\":0,\"userVersion\":2}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+            assertThat(jdbc.queryForMap("""
+                SELECT row_version,status FROM iam_membership WHERE tenant_id=1 AND id=?
+                """, membershipId))
+                .containsEntry("row_version", 2L)
+                .containsEntry("status", "DISABLED");
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=?
+                """, Long.class, membershipId)).isZero();
+
+            String rejectedUsername = "new-disabled-role-user-" + roleId;
+            long createAuditCountBefore = jdbc.queryForObject("""
+                SELECT count(*) FROM iam_audit_event
+                 WHERE tenant_id=1 AND target_type='USER' AND action_code='CREATE'
+                """, Long.class);
+            mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+                    .contentType("application/json")
+                    .content("{\"username\":\"" + rejectedUsername + "\",\"name\":\"Rejected Disabled Role\","
+                        + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":0}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_authentication_credential WHERE username=?
+                """, Long.class, rejectedUsername)).isZero();
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_user WHERE idp_issuer='local' AND idp_subject=?
+                """, Long.class, rejectedUsername)).isZero();
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_membership m
+                  JOIN iam_user u ON u.id=m.user_id
+                 WHERE m.tenant_id=1 AND u.idp_issuer='local' AND u.idp_subject=?
+                """, Long.class, rejectedUsername)).isZero();
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_audit_event
+                 WHERE tenant_id=1 AND target_type='USER' AND action_code='CREATE'
+                """, Long.class)).isEqualTo(createAuditCountBefore);
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=?", membershipId);
+            jdbc.update("DELETE FROM iam_authentication_credential WHERE user_id=?", userId);
+            jdbc.update("DELETE FROM iam_membership WHERE tenant_id=1 AND id=?", membershipId);
+            jdbc.update("DELETE FROM iam_user WHERE id=?", userId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+        }
+    }
+
+    @Test
     void lastActiveSystemAdministratorCannotBeDisabled() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
 

@@ -466,7 +466,7 @@ Response item：
 - `[]` 明确表示无角色；
 - roleIds 最多 256 项，HTTP DTO 和 Core 都会拒绝超限请求；
 - roleIds 非空时额外检查 `user:assign-role`；
-- Role 必须在当前租户且 ACTIVE；
+- 新分配的 Role 必须在当前租户、ACTIVE、`assignable=true` 且 `systemRole=false`；
 - 创建 User、Membership 和 credential row，返回全局 userId string；User 状态固定为 `PENDING_ACTIVATION`，Credential 状态固定为 `DISABLED` 且 `password_hash=NULL`，Membership 只按请求的 `status` 预配置；
 - 新记录只有在 User/Credential/Membership 经受控流程全部进入可登录态后才可通过认证；当前没有这个生产流程；
 - 没有密码激活、初始密码、邀请或重置流程。
@@ -489,6 +489,7 @@ Request 只包含当前租户 Membership 可变字段：
 - roleIds 是最终全集；
 - roleIds 最多 256 项；
 - 入口始终要求 `user:update`、`user:disable`、`user:assign-role`；
+- 新增的角色必须是当前租户 ACTIVE、assignable、非 system 的普通角色；已有禁用普通角色可原样保留或由系统管理员移除，但不能分配给其他用户；system/non-assignable 受保护角色和目录缺失的历史关系由普通编辑流程只读保留；
 - userVersion 不匹配返回 409；
 - 更新当前 Membership 的部门、状态、角色、permissionVersion、sessionVersion；
 - 不接受也不修改全局 `username`、display name、remark 或 credential；前端编辑态将这些身份字段设为只读，并通过 payload 白名单保证不会误传；

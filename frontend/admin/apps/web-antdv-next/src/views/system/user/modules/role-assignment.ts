@@ -6,8 +6,12 @@ export interface RoleAssignmentOption {
   value: string;
 }
 
-function isAssignable(role: SystemRoleApi.SystemRole) {
-  return role.status === 1 && role.assignable && !role.systemRole;
+function isProtected(role: SystemRoleApi.SystemRole) {
+  return role.systemRole || !role.assignable;
+}
+
+function isCurrentlyAssignable(role: SystemRoleApi.SystemRole) {
+  return role.status === 1 && !isProtected(role);
 }
 
 function buildRoleAssignmentOptions(
@@ -21,9 +25,9 @@ function buildRoleAssignmentOptions(
   );
   const knownRoleIds = new Set(roles.map((role) => role.id));
   const knownOptions = roles
-    .filter((role) => isAssignable(role) || currentIds.has(role.id))
+    .filter((role) => isCurrentlyAssignable(role) || currentIds.has(role.id))
     .map((role) => ({
-      disabled: !isAssignable(role),
+      disabled: isProtected(role),
       label: role.name,
       value: role.id,
     }));
@@ -42,14 +46,25 @@ function mergeRoleAssignmentIds(
   currentRoleIds: string[],
   roles: SystemRoleApi.SystemRole[],
 ): string[] {
-  const assignableIds = new Set(
-    roles.filter((role) => isAssignable(role)).map((role) => role.id),
+  const currentIds = new Set(currentRoleIds);
+  const rolesById = new Map(roles.map((role) => [role.id, role]));
+  const editableIds = new Set(
+    roles
+      .filter(
+        (role) =>
+          isCurrentlyAssignable(role) ||
+          (currentIds.has(role.id) && !isProtected(role)),
+      )
+      .map((role) => role.id),
   );
-  const preservedIds = currentRoleIds.filter((id) => !assignableIds.has(id));
-  const selectedAssignableIds = selectedRoleIds.filter((id) =>
-    assignableIds.has(id),
+  const preservedIds = currentRoleIds.filter((id) => {
+    const role = rolesById.get(id);
+    return !role || isProtected(role);
+  });
+  const selectedEditableIds = selectedRoleIds.filter((id) =>
+    editableIds.has(id),
   );
-  return [...new Set([...preservedIds, ...selectedAssignableIds])];
+  return [...new Set([...preservedIds, ...selectedEditableIds])];
 }
 
 export { buildRoleAssignmentOptions, mergeRoleAssignmentIds };
