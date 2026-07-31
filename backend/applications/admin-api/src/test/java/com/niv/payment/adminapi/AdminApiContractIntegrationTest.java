@@ -235,7 +235,8 @@ class AdminApiContractIntegrationTest {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         mvc.perform(get("/api/user/info").cookie(cookie)).andExpect(status().isOk())
             .andExpect(jsonPath("$.data.userId").value("100"))
-            .andExpect(jsonPath("$.data.homePath").value("/dashboard"));
+            .andExpect(jsonPath("$.data.homePath").value("/dashboard"))
+            .andExpect(jsonPath("$.data.systemAdministrator").value(true));
         mvc.perform(get("/api/auth/codes").cookie(cookie)).andExpect(status().isOk())
             .andExpect(jsonPath("$.data.length()").value(19))
             .andExpect(jsonPath("$.data[?(@ == 'user:assign-role')]").exists())

@@ -188,6 +188,37 @@ class JooqPermissionAdaptersIntegrationTest {
     }
 
     @Test
+    void currentUserSystemAdministratorFactRequiresAnActiveSystemRole() {
+        var repository = new JooqIdentityQueryRepository(dsl);
+        assertFalse(repository.findCurrentUser(TENANT_ID, MEMBERSHIP_ID).orElseThrow()
+            .systemAdministrator());
+
+        try {
+            dsl.update(IAM_ROLE)
+                .set(IAM_ROLE.SYSTEM_ROLE, true)
+                .set(IAM_ROLE.ASSIGNABLE, false)
+                .where(IAM_ROLE.ID.eq(ROLE_ID).and(IAM_ROLE.TENANT_ID.eq(TENANT_ID)))
+                .execute();
+            assertTrue(repository.findCurrentUser(TENANT_ID, MEMBERSHIP_ID).orElseThrow()
+                .systemAdministrator());
+
+            dsl.update(IAM_ROLE)
+                .set(IAM_ROLE.STATUS, "DISABLED")
+                .where(IAM_ROLE.ID.eq(ROLE_ID).and(IAM_ROLE.TENANT_ID.eq(TENANT_ID)))
+                .execute();
+            assertFalse(repository.findCurrentUser(TENANT_ID, MEMBERSHIP_ID).orElseThrow()
+                .systemAdministrator());
+        } finally {
+            dsl.update(IAM_ROLE)
+                .set(IAM_ROLE.SYSTEM_ROLE, false)
+                .set(IAM_ROLE.ASSIGNABLE, true)
+                .set(IAM_ROLE.STATUS, "ACTIVE")
+                .where(IAM_ROLE.ID.eq(ROLE_ID).and(IAM_ROLE.TENANT_ID.eq(TENANT_ID)))
+                .execute();
+        }
+    }
+
+    @Test
     void permissionCatalogMapsPostgresArraysWithoutStringFlattening() {
         var repository = new JooqPermissionCatalogRepository(dsl);
 

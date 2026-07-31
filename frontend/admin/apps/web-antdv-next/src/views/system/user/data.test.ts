@@ -24,6 +24,8 @@ describe('system user form schema', () => {
       computed(() => true),
       computed(() => editing.value),
       computed(() => []),
+      ref(false),
+      vi.fn(),
     );
 
     for (const fieldName of ['username', 'name', 'remark']) {

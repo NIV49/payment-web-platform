@@ -52,7 +52,8 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
                 IAM_AUTHENTICATION_CREDENTIAL.USERNAME,
                 IAM_USER.DISPLAY_NAME,
                 IAM_USER.STATUS,
-                IAM_ROLE.ROLE_CODE)
+                IAM_ROLE.ROLE_CODE,
+                IAM_ROLE.SYSTEM_ROLE)
             .from(IAM_MEMBERSHIP)
             .join(IAM_USER)
                 .on(IAM_USER.ID.eq(IAM_MEMBERSHIP.USER_ID)
@@ -82,13 +83,16 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
             .filter(Objects::nonNull)
             .distinct()
             .toList();
+        boolean systemAdministrator = rows.stream()
+            .anyMatch(row -> Boolean.TRUE.equals(row.get(IAM_ROLE.SYSTEM_ROLE)));
         return Optional.of(new IdentityModels.CurrentUser(
             first.get(IAM_USER.ID),
             first.get(IAM_AUTHENTICATION_CREDENTIAL.USERNAME),
             first.get(IAM_USER.DISPLAY_NAME),
             "",
             roles,
-            "/dashboard"));
+            "/dashboard",
+            systemAdministrator));
     }
 
     @Override

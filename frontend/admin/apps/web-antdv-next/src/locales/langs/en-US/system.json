@@ -26,6 +26,8 @@
     "operation": "Operation",
     "clearDeptFilter": "Clear department filter",
     "departmentLoadFailed": "Failed to load departments",
+    "roleCatalogLoadFailed": "Failed to load roles. Reopen the form to retry.",
+    "roleSearchFailed": "Failed to search roles. The previous options are still available.",
     "retryDepartmentLoad": "Retry loading departments",
     "permission": {
       "view": "View Users",

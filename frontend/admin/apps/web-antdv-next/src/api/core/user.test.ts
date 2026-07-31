@@ -11,6 +11,7 @@ const currentUser = {
   token: 'cookie-session',
   userId: '100',
   username: 'admin',
+  systemAdministrator: true,
 };
 
 describe('current user response mapping', () => {
@@ -26,6 +27,18 @@ describe('current user response mapping', () => {
       }),
     ).toEqual(currentUser);
   });
+
+  it.each([undefined, null, false, 'true', 1])(
+    'defaults a non-true system administrator fact to false',
+    (systemAdministrator) => {
+      expect(
+        mapCurrentUserResponse({
+          ...currentUser,
+          systemAdministrator,
+        }).systemAdministrator,
+      ).toBe(false);
+    },
+  );
 
   it.each([
     withoutSessionMarker(),

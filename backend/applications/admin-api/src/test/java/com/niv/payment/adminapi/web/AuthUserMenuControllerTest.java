@@ -73,7 +73,7 @@ class AuthUserMenuControllerTest {
     @Test
     void currentUserAddsOnlyTheApprovedWebCompatibilityFields() {
         IdentityModels.CurrentUser currentUser = new IdentityModels.CurrentUser(
-            100, "admin", "Platform Administrator", "", List.of("platform-admin"), "/dashboard");
+            100, "admin", "Platform Administrator", "", List.of("platform-admin"), "/dashboard", true);
         AuthUserMenuController controller = new AuthUserMenuController(
             authentication(), identities(List.of(), Optional.of(currentUser)),
             new ObjectMapper(), new VbenMenuContract(""));
@@ -85,13 +85,13 @@ class AuthUserMenuControllerTest {
 
         assertThat(response.data()).isEqualTo(new AuthUserMenuController.UserInfoResponse(
             "100", "admin", "Platform Administrator", "", List.of("platform-admin"),
-            "/profile", "", "cookie-session"));
+            "/profile", "", "cookie-session", true));
     }
 
     @Test
     void currentUserUsesTheFirstAccessibleLeafWhenPreferredHomeIsMissing() {
         IdentityModels.CurrentUser currentUser = new IdentityModels.CurrentUser(
-            100, "admin", "Platform Administrator", "", List.of("restricted"), "/dashboard");
+            100, "admin", "Platform Administrator", "", List.of("restricted"), "/dashboard", false);
         List<IdentityModels.Menu> storedMenus = List.of(
             menu(10, null, "catalog", "System", "/system", null,
                 "{\"title\":\"system.title\"}"),

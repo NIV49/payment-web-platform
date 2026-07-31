@@ -1,4 +1,4 @@
-import type { ComputedRef } from 'vue';
+import type { ComputedRef, Ref } from 'vue';
 
 import type { DescriptionsItemType } from '@vben/common-ui';
 
@@ -21,6 +21,8 @@ export function useFormSchema(
   canAssignRoles: ComputedRef<boolean>,
   isEditing: ComputedRef<boolean>,
   roleOptions: ComputedRef<RoleAssignmentOption[]>,
+  roleSearchLoading: Ref<boolean>,
+  onRoleSearch: (value: string) => void,
 ): VbenFormSchema[] {
   return [
     {
@@ -56,8 +58,12 @@ export function useFormSchema(
       componentProps: () => ({
         class: 'w-full',
         disabled: !canAssignRoles.value,
+        filterOption: false,
+        loading: roleSearchLoading.value,
         mode: 'multiple',
+        onSearch: onRoleSearch,
         options: roleOptions.value,
+        showSearch: true,
       }),
       description: $t('system.user.rolePermissionTip'),
       fieldName: 'roleIds',

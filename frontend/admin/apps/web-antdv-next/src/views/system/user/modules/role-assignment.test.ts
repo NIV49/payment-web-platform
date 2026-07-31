@@ -6,7 +6,9 @@ import {
   buildRoleAssignmentOptions,
   loadRoleAssignmentCatalog,
   mergeRoleAssignmentIds,
+  mergeRoleSearchResults,
   resolveRoleAssignmentIds,
+  tryLoadRoleAssignmentCatalog,
 } from './role-assignment';
 
 function role(
@@ -88,38 +90,72 @@ describe('user role assignment contract', () => {
     expect(mergeRoleAssignmentIds(['disabled'], [], roles)).toEqual([]);
   });
 
-  it('fails closed when pagination ends before the advertised total', async () => {
+  it('converts role catalog failures into a non-ready empty form state', async () => {
     await expect(
-      loadRoleAssignmentCatalog(async () => ({
-        items: [role('1')],
-        total: 2,
-      })),
-    ).rejects.toThrow('Role catalog pagination ended before total was loaded');
+      tryLoadRoleAssignmentCatalog(async () => {
+        throw new Error('role catalog unavailable');
+      }),
+    ).resolves.toEqual({ ready: false, roles: [] });
   });
 
-  it('loads every role page before classifying current assignments', async () => {
+  it('loads one active page even when the tenant has more roles', async () => {
     const pageOne = Array.from({ length: 200 }, (_, index) =>
       role(String(index + 1)),
     );
-    const disabledCurrentRole = role('201', { status: 0 });
-    const loadPage = vi.fn(async ({ page }: { page: number }) => ({
-      items: page === 1 ? pageOne : [disabledCurrentRole],
-      total: 201,
-    }));
+    let calls = 0;
+    const loadPage = vi.fn(async () => {
+      calls += 1;
+      if (calls > 1) throw new Error('unexpected second page');
+      return { items: pageOne, total: 201 };
+    });
 
     const catalog = await loadRoleAssignmentCatalog(loadPage);
 
-    expect(loadPage).toHaveBeenCalledTimes(2);
-    expect(loadPage).toHaveBeenNthCalledWith(1, { page: 1, pageSize: 200 });
-    expect(loadPage).toHaveBeenNthCalledWith(2, { page: 2, pageSize: 200 });
-    expect(catalog).toHaveLength(201);
-    expect(
-      buildRoleAssignmentOptions(catalog, ['201'], [], true),
-    ).toContainEqual({
-      disabled: false,
-      label: 'Role 201',
-      value: '201',
+    expect(loadPage).toHaveBeenCalledOnce();
+    expect(loadPage).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 200,
+      status: 1,
     });
+    expect(catalog).toHaveLength(200);
+  });
+
+  it('loads missing current roles by exact id with bounded concurrency', async () => {
+    const currentRoleIds = Array.from({ length: 10 }, (_, index) =>
+      String(index + 201),
+    );
+    let active = 0;
+    let maximumActive = 0;
+    const loadPage = vi.fn(async (query: { id?: string }) => {
+      if (!query.id) return { items: [role('1')], total: 500 };
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+      return {
+        items: [role(query.id, { status: query.id === '201' ? 0 : 1 })],
+        total: 1,
+      };
+    });
+
+    const catalog = await loadRoleAssignmentCatalog(loadPage, currentRoleIds);
+
+    expect(loadPage).toHaveBeenCalledTimes(11);
+    expect(maximumActive).toBeLessThanOrEqual(8);
+    expect(catalog).toHaveLength(11);
+    expect(catalog).toContainEqual(role('201', { status: 0 }));
+    expect(loadPage).toHaveBeenCalledWith({ id: '201', page: 1, pageSize: 1 });
+  });
+
+  it('replaces search candidates without dropping pinned current roles', () => {
+    const current = role('disabled', { status: 0 });
+    expect(
+      mergeRoleSearchResults(
+        [current, role('old-candidate')],
+        [role('new-candidate')],
+        ['disabled'],
+      ),
+    ).toEqual([current, role('new-candidate')]);
   });
 
   it('submits an explicit empty role list when creation is allowed without role assignment', () => {

@@ -12,7 +12,7 @@ public final class IdentityModels {
     }
 
     public record CurrentUser(long id, String username, String realName, String avatar,
-                              List<String> roles, String homePath) {
+                              List<String> roles, String homePath, boolean systemAdministrator) {
         public CurrentUser { roles = List.copyOf(roles); }
     }
 

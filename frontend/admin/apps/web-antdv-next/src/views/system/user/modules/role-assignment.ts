@@ -2,10 +2,14 @@ import type { SystemRoleApi } from '#/api/system/role';
 import type { PageResult } from '#/api/system/types';
 
 const ROLE_CATALOG_PAGE_SIZE = 200;
+const ROLE_LOOKUP_CONCURRENCY = 8;
 
 interface RoleCatalogPageQuery {
+  id?: string;
+  name?: string;
   page: number;
   pageSize: number;
+  status?: 0 | 1;
 }
 
 type RoleCatalogPageLoader = (
@@ -106,29 +110,98 @@ function resolveRoleAssignmentIds(
     : [...currentRoleIds];
 }
 
-async function loadRoleAssignmentCatalog(loadPage: RoleCatalogPageLoader) {
+async function loadRoleAssignmentCatalog(
+  loadPage: RoleCatalogPageLoader,
+  currentRoleIds: string[] = [],
+) {
   const rolesById = new Map<string, SystemRoleApi.SystemRole>();
-  let expectedTotal = 0;
-  let page = 1;
+  const firstPage = await loadPage({
+    page: 1,
+    pageSize: ROLE_CATALOG_PAGE_SIZE,
+    status: 1,
+  });
+  firstPage.items.forEach((role) => rolesById.set(role.id, role));
 
-  while (true) {
-    const result = await loadPage({ page, pageSize: ROLE_CATALOG_PAGE_SIZE });
-    expectedTotal = Math.max(expectedTotal, result.total);
-    result.items.forEach((role) => rolesById.set(role.id, role));
+  const missingCurrentIds = [...new Set(currentRoleIds)].filter(
+    (roleId) => !rolesById.has(roleId),
+  );
+  const exactRoles = await mapWithConcurrency(
+    missingCurrentIds,
+    ROLE_LOOKUP_CONCURRENCY,
+    async (roleId) => {
+      const result = await loadPage({ id: roleId, page: 1, pageSize: 1 });
+      return result.items.find((role) => role.id === roleId);
+    },
+  );
+  exactRoles.forEach((role) => {
+    if (role) rolesById.set(role.id, role);
+  });
+  return [...rolesById.values()];
+}
 
-    if (rolesById.size >= expectedTotal) {
-      return [...rolesById.values()];
-    }
-    if (result.items.length < ROLE_CATALOG_PAGE_SIZE) {
-      throw new Error('Role catalog pagination ended before total was loaded');
-    }
-    page += 1;
+async function tryLoadRoleAssignmentCatalog(
+  loadPage: RoleCatalogPageLoader,
+  currentRoleIds: string[] = [],
+) {
+  try {
+    return {
+      ready: true as const,
+      roles: await loadRoleAssignmentCatalog(loadPage, currentRoleIds),
+    };
+  } catch {
+    return { ready: false as const, roles: [] };
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+) {
+  const results: Array<undefined | { value: R }> = Array.from({
+    length: items.length,
+  });
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const item = items[index];
+        if (item === undefined) {
+          throw new Error('Role lookup worker exceeded the input boundary');
+        }
+        results[index] = { value: await mapper(item) };
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results.map((result) => {
+    if (!result) throw new Error('Role lookup worker did not return a result');
+    return result.value;
+  });
+}
+
+function mergeRoleSearchResults(
+  existingRoles: SystemRoleApi.SystemRole[],
+  searchRoles: SystemRoleApi.SystemRole[],
+  pinnedRoleIds: string[],
+) {
+  const pinnedIds = new Set(pinnedRoleIds);
+  const merged = new Map<string, SystemRoleApi.SystemRole>();
+  existingRoles
+    .filter((role) => pinnedIds.has(role.id))
+    .forEach((role) => merged.set(role.id, role));
+  searchRoles.forEach((role) => merged.set(role.id, role));
+  return [...merged.values()];
 }
 
 export {
   buildRoleAssignmentOptions,
   loadRoleAssignmentCatalog,
   mergeRoleAssignmentIds,
+  mergeRoleSearchResults,
   resolveRoleAssignmentIds,
+  tryLoadRoleAssignmentCatalog,
 };

@@ -146,7 +146,7 @@ Sa-Token 配置：8 小时总超时、30 分钟 active timeout、禁止并发共
   -> Controller
 ```
 
-当前策略只公开 `POST /api/auth/login`。用户信息、权限码、动态菜单和退出是 session-only；系统 CRUD 使用精确 method/path 注册表和完整授权服务。未知路径、未知方法和相似前缀默认拒绝。`permissionCodes` 只服务 UI 展示，不再承担 HTTP PEP。Admin 资源上下文由服务端 Session 构造；未来业务详情/列表还必须从可信资源授权视图补齐 merchant、market、channel 和 resource-owner tenant。
+当前策略只公开 `POST /api/auth/login`。用户信息、权限码、动态菜单和退出是 session-only；系统 CRUD 使用精确 method/path 注册表和完整授权服务。未知路径、未知方法和相似前缀默认拒绝。`permissionCodes` 只服务 UI 展示，不再承担 HTTP PEP。`/user/info.systemAdministrator` 由当前 Membership 的 ACTIVE `system_role` 服务端计算，只用于让前端与角色委派策略共享身份事实，不能替代后端授权。Admin 资源上下文由服务端 Session 构造；未来业务详情/列表还必须从可信资源授权视图补齐 merchant、market、channel 和 resource-owner tenant。
 
 ### 动态菜单
 

@@ -4,6 +4,10 @@ import { COOKIE_SESSION_MARKER } from '../session';
 
 type JsonRecord = Record<string, unknown>;
 
+export type CurrentUserInfo = UserInfo & {
+  systemAdministrator: boolean;
+};
+
 function isJsonRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -14,7 +18,7 @@ function isStringArray(value: unknown): value is string[] {
   );
 }
 
-export function mapCurrentUserResponse(response: unknown): UserInfo {
+export function mapCurrentUserResponse(response: unknown): CurrentUserInfo {
   if (!isJsonRecord(response)) {
     throw new Error('Invalid current-user response');
   }
@@ -41,6 +45,7 @@ export function mapCurrentUserResponse(response: unknown): UserInfo {
     homePath: response.homePath,
     realName: response.realName,
     roles: response.roles,
+    systemAdministrator: response.systemAdministrator === true,
     token: 'cookie-session',
     userId: response.userId,
     username: response.username,

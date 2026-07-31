@@ -304,11 +304,12 @@ Response data：
   "roles": ["platform-admin"],
   "homePath": "/dashboard",
   "desc": "",
-  "token": "cookie-session"
+  "token": "cookie-session",
+  "systemAdministrator": true
 }
 ```
 
-`token` 只是前端 `UserInfo` 兼容所需的固定非秘密 marker，不是 Sa-Token 或 refresh credential。前端运行时校验完整响应，并忽略未知附加字段。不返回完整 RoleGrant、商户、市场或渠道数据范围。
+`token` 只是前端 `UserInfo` 兼容所需的固定非秘密 marker，不是 Sa-Token 或 refresh credential。`systemAdministrator` 仅当当前 Membership 持有 ACTIVE `system_role` 时为 `true`，供界面与后端角色委派策略使用同一身份事实；它不替代后端鉴权。前端运行时校验完整响应，字段缺失或不是严格布尔 `true` 时按 `false` 处理，并忽略未知附加字段。不返回完整 RoleGrant、商户、市场或渠道数据范围。
 
 `homePath` 是服务端根据当前 Membership 的安全菜单树解析后的落点，不直接透传持久化首选值。首选路径不在安全树中时返回第一个可访问叶子；没有任何业务菜单时返回本地保留路由 `/profile`。
 
@@ -491,6 +492,7 @@ Request 只包含当前租户 Membership 可变字段：
 - roleIds 最多 256 项；
 - 入口始终要求 `user:update`、`user:disable`、`user:assign-role`；
 - 新增的角色必须是当前租户 ACTIVE、assignable、非 system 的普通角色；已有禁用普通角色可原样保留或由系统管理员移除，但不能分配给其他用户；system/non-assignable 受保护角色和目录缺失的历史关系由普通编辑流程只读保留；
+- 系统管理员清理能力只取 `/user/info.systemAdministrator`，不得用权限码或角色名称推断；角色候选首屏和名称搜索均使用最大 `pageSize=200`，首屏未覆盖的当前角色通过租户内 `id` 精确查询补齐，不允许为了打开表单串行扫描完整租户角色目录；
 - userVersion 不匹配返回 409；
 - 更新当前 Membership 的部门、状态、角色、permissionVersion、sessionVersion；
 - 不接受也不修改全局 `username`、display name、remark 或 credential；前端编辑态将这些身份字段设为只读，并通过 payload 白名单保证不会误传；
@@ -994,7 +996,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 - 登录在查账号/BCrypt 前原子预留 15 分钟 client 30 和 client/username 5 双桶，Redis key 同 hash slot；
 - 登录响应只返回 `cookie-session` marker；
 - 前端所有请求 `withCredentials=true` 且不发送 Authorization marker；
-- `/user/info` 返回 `/dashboard`、空 `desc` 和固定非秘密 `cookie-session` marker；
+- `/user/info` 返回 `/dashboard`、空 `desc`、固定非秘密 `cookie-session` marker 和服务端计算的 `systemAdministrator`；
 - mixed 路由只注册本地 `Profile`，后端与其 name/path 冲突时拒绝合并；
 - `/auth/codes` 对有效本地平台管理员返回且仅返回本轮 19 个 ACTIVE 管理权限码；permissionVersion 失效的旧 Cookie 立即返回 401 `SESSION_INVALID` 并清 Cookie；
 - 用户/角色/菜单/部门接口受后端权限拦截；

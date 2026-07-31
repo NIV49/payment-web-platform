@@ -26,6 +26,8 @@
     "operation": "操作",
     "clearDeptFilter": "清除部门筛选",
     "departmentLoadFailed": "部门加载失败",
+    "roleCatalogLoadFailed": "角色加载失败，请重新打开表单后重试。",
+    "roleSearchFailed": "角色搜索失败，已保留上一次的有效选项。",
     "retryDepartmentLoad": "重新加载部门",
     "permission": {
       "view": "查看用户",
