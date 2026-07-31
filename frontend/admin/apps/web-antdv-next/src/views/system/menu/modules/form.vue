@@ -79,8 +79,15 @@ const schema: VbenFormSchema[] = [
   {
     component: 'ApiTreeSelect',
     componentProps: () => ({
-      api: async (params?: { excludedMenuId?: string }) =>
-        filterMenuParentOptions(await getMenuList(), params?.excludedMenuId),
+      api: async (params?: {
+        currentParentId?: string;
+        excludedMenuId?: string;
+      }) =>
+        filterMenuParentOptions(
+          await getMenuList(),
+          params?.excludedMenuId,
+          params?.currentParentId,
+        ),
       class: 'w-full',
       filterTreeNode(input: string, node: Recordable<any>) {
         if (!input || input.length === 0) {
@@ -92,7 +99,10 @@ const schema: VbenFormSchema[] = [
       },
       getPopupContainer,
       labelField: 'meta.title',
-      params: { excludedMenuId: formData.value?.id },
+      params: {
+        currentParentId: formData.value?.pid,
+        excludedMenuId: formData.value?.id,
+      },
       showSearch: true,
       treeDefaultExpandAll: true,
       valueField: 'id',

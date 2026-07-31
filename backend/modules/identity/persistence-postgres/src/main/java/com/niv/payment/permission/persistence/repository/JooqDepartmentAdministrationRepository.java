@@ -149,8 +149,12 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
     }
 
     private boolean parentAllowed(Map<Long, TreeNode> nodes, long departmentId, Long parentId, String state) {
+        TreeNode current = nodes.get(departmentId);
         TreeNode parent = parentId == null ? null : nodes.get(parentId);
-        if (parentId != null && (parent == null || (ACTIVE.equals(state) && !ACTIVE.equals(parent.status())))) {
+        boolean retainsExistingDependency = current != null && Objects.equals(current.parentId(), parentId);
+        if (parentId != null && (parent == null
+            || (!ACTIVE.equals(parent.status())
+                && (ACTIVE.equals(state) || !retainsExistingDependency)))) {
             return false;
         }
         Map<Long, TreeNode> candidate = new LinkedHashMap<>(nodes);

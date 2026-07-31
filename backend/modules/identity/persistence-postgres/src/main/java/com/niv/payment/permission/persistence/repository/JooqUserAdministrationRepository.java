@@ -62,7 +62,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         long membershipId = support.nextId();
         authorizeRoleReplacement(tenantId, actor, membershipId, command.roleIds());
         String state = status(command.status());
-        requireMembershipDepartment(tenantId, command.departmentId(), state);
+        requireMembershipDepartment(tenantId, command.departmentId(), state, null);
         String username = command.username().trim().toLowerCase(Locale.ROOT);
 
         dsl.insertInto(IAM_USER)
@@ -98,6 +98,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         support.lockTenant(tenantId, actor);
         var target = dsl.select(
                 IAM_MEMBERSHIP.ID,
+                IAM_MEMBERSHIP.DEPARTMENT_ID,
                 IAM_MEMBERSHIP.ROW_VERSION,
                 IAM_USER.IDP_ISSUER,
                 IAM_USER.IDP_SUBJECT,
@@ -125,7 +126,11 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         }
         authorizeRoleReplacement(tenantId, actor, membershipId, command.roleIds());
         String state = status(command.status());
-        requireMembershipDepartment(tenantId, command.departmentId(), state);
+        requireMembershipDepartment(
+            tenantId,
+            command.departmentId(),
+            state,
+            target.get(IAM_MEMBERSHIP.DEPARTMENT_ID));
         if (command.status() == 0) {
             protectAdministratorDeactivation(tenantId, actor, userId);
         }
@@ -401,11 +406,13 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
             .anyMatch(LoginCredentialPolicy::isLoginCapableHash);
     }
 
-    private void requireMembershipDepartment(long tenantId, long departmentId, String membershipStatus) {
+    private void requireMembershipDepartment(long tenantId, long departmentId, String membershipStatus,
+                                             Long currentDepartmentId) {
         var condition = IAM_DEPARTMENT.TENANT_ID.eq(tenantId)
             .and(IAM_DEPARTMENT.ID.eq(departmentId))
             .and(IAM_DEPARTMENT.DELETED_AT.isNull());
-        if (ACTIVE.equals(membershipStatus)) {
+        boolean retainsExistingDependency = Objects.equals(currentDepartmentId, departmentId);
+        if (ACTIVE.equals(membershipStatus) || !retainsExistingDependency) {
             condition = condition.and(IAM_DEPARTMENT.STATUS.eq(ACTIVE));
         }
         if (!dsl.fetchExists(dsl.selectOne().from(IAM_DEPARTMENT).where(condition))) {

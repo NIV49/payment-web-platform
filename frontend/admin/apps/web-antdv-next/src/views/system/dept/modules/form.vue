@@ -18,6 +18,12 @@ import { canManageDepartment } from '../selection-contract';
 const emit = defineEmits(['success']);
 const formData = ref<SystemDeptApi.SystemDept>();
 const currentDepartmentId = computed(() => formData.value?.id);
+const currentParentId = computed(() => {
+  const parentId = formData.value?.pid;
+  return parentId === undefined || parentId === 0
+    ? undefined
+    : String(parentId);
+});
 const getTitle = computed(() => {
   return formData.value?.id
     ? $t('ui.actionTitle.edit', [$t('system.dept.name')])
@@ -26,7 +32,7 @@ const getTitle = computed(() => {
 
 const [Form, formApi] = useVbenForm({
   layout: 'vertical',
-  schema: useSchema(currentDepartmentId),
+  schema: useSchema(currentDepartmentId, currentParentId),
   showDefaultActions: false,
 });
 

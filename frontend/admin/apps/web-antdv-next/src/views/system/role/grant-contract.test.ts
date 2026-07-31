@@ -6,6 +6,7 @@ import {
   buildTenantRoleGrants,
   canMutateRole,
   findMissingPermissionDependencies,
+  hasPermissionDependencies,
   permissionDependencies,
   reconcilePermissionSelection,
   ROLE_LIST_SEARCH_BEHAVIOR,
@@ -71,6 +72,22 @@ describe('role grant frontend contract', () => {
       'role:view',
       'menu:view',
     ]);
+  });
+
+  it('fails closed when an action grant is missing a required view dependency', () => {
+    const granted = new Set(['role:create']);
+    expect(
+      hasPermissionDependencies(['role:create'], (codes) =>
+        codes.some((code) => granted.has(code)),
+      ),
+    ).toBe(false);
+    granted.add('role:view');
+    granted.add('menu:view');
+    expect(
+      hasPermissionDependencies(['role:create'], (codes) =>
+        codes.some((code) => granted.has(code)),
+      ),
+    ).toBe(true);
   });
 
   it('removes actions that become unusable when a dependency is removed', () => {

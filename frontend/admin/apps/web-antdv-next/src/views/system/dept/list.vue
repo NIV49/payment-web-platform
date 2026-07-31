@@ -5,6 +5,9 @@ import type {
 } from '#/adapter/vxe-table';
 import type { SystemDeptApi } from '#/api/system/dept';
 
+import { computed } from 'vue';
+
+import { useAccess } from '@vben/access';
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
@@ -16,12 +19,18 @@ import { isOptimisticLockConflict } from '#/api/error-contract';
 import { deleteDept, getDeptList } from '#/api/system/dept';
 import { $t } from '#/locales';
 
+import { hasPermissionDependencies } from '../permission-dependencies';
 import { useColumns } from './data';
 import Form from './modules/form.vue';
-import {
-  canAppendDepartmentChild,
-  canManageDepartment,
-} from './selection-contract';
+import { canPerformDepartmentAction } from './selection-contract';
+
+const { hasAccessByCodes } = useAccess();
+const canCreateDepartment = computed(() =>
+  hasPermissionDependencies(
+    [PERMISSION_CODES.departmentCreate],
+    hasAccessByCodes,
+  ),
+);
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
@@ -33,7 +42,14 @@ const [FormModal, formModalApi] = useVbenModal({
  * @param row
  */
 function onEdit(row: SystemDeptApi.SystemDept) {
-  if (!canManageDepartment(row)) return;
+  if (
+    !canPerformDepartmentAction(
+      row,
+      PERMISSION_CODES.departmentUpdate,
+      hasAccessByCodes,
+    )
+  )
+    return;
   formModalApi.setData(row).open();
 }
 
@@ -42,7 +58,14 @@ function onEdit(row: SystemDeptApi.SystemDept) {
  * @param row
  */
 function onAppend(row: SystemDeptApi.SystemDept) {
-  if (!canAppendDepartmentChild(row)) return;
+  if (
+    !canPerformDepartmentAction(
+      row,
+      PERMISSION_CODES.departmentCreate,
+      hasAccessByCodes,
+    )
+  )
+    return;
   formModalApi.setData({ pid: row.id }).open();
 }
 
@@ -50,6 +73,7 @@ function onAppend(row: SystemDeptApi.SystemDept) {
  * 创建新部门
  */
 function onCreate() {
+  if (!canCreateDepartment.value) return;
   formModalApi.setData(null).open();
 }
 
@@ -58,7 +82,14 @@ function onCreate() {
  * @param row
  */
 function onDelete(row: SystemDeptApi.SystemDept) {
-  if (!canManageDepartment(row)) return;
+  if (
+    !canPerformDepartmentAction(
+      row,
+      PERMISSION_CODES.departmentDelete,
+      hasAccessByCodes,
+    )
+  )
+    return;
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.name]),
     duration: 0,
@@ -104,7 +135,7 @@ function onActionClick({
 const [Grid, gridApi] = useVbenVxeGrid({
   gridEvents: {},
   gridOptions: {
-    columns: useColumns(onActionClick),
+    columns: useColumns(onActionClick, hasAccessByCodes),
     height: 'auto',
     keepSource: true,
     pagerConfig: {
@@ -144,6 +175,7 @@ function refreshGrid() {
     <Grid :table-title="$t('system.dept.list')">
       <template #toolbar-tools>
         <Button
+          v-if="canCreateDepartment"
           v-access:code="PERMISSION_CODES.departmentCreate"
           type="primary"
           @click="onCreate"

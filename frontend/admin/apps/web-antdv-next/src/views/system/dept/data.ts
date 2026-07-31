@@ -12,16 +12,18 @@ import { getDeptList } from '#/api/system/dept';
 import { $t } from '#/locales';
 
 import {
-  canAppendDepartmentChild,
-  canManageDepartment,
+  canPerformDepartmentAction,
   filterDepartmentParentOptions,
 } from './selection-contract';
+
+type AccessCodeChecker = (codes: string[]) => boolean;
 
 /**
  * 获取编辑表单的字段配置。如果没有使用多语言，可以直接export一个数组常量
  */
 export function useSchema(
   currentDepartmentId: ComputedRef<string | undefined>,
+  currentParentId: ComputedRef<string | undefined>,
 ): VbenFormSchema[] {
   return [
     {
@@ -40,14 +42,21 @@ export function useSchema(
       component: 'ApiTreeSelect',
       componentProps: () => ({
         allowClear: true,
-        api: async (params?: { excludedDepartmentId?: string }) =>
+        api: async (params?: {
+          currentParentId?: string;
+          excludedDepartmentId?: string;
+        }) =>
           filterDepartmentParentOptions(
             await getDeptList(),
             params?.excludedDepartmentId,
+            params?.currentParentId,
           ),
         class: 'w-full',
         labelField: 'name',
-        params: { excludedDepartmentId: currentDepartmentId.value },
+        params: {
+          currentParentId: currentParentId.value,
+          excludedDepartmentId: currentDepartmentId.value,
+        },
         valueField: 'id',
         childrenField: 'children',
       }),
@@ -92,6 +101,7 @@ export function useSchema(
  */
 export function useColumns(
   onActionClick?: OnActionClickFn<SystemDeptApi.SystemDept>,
+  hasAccessByCodes: AccessCodeChecker = () => false,
 ): VxeTableGridColumns<SystemDeptApi.SystemDept> {
   return [
     {
@@ -130,13 +140,23 @@ export function useColumns(
           {
             auth: PERMISSION_CODES.departmentCreate,
             code: 'append',
-            show: canAppendDepartmentChild,
+            show: (row: SystemDeptApi.SystemDept) =>
+              canPerformDepartmentAction(
+                row,
+                PERMISSION_CODES.departmentCreate,
+                hasAccessByCodes,
+              ),
             text: $t('system.dept.addChild'),
           },
           {
             auth: PERMISSION_CODES.departmentUpdate,
             code: 'edit',
-            show: canManageDepartment,
+            show: (row: SystemDeptApi.SystemDept) =>
+              canPerformDepartmentAction(
+                row,
+                PERMISSION_CODES.departmentUpdate,
+                hasAccessByCodes,
+              ),
           },
           {
             auth: PERMISSION_CODES.departmentDelete,
@@ -144,7 +164,12 @@ export function useColumns(
             disabled: (row: SystemDeptApi.SystemDept) => {
               return !!(row.children && row.children.length > 0);
             },
-            show: canManageDepartment,
+            show: (row: SystemDeptApi.SystemDept) =>
+              canPerformDepartmentAction(
+                row,
+                PERMISSION_CODES.departmentDelete,
+                hasAccessByCodes,
+              ),
           },
         ],
       },

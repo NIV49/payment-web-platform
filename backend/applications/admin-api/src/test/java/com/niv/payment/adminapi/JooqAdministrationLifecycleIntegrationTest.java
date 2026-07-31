@@ -175,6 +175,69 @@ class JooqAdministrationLifecycleIntegrationTest {
     }
 
     @Test
+    void disabledRowsCannotBecomeNewDependenciesButExistingReferencesCanBeRetained() {
+        long historicalDepartment = departments.createDepartment(TENANT_ID, SYSTEM_ACTOR,
+            department(null, "Lifecycle Historical Department", 0));
+        long otherDisabledDepartment = departments.createDepartment(TENANT_ID, SYSTEM_ACTOR,
+            department(null, "Lifecycle Other Disabled Department", 0));
+
+        assertThrows(IdentityAdministrationService.DataConflictException.class,
+            () -> users.createUser(TENANT_ID, SYSTEM_ACTOR,
+                new IdentityModels.UserCreateCommand(
+                    "lifecycle-new-disabled-dependency", "New Disabled Dependency",
+                    historicalDepartment, List.of(), 0, null)));
+
+        long historicalUserId = 9_310_720L;
+        long historicalMembershipId = 9_310_721L;
+        seedUser(historicalUserId, "lifecycle-historical-member", "Historical Member");
+        seedMembership(historicalMembershipId, TENANT_ID, historicalUserId,
+            historicalDepartment, "DISABLED");
+        users.updateUser(TENANT_ID, SYSTEM_ACTOR, historicalUserId,
+            new IdentityModels.MembershipUpdateCommand(
+                historicalDepartment, List.of(), 0, 0L));
+        assertThrows(IdentityAdministrationService.DataConflictException.class,
+            () -> users.updateUser(TENANT_ID, SYSTEM_ACTOR, historicalUserId,
+                new IdentityModels.MembershipUpdateCommand(
+                    otherDisabledDepartment, List.of(), 0, 1L)));
+
+        long departmentParent = departments.createDepartment(TENANT_ID, SYSTEM_ACTOR,
+            department(null, "Lifecycle Historical Department Parent", 1));
+        long departmentChild = departments.createDepartment(TENANT_ID, SYSTEM_ACTOR,
+            department(departmentParent, "Lifecycle Historical Department Child", 0));
+        departments.updateDepartment(TENANT_ID, SYSTEM_ACTOR, departmentParent,
+            department(null, "Lifecycle Historical Department Parent", 0), 0L);
+        departments.updateDepartment(TENANT_ID, SYSTEM_ACTOR, departmentChild,
+            department(departmentParent, "Lifecycle Historical Department Child Renamed", 0), 0L);
+        assertThrows(IllegalArgumentException.class,
+            () -> departments.createDepartment(TENANT_ID, SYSTEM_ACTOR,
+                department(departmentParent, "Lifecycle New Disabled Department Child", 0)));
+        long movableDepartment = departments.createDepartment(TENANT_ID, SYSTEM_ACTOR,
+            department(null, "Lifecycle Movable Department", 0));
+        assertThrows(IllegalArgumentException.class,
+            () -> departments.updateDepartment(TENANT_ID, SYSTEM_ACTOR, movableDepartment,
+                department(departmentParent, "Lifecycle Movable Department", 0), 0L));
+
+        long menuParent = menus.createMenu(TENANT_ID, SYSTEM_ACTOR,
+            menu(null, "LifecycleHistoricalMenuParent", "/lifecycle-historical-menu-parent", 1));
+        long menuChild = menus.createMenu(TENANT_ID, SYSTEM_ACTOR,
+            menu(menuParent, "LifecycleHistoricalMenuChild", "/lifecycle-historical-menu-child", 0));
+        menus.updateMenu(TENANT_ID, SYSTEM_ACTOR, menuParent,
+            menu(null, "LifecycleHistoricalMenuParent", "/lifecycle-historical-menu-parent", 0), 0L);
+        menus.updateMenu(TENANT_ID, SYSTEM_ACTOR, menuChild,
+            menu(menuParent, "LifecycleHistoricalMenuChildRenamed",
+                "/lifecycle-historical-menu-child-renamed", 0), 0L);
+        assertThrows(IllegalArgumentException.class,
+            () -> menus.createMenu(TENANT_ID, SYSTEM_ACTOR,
+                menu(menuParent, "LifecycleNewDisabledMenuChild",
+                    "/lifecycle-new-disabled-menu-child", 0)));
+        long movableMenu = menus.createMenu(TENANT_ID, SYSTEM_ACTOR,
+            menu(null, "LifecycleMovableMenu", "/lifecycle-movable-menu", 0));
+        assertThrows(IllegalArgumentException.class,
+            () -> menus.updateMenu(TENANT_ID, SYSTEM_ACTOR, movableMenu,
+                menu(menuParent, "LifecycleMovableMenu", "/lifecycle-movable-menu", 0), 0L));
+    }
+
+    @Test
     void departmentDeletionIsSoftAndRejectsProtectedOrReferencedRows() {
         long systemManaged = departments.createDepartment(TENANT_ID, SYSTEM_ACTOR,
             department(null, "Lifecycle Managed Department", 1));

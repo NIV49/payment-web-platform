@@ -36,7 +36,9 @@ import Form from './modules/form.vue';
 import {
   hasAllAccessCodes,
   USER_CREATE_PERMISSION_CODES,
+  USER_DELETE_PERMISSION_CODES,
   USER_EDIT_PERMISSION_CODES,
+  USER_STATUS_PERMISSION_CODES,
 } from './permission-contract';
 import {
   buildUserListQuery,
@@ -76,7 +78,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     submitOnChange: USER_LIST_SEARCH_BEHAVIOR.submitOnChange,
   },
   gridOptions: {
-    columns: useColumns(onStatusChange),
+    columns: useColumns(onStatusChange, canChangeUserStatus),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
@@ -132,6 +134,7 @@ async function onStatusChange(
   newStatus: number,
   row: SystemUserApi.SystemUser,
 ) {
+  if (!canChangeUserStatus()) return false;
   try {
     const statusLabel = $t(
       newStatus === 1 ? 'common.enabled' : 'common.disabled',
@@ -154,6 +157,7 @@ async function onStatusChange(
 }
 
 function onEdit(row: SystemUserApi.SystemUser) {
+  if (!canEditUser()) return;
   formDrawerApi.setData(row).open();
 }
 
@@ -162,6 +166,7 @@ function onDetail(row: SystemUserApi.SystemUser) {
 }
 
 function onDelete(row: SystemUserApi.SystemUser) {
+  if (!canDeleteUser()) return;
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.name]),
     duration: 0,
@@ -195,6 +200,14 @@ function canCreateUser() {
 
 function canEditUser() {
   return hasAllAccessCodes(USER_EDIT_PERMISSION_CODES, hasAccessByCodes);
+}
+
+function canDeleteUser() {
+  return hasAllAccessCodes(USER_DELETE_PERMISSION_CODES, hasAccessByCodes);
+}
+
+function canChangeUserStatus() {
+  return hasAllAccessCodes(USER_STATUS_PERMISSION_CODES, hasAccessByCodes);
 }
 
 async function loadDeptList() {
@@ -322,6 +335,7 @@ onMounted(() => {
                     confirm: () => onDelete(row),
                   },
                   auth: PERMISSION_CODES.userDelete,
+                  ifShow: canDeleteUser,
                 },
               ]"
               align="center"

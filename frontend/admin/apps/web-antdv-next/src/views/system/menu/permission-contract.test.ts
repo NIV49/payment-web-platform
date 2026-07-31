@@ -2,11 +2,13 @@ import type { SystemMenuApi } from '#/api/system/menu';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { PERMISSION_CODES } from '#/api/permission-codes';
 import { filterDeletedMenuTree } from '#/api/system/menu';
 
 import {
   canAppendMenuChild,
   canManageMenu,
+  canPerformMenuAction,
   filterMenuParentOptions,
 } from './permission-contract';
 
@@ -16,8 +18,8 @@ const menu = (
   id: string,
   type: SystemMenuApi.SystemMenu['type'],
   children?: SystemMenuApi.SystemMenu[],
-  overrides: Partial<SystemMenuApi.SystemMenu> = {},
-): SystemMenuApi.SystemMenu => ({
+  overrides: Partial<SystemMenuApi.SystemMenu & { disabled?: boolean }> = {},
+): SystemMenuApi.SystemMenu & { disabled?: boolean } => ({
   children,
   id,
   name: `menu-${id}`,
@@ -102,5 +104,54 @@ describe('menu permission presentation contract', () => {
     ]);
 
     expect(result).toEqual([menu('1', 'catalog')]);
+  });
+
+  it('pins the current non-selectable parent and its ancestors as read-only', () => {
+    const result = filterMenuParentOptions(
+      [
+        menu(
+          '1',
+          'catalog',
+          [
+            menu('2', 'menu', [menu('3', 'menu')], {
+              status: 0,
+            }),
+          ],
+          { systemManaged: true },
+        ),
+      ],
+      '3',
+      '2',
+    );
+
+    expect(result).toEqual([
+      menu(
+        '1',
+        'catalog',
+        [menu('2', 'menu', [], { disabled: true, status: 0 })],
+        { disabled: true, systemManaged: true },
+      ),
+    ]);
+  });
+
+  it('requires menu view together with the action permission', () => {
+    const granted = new Set<string>([PERMISSION_CODES.menuCreate]);
+    const hasAccess = (codes: string[]) =>
+      codes.some((code) => granted.has(code));
+    expect(
+      canPerformMenuAction(
+        menu('1', 'menu'),
+        PERMISSION_CODES.menuCreate,
+        hasAccess,
+      ),
+    ).toBe(false);
+    granted.add(PERMISSION_CODES.menuView);
+    expect(
+      canPerformMenuAction(
+        menu('1', 'menu'),
+        PERMISSION_CODES.menuCreate,
+        hasAccess,
+      ),
+    ).toBe(true);
   });
 });

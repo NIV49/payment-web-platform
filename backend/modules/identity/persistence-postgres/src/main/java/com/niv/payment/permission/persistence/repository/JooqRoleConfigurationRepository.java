@@ -161,7 +161,14 @@ public class JooqRoleConfigurationRepository implements RoleConfigurationPort {
     private void replaceMenus(long tenantId, long roleId, Set<Long> menuIds) {
         dsl.deleteFrom(IAM_ROLE_MENU)
             .where(IAM_ROLE_MENU.TENANT_ID.eq(tenantId)
-                .and(IAM_ROLE_MENU.ROLE_ID.eq(roleId)))
+                .and(IAM_ROLE_MENU.ROLE_ID.eq(roleId))
+                .and(IAM_ROLE_MENU.MENU_ID.in(
+                    dsl.select(IAM_MENU.ID)
+                        .from(IAM_MENU)
+                        .where(IAM_MENU.TENANT_ID.eq(tenantId)
+                            .and(IAM_MENU.STATUS.eq("ACTIVE"))
+                            .and(IAM_MENU.DELETED_AT.isNull())
+                            .and(IAM_MENU.MENU_TYPE.in(ROUTABLE_MENU_TYPES))))))
             .execute();
         if (menuIds.isEmpty()) {
             return;

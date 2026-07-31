@@ -78,8 +78,9 @@ export function useGridFormSchema(): VbenFormSchema[] {
 export function useColumns<T = SystemRoleApi.SystemRole>(
   onActionClick: OnActionClickFn<T>,
   onStatusChange?: (newStatus: any, row: T) => PromiseLike<boolean | undefined>,
-  canMutate: (row: T) => boolean = () => true,
+  canChangeStatus: (row: T) => boolean = () => true,
   canEdit: (row: T) => boolean = () => true,
+  canDelete: (row: T) => boolean = () => true,
 ): VxeTableGridColumns {
   return [
     {
@@ -100,7 +101,7 @@ export function useColumns<T = SystemRoleApi.SystemRole>(
         },
         name: onStatusChange ? 'CellSwitch' : 'CellTag',
         props: {
-          disabled: (row: T) => !canMutate(row),
+          disabled: (row: T) => !canChangeStatus(row),
         },
       },
       field: 'status',
@@ -135,7 +136,7 @@ export function useColumns<T = SystemRoleApi.SystemRole>(
           {
             auth: PERMISSION_CODES.roleDelete,
             code: 'delete',
-            show: canMutate,
+            show: canDelete,
           },
         ],
       },

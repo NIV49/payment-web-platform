@@ -26,6 +26,7 @@ import { $t } from '#/locales';
 import { useColumns, useGridFormSchema } from './data';
 import {
   canMutateRole,
+  hasPermissionDependencies,
   ROLE_LIST_SEARCH_BEHAVIOR,
 } from './grant-contract';
 import Form from './modules/form.vue';
@@ -37,19 +38,31 @@ const [FormDrawer, formDrawerApi] = useVbenDrawer({
   destroyOnClose: true,
 });
 
-const canCreateRole = computed(
-  () =>
-    hasAccessByCodes([PERMISSION_CODES.roleCreate]) &&
-    hasAccessByCodes([PERMISSION_CODES.menuView]),
+const canCreateRole = computed(() =>
+  hasPermissionDependencies([PERMISSION_CODES.roleCreate], hasAccessByCodes),
 );
 
 function canEditRole(row: SystemRoleApi.SystemRole) {
   return (
     canMutateRole(row) &&
-    hasAccessByCodes([PERMISSION_CODES.roleView]) &&
-    hasAccessByCodes([PERMISSION_CODES.roleUpdate]) &&
-    hasAccessByCodes([PERMISSION_CODES.menuView]) &&
-    hasAccessByCodes([PERMISSION_CODES.roleGrantUpdate])
+    hasPermissionDependencies(
+      [PERMISSION_CODES.roleUpdate, PERMISSION_CODES.roleGrantUpdate],
+      hasAccessByCodes,
+    )
+  );
+}
+
+function canDeleteRole(row: SystemRoleApi.SystemRole) {
+  return (
+    canMutateRole(row) &&
+    hasPermissionDependencies([PERMISSION_CODES.roleDelete], hasAccessByCodes)
+  );
+}
+
+function canChangeRoleStatus(row: SystemRoleApi.SystemRole) {
+  return (
+    canMutateRole(row) &&
+    hasPermissionDependencies([PERMISSION_CODES.roleUpdate], hasAccessByCodes)
   );
 }
 
@@ -63,8 +76,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
     columns: useColumns(
       onActionClick,
       onStatusChange,
-      canMutateRole,
+      canChangeRoleStatus,
       canEditRole,
+      canDeleteRole,
     ),
     height: 'auto',
     keepSource: true,
@@ -136,7 +150,7 @@ async function onStatusChange(
   newStatus: number,
   row: SystemRoleApi.SystemRole,
 ) {
-  if (!canMutateRole(row)) return false;
+  if (!canChangeRoleStatus(row)) return false;
   try {
     const statusLabel = $t(
       newStatus === 1 ? 'common.enabled' : 'common.disabled',
@@ -164,7 +178,7 @@ function onEdit(row: SystemRoleApi.SystemRole) {
 }
 
 function onDelete(row: SystemRoleApi.SystemRole) {
-  if (!canMutateRole(row)) return;
+  if (!canDeleteRole(row)) return;
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.name]),
     duration: 0,

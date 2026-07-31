@@ -620,7 +620,7 @@ BUTTON.authCode   -> 权限目录在树中的展示绑定
 RoleGrant         -> 后端动作和数据范围
 ```
 
-三者已在数据库模型和写入契约中分离。角色编辑抽屉在同一个多层树中展示 ACTIVE 导航节点及其可分配 BUTTON，勾选 BUTTON 只生成 RoleGrant intent，并自动补齐必要权限和导航祖先；BUTTON ID 绝不写入 `iam_role_menu`，导航 ID 也绝不推导 Grant。保存调用原子 configuration API，一次性替换角色字段、ACTIVE 可路由 menuIds 和页面可无损表达的 RoleGrant。未知、高风险、有效期、多维度或带 target 的现有 Grant 会使表单只读，禁止静默覆盖。菜单管理树中的 BUTTON 只是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
+三者已在数据库模型和写入契约中分离。角色编辑抽屉在同一个多层树中展示 ACTIVE 导航节点及其可分配 BUTTON，勾选 BUTTON 只生成 RoleGrant intent，并自动补齐必要权限和导航祖先；BUTTON ID 绝不写入 `iam_role_menu`，导航 ID 也绝不推导 Grant。保存调用原子 configuration API，一次性替换角色字段、ACTIVE 可路由 menuIds 和页面可无损表达的 RoleGrant；替换导航时只删除当前 ACTIVE、未删除、可路由菜单的旧关系，已禁用、BUTTON 或墓碑菜单的既有 `iam_role_menu` 必须保留为历史。未知、高风险、有效期、多维度或带 target 的现有 Grant 会使表单只读，禁止静默覆盖。菜单管理树中的 BUTTON 只是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
 
 `local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。V15 中两个旧 Permission 处于 ACTIVE 兼容状态不等于旧 BUTTON 重新启用。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，并精确识别已经执行 V14+V15 的过渡状态；预置部门的非负 `rowVersion` 可自然推进，但其 ID、租户、父级、编码、名称、状态、备注或预留键发生漂移时仍失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
 

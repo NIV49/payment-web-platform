@@ -484,7 +484,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isOk());
         assertThat(jdbc.queryForList("""
             SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id
-            """, Long.class, roleId)).containsExactly(6001L);
+            """, Long.class, roleId)).containsExactly(6001L, 6020L, 6031L);
     }
 
     @Test
@@ -1380,6 +1380,16 @@ class AdminApiContractIntegrationTest {
                 .content("{\"name\":\"Atomic Configuration Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        long tombstonedMenuId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_menu(
+                id,tenant_id,menu_type,menu_name,route_name,route_path,status,deleted_at)
+            VALUES (?,1,'PAGE',?,? ,?,'DISABLED',CURRENT_TIMESTAMP)
+            """, tombstonedMenuId, "Atomic Historical Menu " + tombstonedMenuId,
+            "AtomicHistoricalMenu" + tombstonedMenuId, "/atomic-historical-menu-" + tombstonedMenuId);
+        jdbc.update("""
+            INSERT INTO iam_role_menu(tenant_id,role_id,menu_id) VALUES(1,?,?),(1,?,6031)
+            """, roleId, tombstonedMenuId, roleId);
         String username = "atomic-role-user-" + roleId;
         String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
                 .contentType("application/json")
@@ -1412,7 +1422,7 @@ class AdminApiContractIntegrationTest {
             .containsEntry("row_version", 1L);
         assertThat(jdbc.queryForList("""
             SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id
-            """, Long.class, roleId)).containsExactly(6001L);
+            """, Long.class, roleId)).containsExactly(6001L, 6031L, tombstonedMenuId);
         assertThat(jdbc.queryForObject("""
             SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND user_id=?
             """, Long.class, userId)).isEqualTo(permissionVersionBefore + 1L);

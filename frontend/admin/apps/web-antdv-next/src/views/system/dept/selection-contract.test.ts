@@ -2,11 +2,13 @@ import type { SystemDeptApi } from '#/api/system/dept';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { PERMISSION_CODES } from '#/api/permission-codes';
 import { filterDeletedDepartmentTree } from '#/api/system/dept';
 
 import {
   canAppendDepartmentChild,
   canManageDepartment,
+  canPerformDepartmentAction,
   filterDepartmentParentOptions,
 } from './selection-contract';
 
@@ -14,8 +16,8 @@ vi.mock('#/api/request', () => ({ requestClient: {} }));
 
 const department = (
   id: string,
-  overrides: Partial<SystemDeptApi.SystemDept> = {},
-): SystemDeptApi.SystemDept => ({
+  overrides: Partial<SystemDeptApi.SystemDept & { disabled?: boolean }> = {},
+): SystemDeptApi.SystemDept & { disabled?: boolean } => ({
   id,
   name: `department-${id}`,
   pid: '0',
@@ -70,5 +72,60 @@ describe('department selection contract', () => {
     );
 
     expect(result).toEqual([]);
+  });
+
+  it('pins the current non-selectable parent and its ancestors as read-only', () => {
+    const result = filterDepartmentParentOptions(
+      [
+        department('1', {
+          systemManaged: true,
+          children: [
+            department('2', {
+              pid: '1',
+              status: 0,
+              children: [department('3', { pid: '2' })],
+            }),
+          ],
+        }),
+      ],
+      '3',
+      '2',
+    );
+
+    expect(result).toEqual([
+      department('1', {
+        disabled: true,
+        systemManaged: true,
+        children: [
+          department('2', {
+            children: [],
+            disabled: true,
+            pid: '1',
+            status: 0,
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it('requires department view together with the action permission', () => {
+    const granted = new Set<string>([PERMISSION_CODES.departmentDelete]);
+    const hasAccess = (codes: string[]) =>
+      codes.some((code) => granted.has(code));
+    expect(
+      canPerformDepartmentAction(
+        department('1'),
+        PERMISSION_CODES.departmentDelete,
+        hasAccess,
+      ),
+    ).toBe(false);
+    granted.add(PERMISSION_CODES.departmentView);
+    expect(
+      canPerformDepartmentAction(
+        department('1'),
+        PERMISSION_CODES.departmentDelete,
+        hasAccess,
+      ),
+    ).toBe(true);
   });
 });

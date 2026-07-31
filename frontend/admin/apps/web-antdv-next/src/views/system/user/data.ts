@@ -209,6 +209,7 @@ export function useDescriptionItems(
 
 export function useColumns<T = SystemUserApi.SystemUser>(
   onStatusChange?: (newStatus: any, row: T) => PromiseLike<boolean | undefined>,
+  canChangeStatus: (row: T) => boolean = () => true,
 ): VxeTableGridColumns {
   return [
     {
@@ -243,6 +244,9 @@ export function useColumns<T = SystemUserApi.SystemUser>(
           beforeChange: onStatusChange,
         },
         name: onStatusChange ? 'CellSwitch' : 'CellTag',
+        props: {
+          disabled: (row: T) => !canChangeStatus(row),
+        },
       },
       field: 'status',
       title: $t('system.user.membershipStatus'),

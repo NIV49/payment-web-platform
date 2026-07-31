@@ -4,7 +4,9 @@ import type { SystemMenuApi } from '#/api/system/menu';
 import { PERMISSION_CODES } from '#/api';
 import { $t } from '#/locales';
 
-import { canAppendMenuChild, canManageMenu } from './permission-contract';
+import { canPerformMenuAction } from './permission-contract';
+
+type AccessCodeChecker = (codes: string[]) => boolean;
 
 export function getMenuTypeOptions() {
   return [
@@ -26,6 +28,7 @@ export function getMenuTypeOptions() {
 
 export function useColumns(
   onActionClick: OnActionClickFn<SystemMenuApi.SystemMenu>,
+  hasAccessByCodes: AccessCodeChecker,
 ): VxeTableGridColumns<SystemMenuApi.SystemMenu> {
   return [
     {
@@ -96,18 +99,33 @@ export function useColumns(
           {
             auth: PERMISSION_CODES.menuCreate,
             code: 'append',
-            show: canAppendMenuChild,
+            show: (row: SystemMenuApi.SystemMenu) =>
+              canPerformMenuAction(
+                row,
+                PERMISSION_CODES.menuCreate,
+                hasAccessByCodes,
+              ),
             text: $t('system.menu.addChild'),
           },
           {
             auth: PERMISSION_CODES.menuUpdate,
             code: 'edit',
-            show: canManageMenu,
+            show: (row: SystemMenuApi.SystemMenu) =>
+              canPerformMenuAction(
+                row,
+                PERMISSION_CODES.menuUpdate,
+                hasAccessByCodes,
+              ),
           },
           {
             auth: PERMISSION_CODES.menuDelete,
             code: 'delete',
-            show: canManageMenu,
+            show: (row: SystemMenuApi.SystemMenu) =>
+              canPerformMenuAction(
+                row,
+                PERMISSION_CODES.menuDelete,
+                hasAccessByCodes,
+              ),
           },
         ],
       },

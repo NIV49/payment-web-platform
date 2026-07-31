@@ -1,20 +1,21 @@
 import { PERMISSION_CODES } from '#/api/permission-codes';
 
+import { expandPermissionDependencies } from '../permission-dependencies';
+
 type AccessCodeChecker = (codes: string[]) => boolean;
 
-const USER_CREATE_PERMISSION_CODES = [
+const USER_CREATE_PERMISSION_CODES = expandPermissionDependencies([
   PERMISSION_CODES.userCreate,
-  PERMISSION_CODES.departmentView,
-  PERMISSION_CODES.roleView,
-] as const;
-
-const USER_EDIT_PERMISSION_CODES = [
+]);
+const USER_EDIT_PERMISSION_CODES = expandPermissionDependencies([
   PERMISSION_CODES.userUpdate,
+]);
+const USER_DELETE_PERMISSION_CODES = expandPermissionDependencies([
+  PERMISSION_CODES.userDelete,
+]);
+const USER_STATUS_PERMISSION_CODES = expandPermissionDependencies([
   PERMISSION_CODES.userDisable,
-  PERMISSION_CODES.userAssignRole,
-  PERMISSION_CODES.departmentView,
-  PERMISSION_CODES.roleView,
-] as const;
+]);
 
 function hasAllAccessCodes(
   codes: readonly string[],
@@ -26,5 +27,7 @@ function hasAllAccessCodes(
 export {
   hasAllAccessCodes,
   USER_CREATE_PERMISSION_CODES,
+  USER_DELETE_PERMISSION_CODES,
   USER_EDIT_PERMISSION_CODES,
+  USER_STATUS_PERMISSION_CODES,
 };

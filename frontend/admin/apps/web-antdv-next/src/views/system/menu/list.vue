@@ -4,6 +4,9 @@ import type {
   VxeTableGridOptions,
 } from '#/adapter/vxe-table';
 
+import { computed } from 'vue';
+
+import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { IconifyIcon, Plus } from '@vben/icons';
 
@@ -17,9 +20,15 @@ import { isOptimisticLockConflict } from '#/api/error-contract';
 import { deleteMenu, getMenuList, SystemMenuApi } from '#/api/system/menu';
 import { $t } from '#/locales';
 
+import { hasPermissionDependencies } from '../permission-dependencies';
 import { useColumns } from './data';
 import Form from './modules/form.vue';
-import { canAppendMenuChild, canManageMenu } from './permission-contract';
+import { canPerformMenuAction } from './permission-contract';
+
+const { hasAccessByCodes } = useAccess();
+const canCreateMenu = computed(() =>
+  hasPermissionDependencies([PERMISSION_CODES.menuCreate], hasAccessByCodes),
+);
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -28,7 +37,7 @@ const [FormDrawer, formDrawerApi] = useVbenDrawer({
 
 const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
-    columns: useColumns(onActionClick),
+    columns: useColumns(onActionClick, hasAccessByCodes),
     height: 'auto',
     keepSource: true,
     pagerConfig: {
@@ -85,19 +94,23 @@ function onRefresh() {
   gridApi.query();
 }
 function onEdit(row: SystemMenuApi.SystemMenu) {
-  if (!canManageMenu(row)) return;
+  if (!canPerformMenuAction(row, PERMISSION_CODES.menuUpdate, hasAccessByCodes))
+    return;
   formDrawerApi.setData(row).open();
 }
 function onCreate() {
+  if (!canCreateMenu.value) return;
   formDrawerApi.setData({}).open();
 }
 function onAppend(row: SystemMenuApi.SystemMenu) {
-  if (!canAppendMenuChild(row)) return;
+  if (!canPerformMenuAction(row, PERMISSION_CODES.menuCreate, hasAccessByCodes))
+    return;
   formDrawerApi.setData({ pid: row.id }).open();
 }
 
 function onDelete(row: SystemMenuApi.SystemMenu) {
-  if (!canManageMenu(row)) return;
+  if (!canPerformMenuAction(row, PERMISSION_CODES.menuDelete, hasAccessByCodes))
+    return;
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.name]),
     duration: 0,
@@ -123,6 +136,7 @@ function onDelete(row: SystemMenuApi.SystemMenu) {
     <Grid :table-title="$t('system.menu.list')">
       <template #toolbar-tools>
         <Button
+          v-if="canCreateMenu"
           v-access:code="PERMISSION_CODES.menuCreate"
           type="primary"
           @click="onCreate"

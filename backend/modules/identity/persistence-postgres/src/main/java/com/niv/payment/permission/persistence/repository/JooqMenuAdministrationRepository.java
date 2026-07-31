@@ -199,9 +199,12 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
     }
 
     private boolean parentAllowed(Map<Long, TreeNode> nodes, long menuId, Long parentId, String state) {
+        TreeNode current = nodes.get(menuId);
         TreeNode parent = parentId == null ? null : nodes.get(parentId);
+        boolean retainsExistingDependency = current != null && Objects.equals(current.parentId(), parentId);
         if (parentId != null && (parent == null || "BUTTON".equals(parent.type())
-            || (ACTIVE.equals(state) && !ACTIVE.equals(parent.status())))) {
+            || (!ACTIVE.equals(parent.status())
+                && (ACTIVE.equals(state) || !retainsExistingDependency)))) {
             return false;
         }
         Map<Long, TreeNode> candidate = new LinkedHashMap<>(nodes);
