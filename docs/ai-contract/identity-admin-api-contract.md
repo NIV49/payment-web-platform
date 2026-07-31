@@ -466,6 +466,7 @@ Response item：
 - `[]` 明确表示无角色；
 - roleIds 最多 256 项，HTTP DTO 和 Core 都会拒绝超限请求；
 - roleIds 非空时额外检查 `user:assign-role`；
+- 仅持有用户创建及表单依赖权限、没有 `user:assign-role` 时，前端必须显式提交 `roleIds=[]`，不能静默取消创建；
 - 新分配的 Role 必须在当前租户、ACTIVE、`assignable=true` 且 `systemRole=false`；
 - 创建 User、Membership 和 credential row，返回全局 userId string；User 状态固定为 `PENDING_ACTIVATION`，Credential 状态固定为 `DISABLED` 且 `password_hash=NULL`，Membership 只按请求的 `status` 预配置；
 - 新记录只有在 User/Credential/Membership 经受控流程全部进入可登录态后才可通过认证；当前没有这个生产流程；

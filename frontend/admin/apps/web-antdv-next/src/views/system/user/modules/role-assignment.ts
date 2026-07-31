@@ -67,4 +67,19 @@ function mergeRoleAssignmentIds(
   return [...new Set([...preservedIds, ...selectedEditableIds])];
 }
 
-export { buildRoleAssignmentOptions, mergeRoleAssignmentIds };
+function resolveRoleAssignmentIds(
+  canAssignRoles: boolean,
+  selectedRoleIds: string[],
+  currentRoleIds: string[],
+  roles: SystemRoleApi.SystemRole[],
+): string[] {
+  return canAssignRoles
+    ? mergeRoleAssignmentIds(selectedRoleIds, currentRoleIds, roles)
+    : [...currentRoleIds];
+}
+
+export {
+  buildRoleAssignmentOptions,
+  mergeRoleAssignmentIds,
+  resolveRoleAssignmentIds,
+};

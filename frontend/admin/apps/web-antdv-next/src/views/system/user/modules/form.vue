@@ -25,7 +25,7 @@ import { hasAllAccessCodes } from '../permission-contract';
 import { toMembershipUpdateParams, toUserCreateParams } from './form-contract';
 import {
   buildRoleAssignmentOptions,
-  mergeRoleAssignmentIds,
+  resolveRoleAssignmentIds,
 } from './role-assignment';
 
 const emits = defineEmits(['success']);
@@ -60,13 +60,12 @@ const [Drawer, drawerApi] = useVbenDrawer({
     if (!valid) return;
 
     const values = await formApi.getValues<UserFormValues>();
-    const roleIds = canAssignRoles.value
-      ? mergeRoleAssignmentIds(
-          values.roleIds ?? [],
-          formData.value?.roleIds ?? [],
-          roleCatalog.value,
-        )
-      : formData.value?.roleIds;
+    const roleIds = resolveRoleAssignmentIds(
+      canAssignRoles.value,
+      values.roleIds ?? [],
+      formData.value?.roleIds ?? [],
+      roleCatalog.value,
+    );
     if (!hasExplicitRoleIds(roleIds)) return;
 
     drawerApi.lock();

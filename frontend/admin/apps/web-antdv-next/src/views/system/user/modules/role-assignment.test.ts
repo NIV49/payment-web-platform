@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRoleAssignmentOptions,
   mergeRoleAssignmentIds,
+  resolveRoleAssignmentIds,
 } from './role-assignment';
 
 function role(
@@ -70,5 +71,15 @@ describe('user role assignment contract', () => {
     ).toEqual(['system', 'protected', 'unknown', 'ordinary']);
     expect(mergeRoleAssignmentIds([], ['ordinary'], roles)).toEqual([]);
     expect(mergeRoleAssignmentIds(['disabled'], [], roles)).toEqual([]);
+  });
+
+  it('submits an explicit empty role list when creation is allowed without role assignment', () => {
+    expect(resolveRoleAssignmentIds(false, [], [], roles)).toEqual([]);
+  });
+
+  it('preserves existing roles when editing without role assignment capability', () => {
+    expect(
+      resolveRoleAssignmentIds(false, [], ['system', 'ordinary'], roles),
+    ).toEqual(['system', 'ordinary']);
   });
 });
