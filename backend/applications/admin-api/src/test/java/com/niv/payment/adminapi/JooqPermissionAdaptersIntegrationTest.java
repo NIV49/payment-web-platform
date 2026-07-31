@@ -13,6 +13,7 @@ import com.niv.payment.permission.persistence.repository.JooqPermissionCatalogRe
 import com.niv.payment.permission.persistence.repository.JooqPermissionGrantRepository;
 import com.niv.payment.permission.persistence.repository.JooqRoleAdministrationRepository;
 import com.niv.payment.permission.persistence.repository.JooqRoleGrantAdministrationRepository;
+import com.niv.payment.permission.persistence.repository.JooqUserAdministrationRepository;
 import com.niv.payment.permission.port.InvalidAuthorizationSubjectException;
 import com.niv.payment.permission.port.StalePermissionVersionException;
 import com.niv.payment.permission.service.IdentityModels;
@@ -39,6 +40,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -47,6 +49,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_AUTHENTICATION_CREDENTIAL;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_AUDIT_EVENT;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_DEPARTMENT;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_GRANT_DIMENSION;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_GRANT_TARGET;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP;
@@ -319,6 +323,61 @@ class JooqPermissionAdaptersIntegrationTest {
                 .set(IAM_ROLE.SYSTEM_ROLE, false)
                 .set(IAM_ROLE.ASSIGNABLE, true)
                 .where(IAM_ROLE.TENANT_ID.eq(TENANT_ID).and(IAM_ROLE.ID.eq(ROLE_ID)))
+                .execute();
+        }
+    }
+
+    @Test
+    void userRoleReplacementLoadsOnlyRolesRelevantToTheDecision() {
+        long departmentId = 8_914_000L;
+        long createdUserId = 0L;
+        List<String> statements = new CopyOnWriteArrayList<>();
+        var configuration = new DefaultConfiguration();
+        configuration.set(connection);
+        configuration.set(SQLDialect.POSTGRES);
+        configuration.set(new DefaultExecuteListenerProvider(
+            ExecuteListener.onExecuteStart(context -> statements.add(context.sql()))));
+        DSLContext observedDsl = DSL.using(configuration);
+        var repository = new JooqUserAdministrationRepository(
+            observedDsl, new JooqIdentityQueryRepository(observedDsl), () -> "bounded-role-facts-test");
+
+        try {
+            dsl.insertInto(IAM_DEPARTMENT,
+                    IAM_DEPARTMENT.ID, IAM_DEPARTMENT.TENANT_ID,
+                    IAM_DEPARTMENT.DEPARTMENT_CODE, IAM_DEPARTMENT.DEPARTMENT_NAME,
+                    IAM_DEPARTMENT.STATUS)
+                .values(departmentId, TENANT_ID, "bounded-role-facts", "Bounded Role Facts", "ACTIVE")
+                .execute();
+
+            createdUserId = repository.createUser(TENANT_ID,
+                new AdministrationActor(MEMBERSHIP_ID, USER_ID, 17L, 23L),
+                new IdentityModels.UserCreateCommand(
+                    "bounded-role-facts-user", "Bounded Role Facts User",
+                    departmentId, List.of(), 0, null));
+
+            List<String> roleFactQueries = statements.stream()
+                .filter(sql -> sql != null && sql.contains("iam_role") && sql.contains("assignable"))
+                .toList();
+            assertEquals(1, roleFactQueries.size());
+            assertTrue(roleFactQueries.getFirst().contains("\"iam_role\".\"id\" in"));
+        } finally {
+            if (createdUserId != 0L) {
+                dsl.deleteFrom(IAM_AUDIT_EVENT)
+                    .where(IAM_AUDIT_EVENT.TENANT_ID.eq(TENANT_ID)
+                        .and(IAM_AUDIT_EVENT.TRACE_ID.eq("bounded-role-facts-test")))
+                    .execute();
+                dsl.deleteFrom(IAM_AUTHENTICATION_CREDENTIAL)
+                    .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(createdUserId))
+                    .execute();
+                dsl.deleteFrom(IAM_MEMBERSHIP)
+                    .where(IAM_MEMBERSHIP.TENANT_ID.eq(TENANT_ID)
+                        .and(IAM_MEMBERSHIP.USER_ID.eq(createdUserId)))
+                    .execute();
+                dsl.deleteFrom(IAM_USER).where(IAM_USER.ID.eq(createdUserId)).execute();
+            }
+            dsl.deleteFrom(IAM_DEPARTMENT)
+                .where(IAM_DEPARTMENT.TENANT_ID.eq(TENANT_ID)
+                    .and(IAM_DEPARTMENT.ID.eq(departmentId)))
                 .execute();
         }
     }

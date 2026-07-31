@@ -718,7 +718,7 @@ expectedVersion（仅 PUT）
 - `meta` 每个 map/list 最多 32 项、key 64 字符、string 1024 字符、最深 4 层、总 value 最多 128；
 - 每 tenant 最多 2000 个菜单节点、最深 32 层；管理树、可访问树与 create/update 候选树均使用同一上限；
 - PUT/DELETE 在最终 jOOQ UPDATE 的 WHERE 中原子比较 `row_version = expectedVersion`，成功递增 rowVersion；
-- BUTTON 必须填写 authCode，所有非空 authCode 都必须命中当前 ACTIVE Permission Catalog；
+- BUTTON 必须填写 authCode，所有非空 authCode 都必须命中当前 ACTIVE Permission Catalog；滚动兼容期仍为 ACTIVE 的 `menu:manage`、`department:manage` 只服务旧二进制鉴权，create/update 均禁止将其绑定到菜单；
 - BUTTON 不能成为父节点，已有子节点的菜单也不能转换为 BUTTON；
 - 删除是逻辑禁用，现存 role_menu 关系不会自动变成 RoleGrant。
 - `local` bootstrap 预置 19 个 ACTIVE BUTTON，并保留 2 个 DISABLED/隐藏的历史 `menu:manage`、`department:manage` BUTTON；ACTIVE BUTTON authCode 与 19 个现代管理权限码严格相等，path/component/redirect 为空。

@@ -204,21 +204,30 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         support.lockTenant(tenantId, actor);
         validateRoles(tenantId, requestedRoleIds);
         Set<Long> currentRoleIds = Set.copyOf(findMembershipRoleIds(tenantId, targetMembershipId));
+        Set<Long> requestedRoleIdSet = Set.copyOf(requestedRoleIds);
+        Set<Long> operatorRoleIds = Set.copyOf(
+            findMembershipRoleIds(tenantId, actor.membershipId()));
+        Set<Long> relevantRoleIds = new LinkedHashSet<>(currentRoleIds);
+        relevantRoleIds.addAll(requestedRoleIdSet);
+        relevantRoleIds.addAll(operatorRoleIds);
         Map<Long, RoleAssignmentPolicy.RoleFacts> roleFacts = new HashMap<>();
-        dsl.select(IAM_ROLE.ID, IAM_ROLE.ASSIGNABLE, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.STATUS)
-            .from(IAM_ROLE)
-            .where(IAM_ROLE.TENANT_ID.eq(tenantId))
-            .forEach(row -> roleFacts.put(row.get(IAM_ROLE.ID), new RoleAssignmentPolicy.RoleFacts(
-                row.get(IAM_ROLE.ID),
-                Boolean.TRUE.equals(row.get(IAM_ROLE.ASSIGNABLE)),
-                Boolean.TRUE.equals(row.get(IAM_ROLE.SYSTEM_ROLE)),
-                ACTIVE.equals(row.get(IAM_ROLE.STATUS)))));
+        if (!relevantRoleIds.isEmpty()) {
+            dsl.select(IAM_ROLE.ID, IAM_ROLE.ASSIGNABLE, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.STATUS)
+                .from(IAM_ROLE)
+                .where(IAM_ROLE.TENANT_ID.eq(tenantId)
+                    .and(IAM_ROLE.ID.in(relevantRoleIds)))
+                .forEach(row -> roleFacts.put(row.get(IAM_ROLE.ID), new RoleAssignmentPolicy.RoleFacts(
+                    row.get(IAM_ROLE.ID),
+                    Boolean.TRUE.equals(row.get(IAM_ROLE.ASSIGNABLE)),
+                    Boolean.TRUE.equals(row.get(IAM_ROLE.SYSTEM_ROLE)),
+                    ACTIVE.equals(row.get(IAM_ROLE.STATUS)))));
+        }
         roleAssignmentPolicy.validateReplacement(
             actor.membershipId(),
             targetMembershipId,
             currentRoleIds,
-            Set.copyOf(requestedRoleIds),
-            Set.copyOf(findMembershipRoleIds(tenantId, actor.membershipId())),
+            requestedRoleIdSet,
+            operatorRoleIds,
             roleFacts);
     }
 

@@ -30,6 +30,8 @@ import static com.niv.payment.permission.service.IdentityAdministrationService.M
 
 /** Vben menu-contract persistence adapter. */
 public class JooqMenuAdministrationRepository implements MenuAdministrationPort {
+    private static final Set<String> NON_BINDABLE_COMPATIBILITY_CODES = Set.of(
+        "menu:manage", "department:manage");
     private final DSLContext dsl;
     private final JooqIdentityQueryRepository queries;
     private final JooqAdministrationSupport support;
@@ -234,6 +236,9 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         String code = JooqAdministrationSupport.blankToNull(authCode);
         if ("BUTTON".equals(persistedType) && code == null) {
             throw new IllegalArgumentException("Button permission code is required");
+        }
+        if (code != null && NON_BINDABLE_COMPATIBILITY_CODES.contains(code)) {
+            throw new IllegalArgumentException("Compatibility permission code cannot be bound to a menu");
         }
         if (code != null && !dsl.fetchExists(dsl.selectOne().from(IAM_PERMISSION)
             .where(IAM_PERMISSION.PERMISSION_CODE.eq(code).and(IAM_PERMISSION.STATUS.eq(ACTIVE))))) {

@@ -130,6 +130,29 @@ class JooqMenuAdministrationRepositoryIntegrationTest {
     }
 
     @Test
+    void compatibilityPermissionCodesCannotBeBoundToNewOrExistingButtons() {
+        assertThrows(IllegalArgumentException.class, () -> repository.createMenu(
+            TENANT_A, ACTOR_A, new IdentityModels.MenuCommand(null, "button", "LegacyMenuManageButton",
+                null, null, null, "menu:manage", "{}", 1)));
+        assertThrows(IllegalArgumentException.class, () -> repository.createMenu(
+            TENANT_A, ACTOR_A, new IdentityModels.MenuCommand(null, "button", "LegacyDepartmentManageButton",
+                null, null, null, "department:manage", "{}", 1)));
+
+        long button = repository.createMenu(TENANT_A, ACTOR_A,
+            new IdentityModels.MenuCommand(null, "button", "ModernPermissionButton", null, null,
+                null, "user:view", "{}", 1));
+
+        assertThrows(IllegalArgumentException.class, () -> repository.updateMenu(
+            TENANT_A, ACTOR_A, button,
+            new IdentityModels.MenuCommand(null, "button", "ModernPermissionButton", null, null,
+                null, "menu:manage", "{}", 1), 0L));
+        assertEquals("user:view", dsl.select(IAM_MENU.AUTH_CODE)
+            .from(IAM_MENU)
+            .where(IAM_MENU.TENANT_ID.eq(TENANT_A).and(IAM_MENU.ID.eq(button)))
+            .fetchSingle(IAM_MENU.AUTH_CODE));
+    }
+
+    @Test
     void activeDeepDescendantBlocksAncestorDisableAndDelete() {
         long root = repository.createMenu(
             TENANT_A, ACTOR_A, command(null, "DeepRoot", "/deep-root", 1));
