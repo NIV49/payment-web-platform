@@ -280,6 +280,7 @@ Request：
 - 两个 Redis key 使用相同 client SHA-256 digest hash tag，在 Redis Cluster 中保持同槽；成功登录清除该 client/username 桶并释放当次 client 预留；
 - 成功后创建 Sa-Token Session Cookie；
 - 只有显式启用 `local` profile 才创建本地管理员；没有默认开发身份口令，启动时必须显式提供 `PAYMENT_BOOTSTRAP_PASSWORD`；默认/生产 profile 不注册 bootstrap 组件；
+- Admin 登录页可在本地 Vite 开发进程中通过 `VITE_LOCAL_ADMIN_USERNAME/VITE_LOCAL_ADMIN_PASSWORD` 预填同一开发凭据，但仅 `DEV` 模式读取且不自动提交；真实值不得进入受版本控制的 `.env*`、源码或构建产物，生产模式默认值固定为空；
 - 不记录或返回真实 token。
 
 当前限制：没有外部 IdP、MFA、激活流程、忘记密码或重置密码。
@@ -620,7 +621,7 @@ BUTTON.authCode   -> 权限目录在树中的展示绑定
 RoleGrant         -> 后端动作和数据范围
 ```
 
-三者已在数据库模型和写入契约中分离。角色编辑抽屉在同一个多层树中展示 ACTIVE 导航节点及其可分配 BUTTON，勾选 BUTTON 只生成 RoleGrant intent，并自动补齐必要权限和导航祖先；BUTTON ID 绝不写入 `iam_role_menu`，导航 ID 也绝不推导 Grant。保存调用原子 configuration API，一次性替换角色字段、ACTIVE 可路由 menuIds 和页面可无损表达的 RoleGrant；替换导航时只删除当前 ACTIVE、未删除、可路由菜单的旧关系，已禁用、BUTTON 或墓碑菜单的既有 `iam_role_menu` 必须保留为历史。未知、高风险、有效期、多维度或带 target 的现有 Grant 会使表单只读，禁止静默覆盖。菜单管理树中的 BUTTON 只是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
+三者已在数据库模型和写入契约中分离。角色新增和编辑抽屉在同一个多层树中展示 ACTIVE 导航节点及其可分配 BUTTON。勾选导航节点只联动其 ACTIVE 导航后代，不授予后代 BUTTON；取消导航节点清除该导航子树及依赖其 BUTTON 的动作。勾选 BUTTON 只生成 RoleGrant intent，并自动补齐必要权限和导航祖先；BUTTON ID 绝不写入 `iam_role_menu`，导航 ID 也绝不推导 Grant。保存调用原子 configuration API，一次性替换角色字段、ACTIVE 可路由 menuIds 和页面可无损表达的 RoleGrant；替换导航时只删除当前 ACTIVE、未删除、可路由菜单的旧关系，已禁用、BUTTON 或墓碑菜单的既有 `iam_role_menu` 必须保留为历史。未知、高风险、有效期、多维度或带 target 的现有 Grant 会使表单只读，禁止静默覆盖。菜单管理树中的 BUTTON 只是权限目录展示，不会因存在 `authCode` 自动获得授权，也不会进入动态路由。
 
 `local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。V15 中两个旧 Permission 处于 ACTIVE 兼容状态不等于旧 BUTTON 重新启用。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线，并精确识别已经执行 V14+V15 的过渡状态；预置部门的非负 `rowVersion` 可自然推进，但其 ID、租户、父级、编码、名称、状态、备注或预留键发生漂移时仍失败关闭。V8 已从生产迁移结果移除固定租户、管理员、RoleGrant 和菜单 fixture。角色的 `menuIds` 仍不能推导 RoleGrant。
 
@@ -732,6 +733,7 @@ expectedVersion（仅 PUT）
 - BUTTON 必须填写 authCode，所有非空 authCode 都必须命中当前 ACTIVE Permission Catalog；滚动兼容期仍为 ACTIVE 的 `menu:manage`、`department:manage` 只服务旧二进制鉴权，create/update 均禁止将其绑定到菜单；
 - BUTTON 不能成为父节点，已有子节点的菜单也不能转换为 BUTTON；
 - 删除写入墓碑并从后续管理树、选择器和动态菜单隐藏；现存 role_menu 关系作为历史保留，也不会自动变成 RoleGrant。
+- local bootstrap 标记的 system-managed 预置菜单拒绝更新和删除；管理页仍显示禁用的编辑/删除操作并说明保护原因，避免把保护状态误判为权限码缺失；
 - `local` bootstrap 预置 19 个 ACTIVE BUTTON，并保留 2 个 DISABLED/隐藏的历史 `menu:manage`、`department:manage` BUTTON；ACTIVE BUTTON authCode 与 19 个现代管理权限码严格相等，path/component/redirect 为空。
 
 ### 管理资源的并发冲突协议

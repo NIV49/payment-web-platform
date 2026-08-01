@@ -1,3 +1,5 @@
+import type { SystemMenuApi } from '#/api/system/menu';
+
 import { createApp, nextTick } from 'vue';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,7 +29,12 @@ const harness = vi.hoisted(() => ({
 }));
 
 vi.mock('@vben/common-ui', () => ({
-  Tree: { template: '<div />' },
+  Tree: {
+    emits: ['select'],
+    props: ['treeData'],
+    template:
+      '<button data-testid="tree-select" type="button" @click="$emit(\'select\', { value: treeData[0] })">select tree node</button>',
+  },
   useVbenDrawer: (options: any) => {
     harness.drawerOptions = options;
     return [{ template: '<div><slot /></div>' }, harness.drawerApi];
@@ -92,7 +99,9 @@ function mountDrawer(onSuccess = vi.fn()) {
 async function setReason(root: HTMLElement, value: string) {
   const textarea = root.querySelector('textarea');
   if (!(textarea instanceof HTMLTextAreaElement)) {
-    throw new TypeError('Expected the configuration reason textarea to be rendered');
+    throw new TypeError(
+      'Expected the configuration reason textarea to be rendered',
+    );
   }
   textarea.value = value;
   textarea.dispatchEvent(new Event('input'));
@@ -109,7 +118,11 @@ const role = (id: string, rowVersion: number) => ({
   systemRole: false,
 });
 
-const menu = (id: string) => ({
+const menu = (
+  id: string,
+  children?: SystemMenuApi.SystemMenu[],
+): SystemMenuApi.SystemMenu => ({
+  children,
   id,
   meta: { title: `menu.${id}` },
   name: id,
@@ -166,7 +179,12 @@ describe('role form drawer request isolation', () => {
 
     menusB.resolve([menu('menu-B')]);
     permissionsB.resolve([]);
-    grantsB.resolve({ editable: true, grants: [], roleId: 'B', roleVersion: 2 });
+    grantsB.resolve({
+      editable: true,
+      grants: [],
+      roleId: 'B',
+      roleVersion: 2,
+    });
     await flushAsyncWork();
     expect(harness.formApi.setValues).toHaveBeenCalledTimes(1);
     expect(harness.formApi.setValues).toHaveBeenCalledWith(
@@ -190,12 +208,44 @@ describe('role form drawer request isolation', () => {
     await saving;
     menusA.resolve([menu('menu-A')]);
     permissionsA.resolve([]);
-    grantsA.resolve({ editable: true, grants: [], roleId: 'A', roleVersion: 1 });
+    grantsA.resolve({
+      editable: true,
+      grants: [],
+      roleId: 'A',
+      roleVersion: 1,
+    });
     await flushAsyncWork();
 
     expect(harness.formApi.setValues).toHaveBeenCalledTimes(1);
     expect(harness.drawerApi.close).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it('applies navigation cascading on the new-role tree interaction path', async () => {
+    harness.drawerApi.getData.mockReturnValue(undefined);
+    harness.getMenuList.mockResolvedValue([menu('parent', [menu('child')])]);
+    harness.formApi.getValues.mockResolvedValue({
+      menuIds: ['parent'],
+      name: 'New role',
+      status: 1,
+    });
+
+    const { app, root } = mountDrawer();
+    harness.drawerOptions.onOpenChange(true);
+    await flushAsyncWork();
+    harness.formApi.setValues.mockClear();
+
+    const treeSelect = root.querySelector('[data-testid="tree-select"]');
+    if (!(treeSelect instanceof HTMLButtonElement)) {
+      throw new TypeError('Expected the role tree interaction control');
+    }
+    treeSelect.click();
+    await flushAsyncWork();
+
+    expect(harness.formApi.setValues).toHaveBeenCalledWith({
+      menuIds: ['parent', 'child'],
+    });
     app.unmount();
   });
 });

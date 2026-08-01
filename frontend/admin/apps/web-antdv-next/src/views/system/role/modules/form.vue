@@ -223,7 +223,9 @@ async function initializeForm(existingRole?: SystemRoleApi.SystemRole) {
     } else {
       const navigationMenus = filterNavigableMenuTree(await getMenuList());
       if (!requestGuard.isCurrent(requestIdentity, currentScope())) return;
-      menuOptions.value = navigationMenus;
+      const configuration = buildRoleConfigurationTree(navigationMenus, []);
+      roleConfigurationTree.value = configuration;
+      menuOptions.value = configuration.tree;
       await nextTick();
       if (!requestGuard.isCurrent(requestIdentity, currentScope())) return;
       await formApi.setValues({ menuIds: [], status: 1 });

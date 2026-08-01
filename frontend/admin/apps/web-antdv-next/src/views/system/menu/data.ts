@@ -4,7 +4,10 @@ import type { SystemMenuApi } from '#/api/system/menu';
 import { PERMISSION_CODES } from '#/api';
 import { $t } from '#/locales';
 
-import { canPerformMenuAction } from './permission-contract';
+import {
+  canPerformMenuAction,
+  getMenuActionPresentation,
+} from './permission-contract';
 
 type AccessCodeChecker = (codes: string[]) => boolean;
 
@@ -110,22 +113,38 @@ export function useColumns(
           {
             auth: PERMISSION_CODES.menuUpdate,
             code: 'edit',
-            show: (row: SystemMenuApi.SystemMenu) =>
-              canPerformMenuAction(
+            disabled: (row: SystemMenuApi.SystemMenu) =>
+              getMenuActionPresentation(
                 row,
                 PERMISSION_CODES.menuUpdate,
                 hasAccessByCodes,
-              ),
+              ).disabled,
+            show: (row: SystemMenuApi.SystemMenu) =>
+              getMenuActionPresentation(
+                row,
+                PERMISSION_CODES.menuUpdate,
+                hasAccessByCodes,
+              ).visible,
+            title: (row: SystemMenuApi.SystemMenu) =>
+              row.systemManaged ? $t('system.menu.protectedAction') : undefined,
           },
           {
             auth: PERMISSION_CODES.menuDelete,
             code: 'delete',
-            show: (row: SystemMenuApi.SystemMenu) =>
-              canPerformMenuAction(
+            disabled: (row: SystemMenuApi.SystemMenu) =>
+              getMenuActionPresentation(
                 row,
                 PERMISSION_CODES.menuDelete,
                 hasAccessByCodes,
-              ),
+              ).disabled,
+            show: (row: SystemMenuApi.SystemMenu) =>
+              getMenuActionPresentation(
+                row,
+                PERMISSION_CODES.menuDelete,
+                hasAccessByCodes,
+              ).visible,
+            title: (row: SystemMenuApi.SystemMenu) =>
+              row.systemManaged ? $t('system.menu.protectedAction') : undefined,
           },
         ],
       },

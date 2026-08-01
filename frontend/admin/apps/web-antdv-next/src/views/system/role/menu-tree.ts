@@ -146,7 +146,26 @@ export function normalizeRoleConfigurationSelection(
   change?: RoleConfigurationSelectionChange,
 ) {
   const navigationSet = new Set(configuration.navigationIds);
-  const requestedPermissions = selectedIds.flatMap((id) => {
+  const requestedIds = new Set(selectedIds);
+  const removedPermissions = new Set<string>();
+  if (change && navigationSet.has(change.id)) {
+    for (const id of [
+      ...configuration.navigationIds,
+      ...Object.keys(configuration.permissionByButtonId),
+    ]) {
+      if (id !== change.id && !isDescendantOf(id, change.id, configuration)) {
+        continue;
+      }
+      if (change.checked && navigationSet.has(id)) requestedIds.add(id);
+      if (!change.checked) {
+        requestedIds.delete(id);
+        const permission = configuration.permissionByButtonId[id];
+        if (permission) removedPermissions.add(permission);
+      }
+    }
+  }
+
+  const requestedPermissions = [...requestedIds].flatMap((id) => {
     const permission = configuration.permissionByButtonId[id];
     return permission ? [permission] : [];
   });
@@ -160,6 +179,19 @@ export function normalizeRoleConfigurationSelection(
       changedPermission,
       change.checked,
     );
+  } else if (removedPermissions.size > 0) {
+    let remainingPermissions = requestedPermissions;
+    for (const removedPermission of removedPermissions) {
+      remainingPermissions = reconcilePermissionSelection(
+        remainingPermissions,
+        removedPermission,
+        false,
+      );
+    }
+    permissions = [];
+    for (const permission of remainingPermissions) {
+      permissions = reconcilePermissionSelection(permissions, permission, true);
+    }
   } else {
     permissions = [];
     for (const permission of requestedPermissions) {
@@ -169,7 +201,16 @@ export function normalizeRoleConfigurationSelection(
   const availablePermissions = permissions.filter(
     (permission) => configuration.buttonIdByPermission[permission],
   );
-  const nextIds = new Set(selectedIds.filter((id) => navigationSet.has(id)));
+  const nextIds = new Set(
+    [...requestedIds].filter((id) => navigationSet.has(id)),
+  );
+  for (const navigationId of [...nextIds]) {
+    let parentId = configuration.parentById[navigationId];
+    while (parentId) {
+      if (navigationSet.has(parentId)) nextIds.add(parentId);
+      parentId = configuration.parentById[parentId];
+    }
+  }
   for (const permission of availablePermissions) {
     let currentId: string | undefined =
       configuration.buttonIdByPermission[permission];
@@ -188,4 +229,17 @@ export function normalizeRoleConfigurationSelection(
     permissionCodes: [...availablePermissions].toSorted(),
     selectedIds: normalizedIds,
   };
+}
+
+function isDescendantOf(
+  id: string,
+  ancestorId: string,
+  configuration: RoleConfigurationTree,
+) {
+  let parentId = configuration.parentById[id];
+  while (parentId) {
+    if (parentId === ancestorId) return true;
+    parentId = configuration.parentById[parentId];
+  }
+  return false;
 }

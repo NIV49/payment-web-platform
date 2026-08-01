@@ -93,6 +93,7 @@
     "name": "菜单",
     "operation": "操作",
     "parent": "上级菜单",
+    "protectedAction": "系统预置菜单不可修改或删除",
     "permission": {
       "view": "查看菜单",
       "create": "新增菜单",

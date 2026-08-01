@@ -10,6 +10,7 @@ import {
   canManageMenu,
   canPerformMenuAction,
   filterMenuParentOptions,
+  getMenuActionPresentation,
 } from './permission-contract';
 
 vi.mock('#/api/request', () => ({ requestClient: {} }));
@@ -153,5 +154,62 @@ describe('menu permission presentation contract', () => {
         hasAccess,
       ),
     ).toBe(true);
+  });
+
+  it('shows protected menu actions as disabled instead of hiding them', () => {
+    const hasAccess = () => true;
+    const protectedMenu = menu('1', 'menu', undefined, {
+      systemManaged: true,
+    });
+
+    expect(
+      getMenuActionPresentation(
+        protectedMenu,
+        PERMISSION_CODES.menuUpdate,
+        hasAccess,
+      ),
+    ).toEqual({ disabled: true, visible: true });
+    expect(
+      getMenuActionPresentation(
+        protectedMenu,
+        PERMISSION_CODES.menuDelete,
+        hasAccess,
+      ),
+    ).toEqual({ disabled: true, visible: true });
+  });
+
+  it('keeps ordinary menu actions visible and enabled when dependencies exist', () => {
+    const granted = new Set<string>([
+      PERMISSION_CODES.menuDelete,
+      PERMISSION_CODES.menuUpdate,
+      PERMISSION_CODES.menuView,
+    ]);
+    const hasAccess = (codes: string[]) =>
+      codes.some((code) => granted.has(code));
+
+    expect(
+      getMenuActionPresentation(
+        menu('1', 'menu'),
+        PERMISSION_CODES.menuUpdate,
+        hasAccess,
+      ),
+    ).toEqual({ disabled: false, visible: true });
+    expect(
+      getMenuActionPresentation(
+        menu('1', 'menu'),
+        PERMISSION_CODES.menuDelete,
+        hasAccess,
+      ),
+    ).toEqual({ disabled: false, visible: true });
+  });
+
+  it('still hides menu actions when permission dependencies are missing', () => {
+    expect(
+      getMenuActionPresentation(
+        menu('1', 'menu'),
+        PERMISSION_CODES.menuUpdate,
+        () => false,
+      ),
+    ).toEqual({ disabled: false, visible: false });
   });
 });

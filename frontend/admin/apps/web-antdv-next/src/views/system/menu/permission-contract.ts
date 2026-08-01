@@ -25,11 +25,28 @@ function canPerformMenuAction(
   action: PermissionCode,
   hasAccessByCodes: AccessCodeChecker,
 ) {
+  const presentation = getMenuActionPresentation(
+    menu,
+    action,
+    hasAccessByCodes,
+  );
+  return presentation.visible && !presentation.disabled;
+}
+
+function getMenuActionPresentation(
+  menu: SystemMenuApi.SystemMenu,
+  action: PermissionCode,
+  hasAccessByCodes: AccessCodeChecker,
+) {
+  const visible = hasPermissionDependencies([action], hasAccessByCodes);
   const stateAllowed =
     action === PERMISSION_CODES.menuCreate
       ? canAppendMenuChild(menu)
       : canManageMenu(menu);
-  return stateAllowed && hasPermissionDependencies([action], hasAccessByCodes);
+  return {
+    disabled: visible && !stateAllowed,
+    visible,
+  };
 }
 
 function filterMenuParentOptions(
@@ -70,4 +87,5 @@ export {
   canManageMenu,
   canPerformMenuAction,
   filterMenuParentOptions,
+  getMenuActionPresentation,
 };

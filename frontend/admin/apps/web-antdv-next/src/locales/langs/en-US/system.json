@@ -63,6 +63,7 @@
     "list": "Menu List",
     "title": "Menu Management",
     "parent": "Parent Menu",
+    "protectedAction": "System menus cannot be changed or deleted",
     "permission": {
       "view": "View Menus",
       "create": "Create Menu",

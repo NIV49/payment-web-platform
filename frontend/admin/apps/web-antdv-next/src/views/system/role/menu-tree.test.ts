@@ -196,6 +196,117 @@ describe('role navigable menu tree', () => {
     });
   });
 
+  it('selecting a navigation parent cascades to navigation descendants without granting buttons', () => {
+    const configuration = buildRoleConfigurationTree(
+      [
+        makeMenu('10', 'catalog', [
+          makeMenu('11', 'catalog', [
+            makeMenu('14', 'menu', [makeButton('12', 'menu:view')]),
+          ]),
+          makeMenu('13', 'menu'),
+        ]),
+      ],
+      ['menu:view'],
+    );
+
+    expect(
+      normalizeRoleConfigurationSelection(['10'], configuration, {
+        checked: true,
+        id: '10',
+      }),
+    ).toEqual({
+      menuIds: ['10', '11', '14', '13'],
+      permissionCodes: [],
+      selectedIds: ['10', '11', '14', '13'],
+    });
+  });
+
+  it('keeps navigation cascading idempotent', () => {
+    const configuration = buildRoleConfigurationTree(
+      [makeMenu('10', 'catalog', [makeMenu('11', 'menu')])],
+      [],
+    );
+    const first = normalizeRoleConfigurationSelection(['10'], configuration, {
+      checked: true,
+      id: '10',
+    });
+
+    expect(
+      normalizeRoleConfigurationSelection(first.selectedIds, configuration, {
+        checked: true,
+        id: '10',
+      }),
+    ).toEqual(first);
+  });
+
+  it('selecting a navigation leaf adds its navigation ancestors', () => {
+    const configuration = buildRoleConfigurationTree(
+      [makeMenu('10', 'catalog', [makeMenu('11', 'menu')])],
+      [],
+    );
+
+    expect(
+      normalizeRoleConfigurationSelection(['11'], configuration, {
+        checked: true,
+        id: '11',
+      }),
+    ).toEqual({
+      menuIds: ['10', '11'],
+      permissionCodes: [],
+      selectedIds: ['10', '11'],
+    });
+  });
+
+  it('removing a navigation parent clears its navigation and button subtree', () => {
+    const configuration = buildRoleConfigurationTree(
+      [
+        makeMenu('10', 'catalog', [
+          makeMenu('11', 'menu', [makeButton('12', 'menu:view')]),
+        ]),
+        makeMenu('20', 'menu', [makeButton('21', 'role:view')]),
+      ],
+      ['menu:view', 'role:view'],
+    );
+
+    expect(
+      normalizeRoleConfigurationSelection(
+        ['10', '11', '12', '20', '21'],
+        configuration,
+        { checked: false, id: '10' },
+      ),
+    ).toEqual({
+      menuIds: ['20'],
+      permissionCodes: ['role:view'],
+      selectedIds: ['20', '21'],
+    });
+  });
+
+  it('removing a navigation subtree removes cross-branch actions that depend on its buttons', () => {
+    const configuration = buildRoleConfigurationTree(
+      [
+        makeMenu('10', 'menu', [makeButton('11', 'role:view')]),
+        makeMenu('20', 'menu', [
+          makeButton('21', 'user:view'),
+          makeButton('22', 'department:view'),
+          makeButton('23', 'user:create'),
+        ]),
+      ],
+      ['department:view', 'role:view', 'user:create', 'user:view'],
+    );
+
+    expect(
+      normalizeRoleConfigurationSelection(
+        ['10', '11', '20', '21', '22', '23'],
+        configuration,
+        { checked: false, id: '10' },
+      ),
+    ).toEqual({
+      menuIds: ['20'],
+      permissionCodes: ['department:view', 'user:view'],
+      selectedIds: ['20', '21', '22'],
+    });
+  });
+
   it('removing a dependency also removes actions that can no longer be granted', () => {
     const configuration = buildRoleConfigurationTree(
       [
