@@ -6,7 +6,9 @@ import com.niv.payment.permission.domain.ScopeDimension;
 import com.niv.payment.permission.domain.ScopeMode;
 import com.niv.payment.permission.service.RoleConfigurationAdministrationService;
 import com.niv.payment.permission.service.RoleConfigurationCommand;
+import com.niv.payment.permission.service.RoleConfigurationCreateCommand;
 import com.niv.payment.permission.service.RoleConfigurationModels;
+import com.niv.payment.permission.service.RoleConfigurationPort;
 import com.niv.payment.permission.service.RoleGrantModels;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +35,34 @@ class RoleConfigurationAdministrationServiceTest {
         assertEquals(1, writes.get());
         assertEquals(10L, result.roleVersion());
         assertEquals(List.of(101L, 102L), result.menuIds());
+    }
+
+    @Test
+    void delegatesCreationToOneAtomicWriteBoundary() {
+        AtomicInteger writes = new AtomicInteger();
+        var service = new RoleConfigurationAdministrationService(new RoleConfigurationPort() {
+            @Override
+            public RoleConfigurationModels.RoleConfiguration replaceAtomically(
+                RoleConfigurationCommand command) {
+                throw new AssertionError("Creation must not use replacement persistence");
+            }
+
+            @Override
+            public RoleConfigurationModels.RoleConfiguration createAtomically(
+                RoleConfigurationCreateCommand command) {
+                writes.incrementAndGet();
+                return new RoleConfigurationModels.RoleConfiguration(
+                    12L, 0L, command.menuIds(), command.grants(), true);
+            }
+        }, true);
+
+        var result = service.create(new RoleConfigurationCreateCommand(
+            3L, ACTOR, "Support", 1, null, List.of(101L),
+            List.of(selection("user-view", "user:view"))));
+
+        assertEquals(1, writes.get());
+        assertEquals(12L, result.roleId());
+        assertEquals(List.of(101L), result.menuIds());
     }
 
     @Test

@@ -50,6 +50,9 @@ public final class AdminApiPermissionPolicy {
         if ("PUT".equals(method) && ROLE_CONFIGURATION.matcher(path).matches()) {
             return List.of("role:view", "role:update", "menu:view", "role:grant-update");
         }
+        if ("POST".equals(method) && "/api/v1/iam/roles/configuration".equals(path)) {
+            return List.of("role:view", "role:create", "menu:view", "role:grant-update");
+        }
 
         if ("GET".equals(method) && ("/api/system/menu/list".equals(path)
             || "/api/system/menu/name-exists".equals(path) || "/api/system/menu/path-exists".equals(path))) {

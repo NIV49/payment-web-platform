@@ -10,6 +10,7 @@ import com.niv.payment.permission.service.RoleGrantChangeCommand;
 import com.niv.payment.permission.service.RoleGrantModels;
 import com.niv.payment.permission.service.RoleConfigurationAdministrationService;
 import com.niv.payment.permission.service.RoleConfigurationCommand;
+import com.niv.payment.permission.service.RoleConfigurationCreateCommand;
 import com.niv.payment.permission.service.RoleConfigurationModels;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -21,6 +22,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -82,6 +84,18 @@ public final class RoleGrantAdministrationController {
         return ApiResponse.success(RoleConfigurationResponse.from(configurations.replace(command)));
     }
 
+    @PostMapping("/roles/configuration")
+    ApiResponse<RoleConfigurationResponse> createRoleConfiguration(
+        @Valid @RequestBody CreateRoleConfigurationRequest body,
+        HttpServletRequest request) {
+        AuthorizationSubject subject = AuthUserMenuController.subject(request);
+        RoleConfigurationCreateCommand command = new RoleConfigurationCreateCommand(
+            subject.tenantId(), actor(subject), body.name(), body.status(), body.remark(),
+            body.menuIds().stream().map(Long::parseLong).toList(),
+            body.grants().stream().map(GrantRequest::selection).toList());
+        return ApiResponse.success(RoleConfigurationResponse.from(configurations.create(command)));
+    }
+
     private static AdministrationActor actor(AuthorizationSubject subject) {
         return new AdministrationActor(subject.membershipId(), subject.userId(),
             subject.permissionVersion(), subject.sessionVersion());
@@ -140,6 +154,15 @@ public final class RoleGrantAdministrationController {
         @NotNull @Size(max = 2048)
         List<@Pattern(regexp = "[1-9][0-9]{0,18}") String> menuIds,
         @NotBlank @Size(max = 500) String reason,
+        @NotNull @Size(max = 18) List<@NotNull @Valid GrantRequest> grants) {
+    }
+
+    record CreateRoleConfigurationRequest(
+        @NotBlank @Size(max = 128) String name,
+        @NotNull @Min(0) @Max(1) Integer status,
+        @Size(max = 500) String remark,
+        @NotNull @Size(max = 2048)
+        List<@Pattern(regexp = "[1-9][0-9]{0,18}") String> menuIds,
         @NotNull @Size(max = 18) List<@NotNull @Valid GrantRequest> grants) {
     }
 

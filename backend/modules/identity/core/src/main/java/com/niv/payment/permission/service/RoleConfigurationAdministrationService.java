@@ -20,15 +20,28 @@ public final class RoleConfigurationAdministrationService {
 
     public RoleConfigurationModels.RoleConfiguration replace(RoleConfigurationCommand command) {
         Objects.requireNonNull(command, "command");
+        validate(command.menuIds(), command.grants());
+        return port.replaceAtomically(command);
+    }
+
+    public RoleConfigurationModels.RoleConfiguration create(RoleConfigurationCreateCommand command) {
+        Objects.requireNonNull(command, "command");
+        validate(command.menuIds(), command.grants());
+        return port.createAtomically(command);
+    }
+
+    private void validate(
+        java.util.List<Long> menuIds,
+        java.util.List<RoleGrantModels.Selection> grants) {
         if (!legacyAdministrationCutoverComplete) {
             throw new LegacyAdministrationCutoverRequiredException();
         }
-        if (new HashSet<>(command.menuIds()).size() != command.menuIds().size()) {
+        if (new HashSet<>(menuIds).size() != menuIds.size()) {
             throw new IllegalArgumentException("Duplicate role menu identifier");
         }
         Set<String> keys = new HashSet<>();
         Set<String> permissions = new HashSet<>();
-        for (RoleGrantModels.Selection grant : command.grants()) {
+        for (RoleGrantModels.Selection grant : grants) {
             if (!RoleGrantAdministrationService.GRANTABLE_CODES.contains(grant.permission().value())) {
                 throw new IllegalArgumentException("Permission is not grantable from this administration surface");
             }
@@ -39,7 +52,6 @@ public final class RoleConfigurationAdministrationService {
                 throw new IllegalArgumentException("Duplicate grant key or permission");
             }
         }
-        return port.replaceAtomically(command);
     }
 
     public static final class LegacyAdministrationCutoverRequiredException extends IllegalStateException {

@@ -1373,6 +1373,51 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void roleConfigurationCreationPersistsMenusAndGrantsAtomically() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String response = mvc.perform(post("/api/v1/iam/roles/configuration")
+                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .content("""
+                    {"name":"Atomic Created Role","status":1,"remark":"single transaction",
+                     "menuIds":["6000","6002"],
+                     "grants":[{"grantKey":"user-view","permissionCode":"user:view",
+                       "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roleVersion").value(0))
+            .andExpect(jsonPath("$.data.menuIds.length()").value(2))
+            .andExpect(jsonPath("$.data.grants[0].permissionCode").value("user:view"))
+            .andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(response, "$.data.roleId"));
+
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_menu
+             WHERE tenant_id=1 AND role_id=? AND menu_id IN (6000,6002)
+            """, Long.class, roleId)).isEqualTo(2L);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_menu role_menu
+              JOIN iam_menu menu ON menu.tenant_id=role_menu.tenant_id AND menu.id=role_menu.menu_id
+             WHERE role_menu.tenant_id=1 AND role_menu.role_id=? AND menu.menu_type='BUTTON'
+            """, Long.class, roleId)).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.status='ACTIVE' AND permission.permission_code='user:view'
+            """, Long.class, roleId)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_CONFIGURATION' AND target_ref=?
+               AND action_code='CREATE'
+            """, Long.class, Long.toString(roleId))).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE_CONFIGURATION' AND aggregate_ref=?
+               AND event_type='ROLE_CONFIGURATION_CREATED'
+            """, Long.class, Long.toString(roleId))).isOne();
+    }
+
+    @Test
     void roleConfigurationReplacesRoleMenusAndGrantsWithOneVersionChange() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
