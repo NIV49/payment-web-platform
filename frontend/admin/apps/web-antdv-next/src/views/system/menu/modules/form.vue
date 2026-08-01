@@ -504,7 +504,7 @@ const [Drawer, drawerApi] = useVbenDrawer({
           ? $t(formData.value.meta.title)
           : '';
       } else {
-        formApi.resetForm();
+        formApi.reset();
         titleSuffix.value = '';
       }
     }

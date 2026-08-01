@@ -37,7 +37,7 @@ const [Form, formApi] = useVbenForm({
 });
 
 function resetForm() {
-  formApi.resetForm();
+  formApi.reset();
   formApi.setValues(formData.value || {});
 }
 

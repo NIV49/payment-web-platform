@@ -144,7 +144,7 @@ async function initializeForm(isOpen: boolean) {
   if (!isOpen) return;
 
   const data = drawerApi.getData<SystemUserApi.SystemUser>();
-  formApi.resetForm();
+  formApi.reset();
   formData.value = data?.id ? data : undefined;
   id.value = data?.id;
 
