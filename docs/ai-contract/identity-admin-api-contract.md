@@ -210,7 +210,7 @@ identityStatus=DISABLED           = 全局身份禁用
 identityStatus=LOCKED             = 全局身份锁定
 ```
 
-`status` 只表达当前工作区 Membership，`identityStatus` 表达全局 `iam_user`，两者不得合并展示或互相推导。创建用户时，Membership 仍按请求的 `status` 预配置。未配置 `payment.user-initial-password` 时，全局 User 创建为 `PENDING_ACTIVATION`，Credential 创建为 `DISABLED` 且 `password_hash=NULL`；`local` profile 则从运行时 `PAYMENT_INITIAL_USER_PASSWORD`（缺省回退 `PAYMENT_BOOTSTRAP_PASSWORD`）生成独立 BCrypt hash，并把 User/Credential 创建为 ACTIVE。明文不得进入源码、数据库、响应、日志或构建产物。
+`status` 只表达当前工作区 Membership，`identityStatus` 表达全局 `iam_user`，两者不得合并展示或互相推导。创建用户时，Membership 仍按请求的 `status` 预配置。未配置 `payment.bootstrap-password` 时，全局 User 创建为 `PENDING_ACTIVATION`，Credential 创建为 `DISABLED` 且 `password_hash=NULL`；`local` profile 通过运行时 `PAYMENT_BOOTSTRAP_PASSWORD` 绑定该属性，为每个新用户生成独立 BCrypt hash，并把 User/Credential 创建为 ACTIVE。明文不得进入源码、数据库、响应、日志或构建产物。
 
 当前没有生产可用的邀请、密码设置或身份激活流程，也没有对应 Admin API。测试中的直接 SQL 状态推进仅模拟未来受控激活边界，不是运维方案；正式激活流程上线前禁止人工把这些三项状态拼成可登录账号。
 
@@ -283,7 +283,7 @@ Request：
 - Admin 登录页可在本地 Vite 开发进程中通过 `VITE_LOCAL_ADMIN_USERNAME/VITE_LOCAL_ADMIN_PASSWORD` 预填同一开发凭据，但仅 `DEV` 模式读取且不自动提交；真实值不得进入受版本控制的 `.env*`、源码或构建产物，生产模式默认值固定为空；
 - 不记录或返回真实 token。
 
-当前限制：没有外部 IdP、MFA、激活流程、忘记密码或重置密码。
+当前限制：没有外部 IdP、MFA、生产激活、首次改密或忘记密码流程；现有密码重置仅服务 `local` profile 的开发验收，不是生产身份生命周期能力。
 
 ### POST `/auth/logout`
 
@@ -879,7 +879,7 @@ V16__enforce_exact_administration_permission_catalog.sql
 
 - 外部 IdP/OIDC；
 - MFA、step-up、MFA 重置审批；
-- 新建用户密码激活、邀请、首次改密、忘记密码和管理员重置；
+- 生产级的新建用户密码激活、邀请、首次改密、忘记密码和管理员重置；
 - 超出本文精确目录、数据维度或审批规则的通用 RoleGrant 管理；
 - 商户、市场、渠道、销售客户关系和历史代理关系数据范围 Provider；
 - 可信审批 workflow evidence、资源指纹、金额/币种绑定、过期和防重放；
@@ -971,7 +971,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 
 1. 外部 IdP/OIDC、密码策略和身份生命周期未定版；
 2. MFA、step-up、MFA 重置、激活会话和旧会话撤销流程未实现；
-3. 新建用户没有可用的密码激活、邀请、首次改密或管理员重置流程；
+3. 新建用户没有生产可用的密码激活、邀请、首次改密或管理员重置流程；本地统一口令及重置能力不得用于生产；
 4. Cookie Secure 的生产强制、代理拓扑、TTL、Redis 故障和会话撤权未演练；
 5. CSRF/Origin/CORS 策略尚未经过真实部署安全测试；
 6. RoleGrant PUT 和角色 configuration PUT 已关闭 `valid_until` 在等待锁期间过期的竞态；User、普通 Role lifecycle、Menu、Department 其他管理写接口尚未执行同等事务内授权重验，仍需通过“这些管理写权限不得配置有限 `valid_until`”的运维约束临时规避；
