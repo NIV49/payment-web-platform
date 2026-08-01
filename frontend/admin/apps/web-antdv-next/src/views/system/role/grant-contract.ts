@@ -1,6 +1,8 @@
 import type { SystemRoleApi } from '#/api/system/role';
 import type { IamRoleGrantApi } from '#/api/system/role-grant';
 
+import { PERMISSION_CODES } from '#/api/permission-codes';
+
 import {
   expandPermissionDependencies,
   hasPermissionDependencies,
@@ -13,6 +15,20 @@ const ROLE_LIST_SEARCH_BEHAVIOR = {
 
 function canMutateRole(role: SystemRoleApi.SystemRole) {
   return role.assignable && !role.systemRole;
+}
+
+function canConfigureRole(
+  systemAdministrator: boolean,
+  actionPermission: string,
+  hasAccessByCodes: (codes: string[]) => boolean,
+) {
+  return (
+    systemAdministrator &&
+    hasPermissionDependencies(
+      [actionPermission, PERMISSION_CODES.roleGrantUpdate],
+      hasAccessByCodes,
+    )
+  );
 }
 
 function buildTenantRoleGrants(
@@ -68,6 +84,7 @@ function findMissingPermissionDependencies(permissionCodes: readonly string[]) {
 
 export {
   buildTenantRoleGrants,
+  canConfigureRole,
   canMutateRole,
   findMissingPermissionDependencies,
   hasPermissionDependencies,

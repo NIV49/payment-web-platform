@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -27,6 +26,7 @@ import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_R
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_ROLE_MENU;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.DISABLED;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.notFound;
+import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.roleCode;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.status;
 
 /** Role and presentation-menu administration. Business grants remain a separate capability. */
@@ -63,7 +63,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
         dsl.insertInto(IAM_ROLE)
             .set(IAM_ROLE.ID, roleId)
             .set(IAM_ROLE.TENANT_ID, tenantId)
-            .set(IAM_ROLE.ROLE_CODE, slug(command.name()) + '-' + roleId)
+            .set(IAM_ROLE.ROLE_CODE, roleCode(command.name(), roleId))
             .set(IAM_ROLE.ROLE_NAME, command.name().trim())
             .set(IAM_ROLE.APPLICABLE_TENANT_TYPE, "PLATFORM")
             .set(IAM_ROLE.ASSIGNABLE, true)
@@ -291,10 +291,4 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
             .execute();
     }
 
-    private static String slug(String value) {
-        String slug = value.trim().toLowerCase(Locale.ROOT)
-            .replaceAll("[^a-z0-9]+", "-")
-            .replaceAll("(^-|-$)", "");
-        return slug.isBlank() ? "role" : slug;
-    }
 }

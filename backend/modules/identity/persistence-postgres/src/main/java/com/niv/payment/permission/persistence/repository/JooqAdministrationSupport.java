@@ -7,6 +7,7 @@ import com.niv.payment.permission.service.IdentityAdministrationService;
 import org.jooq.DSLContext;
 import org.jooq.JSONB;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -18,6 +19,8 @@ import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_T
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_USER;
 
 final class JooqAdministrationSupport {
+    private static final int ROLE_CODE_MAX_LENGTH = 100;
+
     static final String ACTIVE = "ACTIVE";
     static final String DISABLED = "DISABLED";
     static final String TERMINATED = "TERMINATED";
@@ -150,5 +153,20 @@ final class JooqAdministrationSupport {
 
     static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    static String roleCode(String roleName, long roleId) {
+        String suffix = '-' + Long.toString(roleId);
+        int slugLimit = ROLE_CODE_MAX_LENGTH - suffix.length();
+        String slug = roleName.trim().toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9]+", "-")
+            .replaceAll("(^-|-$)", "");
+        if (slug.isBlank()) {
+            slug = "role";
+        }
+        if (slug.length() > slugLimit) {
+            slug = slug.substring(0, slugLimit).replaceAll("-+$", "");
+        }
+        return (slug.isBlank() ? "role" : slug) + suffix;
     }
 }

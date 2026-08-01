@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildTenantRoleGrants,
+  canConfigureRole,
   canMutateRole,
   findMissingPermissionDependencies,
   hasPermissionDependencies,
@@ -34,6 +35,26 @@ describe('role grant frontend contract', () => {
     expect(canMutateRole(role())).toBe(true);
     expect(canMutateRole(role({ systemRole: true }))).toBe(false);
     expect(canMutateRole(role({ assignable: false }))).toBe(false);
+  });
+
+  it('requires a system administrator and the complete role configuration permissions', () => {
+    const granted = new Set([
+      'menu:view',
+      'role:create',
+      'role:grant-update',
+      'role:update',
+      'role:view',
+    ]);
+    const hasAccess = (codes: string[]) =>
+      codes.some((code) => granted.has(code));
+
+    expect(canConfigureRole(false, 'role:create', hasAccess)).toBe(false);
+    expect(canConfigureRole(true, 'role:create', hasAccess)).toBe(true);
+    expect(canConfigureRole(true, 'role:update', hasAccess)).toBe(true);
+
+    granted.delete('role:grant-update');
+    expect(canConfigureRole(true, 'role:create', hasAccess)).toBe(false);
+    expect(canConfigureRole(true, 'role:update', hasAccess)).toBe(false);
   });
 
   it('builds only canonical TENANT/TENANT_ALL grant intents', () => {

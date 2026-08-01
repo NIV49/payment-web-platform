@@ -1476,6 +1476,29 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void roleConfigurationCreationKeepsGeneratedCodeWithinDatabaseLimit() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleName = "R".repeat(128);
+        String response = mvc.perform(post("/api/v1/iam/roles/configuration")
+                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .content("""
+                    {"name":"%s","status":1,"remark":"maximum role name",
+                     "menuIds":[],"grants":[]}
+                    """.formatted(roleName)))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(response, "$.data.roleId"));
+
+        var role = jdbc.queryForMap("""
+            SELECT role_code,role_name FROM iam_role WHERE tenant_id=1 AND id=?
+            """, roleId);
+        assertThat(role.get("role_name")).isEqualTo(roleName);
+        assertThat((String) role.get("role_code"))
+            .hasSizeLessThanOrEqualTo(100)
+            .endsWith("-" + roleId);
+    }
+
+    @Test
     void roleConfigurationReplacesRoleMenusAndGrantsWithOneVersionChange() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)

@@ -10,6 +10,7 @@ import { computed } from 'vue';
 import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import { Button, message, Modal } from 'antdv-next';
 
@@ -25,6 +26,7 @@ import { $t } from '#/locales';
 
 import { useColumns, useGridFormSchema } from './data';
 import {
+  canConfigureRole,
   canMutateRole,
   hasPermissionDependencies,
   ROLE_LIST_SEARCH_BEHAVIOR,
@@ -32,6 +34,7 @@ import {
 import Form from './modules/form.vue';
 
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -39,14 +42,19 @@ const [FormDrawer, formDrawerApi] = useVbenDrawer({
 });
 
 const canCreateRole = computed(() =>
-  hasPermissionDependencies([PERMISSION_CODES.roleCreate], hasAccessByCodes),
+  canConfigureRole(
+    userStore.userInfo?.systemAdministrator === true,
+    PERMISSION_CODES.roleCreate,
+    hasAccessByCodes,
+  ),
 );
 
 function canEditRole(row: SystemRoleApi.SystemRole) {
   return (
     canMutateRole(row) &&
-    hasPermissionDependencies(
-      [PERMISSION_CODES.roleUpdate, PERMISSION_CODES.roleGrantUpdate],
+    canConfigureRole(
+      userStore.userInfo?.systemAdministrator === true,
+      PERMISSION_CODES.roleUpdate,
       hasAccessByCodes,
     )
   );
@@ -203,6 +211,7 @@ function onRefresh() {
 }
 
 function onCreate() {
+  if (!canCreateRole.value) return;
   formDrawerApi.setData({}).open();
 }
 </script>
