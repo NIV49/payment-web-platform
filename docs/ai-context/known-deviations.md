@@ -66,7 +66,7 @@ V9 的 canonical route name 是 `lower(COALESCE(NULLIF(BTRIM(route_name), ''), m
 
 ## 已解决：`/menu/all` 把按钮和断裂树交给 Vben
 
-`/menu/all` 只查 ACTIVE 的 DIRECTORY/PAGE/EMBEDDED/LINK，BUTTON 只用于管理视图和权限码展示，不作为动态 route 返回。直接分配的菜单会补齐同 tenant 且 ACTIVE 的显式祖先，不会带入 sibling；祖先缺失、禁用、不是可路由类型或者成环时，整条直接分配分支 fail closed。
+`/menu/all` 只查 ACTIVE 的 DIRECTORY/PAGE/EMBEDDED/LINK，BUTTON 只用于管理视图和权限码展示，不作为动态 route 返回。直接分配的菜单会补齐同 tenant 且 ACTIVE 的显式祖先，不会带入 sibling；祖先缺失、禁用、不是可路由类型或者成环时，整条直接分配分支 fail closed。角色配置页中用户主动勾选导航节点会在前端显式展开为全部 ACTIVE 导航与 BUTTON 后代，再分别提交 navigation menuIds 和 RoleGrant intent；服务端仍不从 menuIds 暗推 Grant。
 
 ## 已解决：路由和批量输入缺少硬边界
 
@@ -152,7 +152,7 @@ IAM Admin 请求已经通过 `AdminAuthorizationEnforcer` 进入 `DefaultAuthori
 
 ## P1：生产用户激活流程尚未实现
 
-Admin 创建用户现在只建立不可登录的身份骨架：`iam_user=PENDING_ACTIVATION`、Credential=`DISABLED` 且无 password hash；Membership 状态仅用于预配置目标工作区。列表/API 分开返回 `identityStatus` 和 Membership `status`，前端也分别显示“身份状态”和“工作区状态”。当前没有生产邀请、密码设置、身份核验或激活 API；集成测试通过直接 SQL 模拟未来受控激活，仅证明三重门禁在全部满足后才允许登录，不代表可供运维执行的流程。正式激活用例需要单独规格、一次性凭据、审计、过期和重放防护。
+Admin 创建用户在 `local` profile 使用运行时统一初始密码生成独立 BCrypt hash，并创建 ACTIVE User/Credential；系统管理员可通过带 Credential 乐观锁的 reset API 重置为同一运行时初始密码，重置会推进全部未终止 Membership 会话版本。未配置初始密码的其他 profile 仍只建立 `iam_user=PENDING_ACTIVATION`、Credential=`DISABLED` 且无 password hash 的身份骨架。该本地能力不构成生产邀请、首次改密、身份核验或激活方案；正式流程仍需要一次性凭据、审计原因、过期和重放防护。
 
 ## P2：Portal 尚未初始化
 

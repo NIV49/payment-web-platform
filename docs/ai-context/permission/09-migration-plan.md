@@ -160,7 +160,7 @@ V17 墓碑写入属于前向状态：旧二进制会把墓碑误当普通 DISABL
 - 生产 Flyway 与 local fixture 隔离；
 - V14/V15 管理权限 expand 迁移保留复杂历史 Grant 的范围、有效期和 target，并推进 role/membership 版本、审计和 Outbox；
 - V16 固定管理权限目录失败关闭守卫，以及默认关闭的 RoleGrant N-1 切换闸门；
-- V17 墓碑、系统预置保护和 live-only 唯一索引；软删除后列表/选择器/有效授权均排除墓碑；
+- V17 墓碑、系统预置来源标记和 live-only 唯一索引；`system_managed` 是 local bootstrap 所有权事实，不是业务不可编辑标记；软删除后列表/选择器/有效授权均排除墓碑；
 - DataScopePlan 保留 Grant 元组并排除无可信审批证据的 Grant。
 
 它仍不是生产身份或支付权限系统：外部 IdP、MFA 时效、可信审批工作流、超出首阶段 18 项 TENANT/TENANT_ALL 目录的通用 RoleGrant 管理、关系 Provider、真实订单 Mapper、Outbox relay、生产 provisioning/observability 和资金业务规格尚未完成。任何真实资金写路径仍被发布门禁阻断。
