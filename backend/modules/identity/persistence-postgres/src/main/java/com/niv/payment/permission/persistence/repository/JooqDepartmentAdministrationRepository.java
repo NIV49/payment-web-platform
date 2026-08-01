@@ -92,7 +92,6 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
         if (!nodes.containsKey(departmentId)) {
             throw notFound("Department");
         }
-        requireUserManaged(nodes.get(departmentId));
         String state = status(command.status());
         if (!parentAllowed(nodes, departmentId, command.parentId(), state)) {
             throw new IllegalArgumentException("Invalid or inactive department parent");
@@ -128,7 +127,6 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
         if (target == null) {
             throw notFound("Department");
         }
-        requireUserManaged(target);
         if (hasDeletionDependents(tenantId, departmentId)) {
             throw new IdentityAdministrationService.DataConflictException(
                 "Department has live children, memberships, or grants");
@@ -158,8 +156,7 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
             return false;
         }
         Map<Long, TreeNode> candidate = new LinkedHashMap<>(nodes);
-        candidate.put(departmentId, new TreeNode(parentId, state,
-            nodes.containsKey(departmentId) && nodes.get(departmentId).systemManaged()));
+        candidate.put(departmentId, new TreeNode(parentId, state));
         return isValidTree(candidate);
     }
 
@@ -230,7 +227,7 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
     private Map<Long, TreeNode> nodes(long tenantId) {
         Map<Long, TreeNode> nodes = new LinkedHashMap<>();
         var rows = dsl.select(IAM_DEPARTMENT.ID, IAM_DEPARTMENT.PARENT_ID,
-                IAM_DEPARTMENT.STATUS, IAM_DEPARTMENT.SYSTEM_MANAGED)
+                IAM_DEPARTMENT.STATUS)
             .from(IAM_DEPARTMENT)
             .where(IAM_DEPARTMENT.TENANT_ID.eq(tenantId)
                 .and(IAM_DEPARTMENT.DELETED_AT.isNull()))
@@ -240,8 +237,7 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
             throw new IdentityAdministrationService.TreeLimitExceededException("Tree node limit exceeded");
         }
         rows.forEach(row -> nodes.put(row.get(IAM_DEPARTMENT.ID),
-                new TreeNode(row.get(IAM_DEPARTMENT.PARENT_ID), row.get(IAM_DEPARTMENT.STATUS),
-                    Boolean.TRUE.equals(row.get(IAM_DEPARTMENT.SYSTEM_MANAGED)))));
+                new TreeNode(row.get(IAM_DEPARTMENT.PARENT_ID), row.get(IAM_DEPARTMENT.STATUS))));
         return nodes;
     }
 
@@ -281,13 +277,6 @@ public class JooqDepartmentAdministrationRepository implements DepartmentAdminis
         return Set.copyOf(result);
     }
 
-    private static void requireUserManaged(TreeNode node) {
-        if (node.systemManaged()) {
-            throw new IdentityAdministrationService.DataConflictException(
-                "System-managed department cannot be modified");
-        }
-    }
-
-    private record TreeNode(Long parentId, String status, boolean systemManaged) {
+    private record TreeNode(Long parentId, String status) {
     }
 }

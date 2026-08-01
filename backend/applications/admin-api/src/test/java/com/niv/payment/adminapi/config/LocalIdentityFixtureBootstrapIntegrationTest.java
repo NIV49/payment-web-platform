@@ -233,7 +233,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
     }
 
     @Test
-    void advancedDepartmentVersionDoesNotPermitFixtureFieldDrift() {
+    void systemManagedDepartmentEditsSurviveLocalRestart() throws Exception {
         restoreExactLegacyFixtureAtV9(false);
         migrateToLatest();
         jdbc.update("""
@@ -242,13 +242,46 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
              WHERE tenant_id=1 AND id=10
             """);
 
-        assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
-            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
+        runBootstrap(FIXTURE_LOGIN_INPUT);
 
         assertThat(jdbc.queryForObject(
             "SELECT department_name FROM iam_department WHERE tenant_id=1 AND id=10", String.class))
             .isEqualTo("Modified Head Office");
-        assertThat(count("iam_role_grant")).isEqualTo(21);
+        assertThat(count("iam_role_grant")).isEqualTo(19);
+    }
+
+    @Test
+    void systemManagedMenuEditsAndSoftDeletesSurviveLocalRestart() throws Exception {
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+        jdbc.update("""
+            UPDATE iam_menu
+               SET menu_name='RenamedUserMenu', route_name='RenamedUserMenu',
+                   route_path='/renamed-user-menu', row_version=row_version+1
+             WHERE tenant_id=1 AND id=6002
+            """);
+        jdbc.update("""
+            UPDATE iam_menu
+               SET status='DISABLED', deleted_at=now(), row_version=row_version+1
+             WHERE tenant_id=1 AND id=6040
+            """);
+
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+
+        assertThat(jdbc.queryForObject(
+            "SELECT route_name FROM iam_menu WHERE tenant_id=1 AND id=6002", String.class))
+            .isEqualTo("RenamedUserMenu");
+        assertThat(jdbc.queryForObject(
+            "SELECT deleted_at FROM iam_menu WHERE tenant_id=1 AND id=6040", OffsetDateTime.class))
+            .isNotNull();
+    }
+
+    @Test
+    void reservedMenuOwnershipDriftStillFailsClosed() throws Exception {
+        runBootstrap(FIXTURE_LOGIN_INPUT);
+        jdbc.update("UPDATE iam_menu SET system_managed=false WHERE tenant_id=1 AND id=6040");
+
+        assertThatThrownBy(() -> runBootstrap(FIXTURE_LOGIN_INPUT))
+            .hasStackTraceContaining("local fixture footprint is incomplete or modified");
     }
 
     @Test

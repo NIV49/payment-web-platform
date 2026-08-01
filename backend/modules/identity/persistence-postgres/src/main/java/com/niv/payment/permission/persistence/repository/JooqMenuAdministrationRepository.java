@@ -102,7 +102,6 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         if (!nodes.containsKey(menuId)) {
             throw notFound("Menu");
         }
-        requireUserManaged(nodes.get(menuId));
         String state = status(command.status());
         String routeName = command.name().trim();
         String routePath = JooqAdministrationSupport.blankToNull(command.path());
@@ -151,7 +150,6 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         if (target == null) {
             throw notFound("Menu");
         }
-        requireUserManaged(target);
         if (hasLiveDescendants(tenantId, menuId)) {
             throw new IdentityAdministrationService.DataConflictException(
                 "Menu has live descendants");
@@ -209,8 +207,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         }
         Map<Long, TreeNode> candidate = new LinkedHashMap<>(nodes);
         candidate.put(menuId, new TreeNode(parentId, state,
-            nodes.containsKey(menuId) ? nodes.get(menuId).type() : null,
-            nodes.containsKey(menuId) && nodes.get(menuId).systemManaged()));
+            nodes.containsKey(menuId) ? nodes.get(menuId).type() : null));
         return isValidTree(candidate);
     }
 
@@ -241,7 +238,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
     private Map<Long, TreeNode> nodes(long tenantId) {
         Map<Long, TreeNode> nodes = new LinkedHashMap<>();
         var rows = dsl.select(IAM_MENU.ID, IAM_MENU.PARENT_ID, IAM_MENU.STATUS,
-                IAM_MENU.MENU_TYPE, IAM_MENU.SYSTEM_MANAGED)
+                IAM_MENU.MENU_TYPE)
             .from(IAM_MENU)
             .where(IAM_MENU.TENANT_ID.eq(tenantId).and(IAM_MENU.DELETED_AT.isNull()))
             .limit(MAX_TREE_NODES + 1)
@@ -251,7 +248,7 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         }
         rows.forEach(row -> nodes.put(row.get(IAM_MENU.ID),
                 new TreeNode(row.get(IAM_MENU.PARENT_ID), row.get(IAM_MENU.STATUS),
-                    row.get(IAM_MENU.MENU_TYPE), Boolean.TRUE.equals(row.get(IAM_MENU.SYSTEM_MANAGED)))));
+                    row.get(IAM_MENU.MENU_TYPE))));
         return nodes;
     }
 
@@ -355,13 +352,6 @@ public class JooqMenuAdministrationRepository implements MenuAdministrationPort 
         };
     }
 
-    private static void requireUserManaged(TreeNode node) {
-        if (node.systemManaged()) {
-            throw new IdentityAdministrationService.DataConflictException(
-                "System-managed menu cannot be modified");
-        }
-    }
-
-    private record TreeNode(Long parentId, String status, String type, boolean systemManaged) {
+    private record TreeNode(Long parentId, String status, String type) {
     }
 }

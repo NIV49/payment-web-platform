@@ -156,9 +156,8 @@ SELECT
         AND tenant_name='Platform Administration' AND tenant_type='PLATFORM'
         AND status='ACTIVE' AND row_version=0)
     AND (SELECT count(*) FROM iam_department WHERE id=10 OR (tenant_id=1 AND department_code='head-office')) = 1
-    AND EXISTS (SELECT 1 FROM iam_department WHERE id=10 AND tenant_id=1 AND parent_id IS NULL
-        AND department_code='head-office' AND department_name='Head Office' AND status='ACTIVE'
-        AND remark IS NOT DISTINCT FROM 'Local bootstrap department' AND row_version>=0
+    AND EXISTS (SELECT 1 FROM iam_department WHERE id=10 AND tenant_id=1
+        AND department_code='head-office' AND status='ACTIVE'
         AND system_managed AND deleted_at IS NULL)
     AND (SELECT count(*) FROM iam_user WHERE id=100 OR (idp_issuer='local' AND idp_subject='admin')) = 1
     AND EXISTS (SELECT 1 FROM iam_user WHERE id=100 AND idp_issuer='local' AND idp_subject='admin'
@@ -277,20 +276,18 @@ SELECT (pg_temp.iam_local_identity_is_exact(0)
    AND NOT EXISTS (SELECT 1 FROM iam_grant_target target JOIN iam_grant_dimension dimension_row
           ON dimension_row.id=target.dimension_id WHERE dimension_row.grant_id IN
           (SELECT id FROM iam_role_grant WHERE role_id=2000))
-   AND (SELECT count(*) FROM iam_menu menu JOIN iam_local_final_menu expected ON expected.id=menu.id
-          AND expected.parent_id IS NOT DISTINCT FROM menu.parent_id AND expected.menu_type=menu.menu_type
-          AND expected.menu_name=menu.menu_name AND expected.route_name=menu.route_name
-          AND expected.route_path IS NOT DISTINCT FROM menu.route_path
-          AND expected.component_path IS NOT DISTINCT FROM menu.component_path
-          AND expected.redirect_path IS NOT DISTINCT FROM menu.redirect_path
-          AND expected.sort_order=menu.sort_order AND expected.auth_code IS NOT DISTINCT FROM menu.auth_code
-          AND expected.status=menu.status AND expected.meta_json=menu.meta_json
-         WHERE menu.tenant_id=1 AND menu.display_permission_id IS NULL AND menu.remark IS NULL
-           AND menu.system_managed AND menu.deleted_at IS NULL) = 29
-   AND (SELECT count(*) FROM iam_menu WHERE id IN (SELECT id FROM iam_local_final_menu)
-          OR (tenant_id=1 AND (route_name IN (SELECT route_name FROM iam_local_final_menu)
-          OR route_path IN (SELECT route_path FROM iam_local_final_menu WHERE route_path IS NOT NULL)
-          OR auth_code IN (SELECT auth_code FROM iam_local_final_menu WHERE auth_code IS NOT NULL)))) = 29
+   AND (SELECT count(*) FROM iam_menu menu
+          JOIN iam_local_final_menu expected ON expected.id=menu.id
+         WHERE menu.tenant_id=1 AND menu.system_managed) = 29
+   AND (SELECT count(*) FROM iam_menu WHERE id IN (SELECT id FROM iam_local_final_menu)) = 29
+   AND NOT EXISTS (
+       SELECT 1 FROM iam_menu menu
+        WHERE menu.tenant_id=1 AND menu.id NOT IN (SELECT id FROM iam_local_final_menu)
+          AND menu.status='ACTIVE' AND menu.deleted_at IS NULL
+          AND menu.auth_code IN (
+              SELECT auth_code FROM iam_local_final_menu WHERE auth_code IS NOT NULL
+          )
+   )
 $$
 @@
 
