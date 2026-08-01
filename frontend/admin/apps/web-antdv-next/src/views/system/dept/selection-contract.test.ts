@@ -36,21 +36,21 @@ describe('department selection contract', () => {
     expect(result).toEqual([department('1', { status: 0 })]);
   });
 
-  it('keeps disabled ordinary departments manageable for recovery', () => {
+  it('keeps disabled and system-managed departments manageable for recovery', () => {
     expect(canManageDepartment(department('1', { status: 0 }))).toBe(true);
     expect(canManageDepartment(department('2', { systemManaged: true }))).toBe(
-      false,
+      true,
     );
   });
 
-  it('allows only active ordinary departments to own children', () => {
+  it('allows every active non-deleted department to own children', () => {
     expect(canAppendDepartmentChild(department('1'))).toBe(true);
     expect(canAppendDepartmentChild(department('2', { status: 0 }))).toBe(
       false,
     );
     expect(
       canAppendDepartmentChild(department('3', { systemManaged: true })),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       canAppendDepartmentChild(
         department('4', { deletedAt: '2026-08-01T00:00:00Z' }),
@@ -58,7 +58,7 @@ describe('department selection contract', () => {
     ).toBe(false);
   });
 
-  it('excludes disabled, deleted, protected, self, and descendant parents', () => {
+  it('excludes disabled, deleted, self, and descendant parents', () => {
     const result = filterDepartmentParentOptions(
       [
         department('1', {
@@ -71,7 +71,7 @@ describe('department selection contract', () => {
       '1',
     );
 
-    expect(result).toEqual([]);
+    expect(result).toEqual([department('3', { systemManaged: true })]);
   });
 
   it('pins the current non-selectable parent and its ancestors as read-only', () => {
@@ -94,7 +94,6 @@ describe('department selection contract', () => {
 
     expect(result).toEqual([
       department('1', {
-        disabled: true,
         systemManaged: true,
         children: [
           department('2', {

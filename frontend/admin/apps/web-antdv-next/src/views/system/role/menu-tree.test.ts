@@ -196,7 +196,7 @@ describe('role navigable menu tree', () => {
     });
   });
 
-  it('selecting a navigation parent cascades to navigation descendants without granting buttons', () => {
+  it('selecting a navigation parent cascades to navigation and button descendants', () => {
     const configuration = buildRoleConfigurationTree(
       [
         makeMenu('10', 'catalog', [
@@ -216,8 +216,8 @@ describe('role navigable menu tree', () => {
       }),
     ).toEqual({
       menuIds: ['10', '11', '14', '13'],
-      permissionCodes: [],
-      selectedIds: ['10', '11', '14', '13'],
+      permissionCodes: ['menu:view'],
+      selectedIds: ['10', '11', '14', '12', '13'],
     });
   });
 

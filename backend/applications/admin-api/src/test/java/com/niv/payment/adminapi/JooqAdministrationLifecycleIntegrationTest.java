@@ -238,16 +238,16 @@ class JooqAdministrationLifecycleIntegrationTest {
     }
 
     @Test
-    void departmentDeletionIsSoftAndRejectsProtectedOrReferencedRows() {
+    void departmentDeletionIsSoftAndAllowsSystemManagedRowsWhenUnreferenced() {
         long systemManaged = departments.createDepartment(TENANT_ID, SYSTEM_ACTOR,
             department(null, "Lifecycle Managed Department", 1));
         dsl.update(IAM_DEPARTMENT).set(IAM_DEPARTMENT.SYSTEM_MANAGED, true)
             .where(IAM_DEPARTMENT.ID.eq(systemManaged)).execute();
-        assertThrows(IdentityAdministrationService.DataConflictException.class,
-            () -> departments.updateDepartment(TENANT_ID, SYSTEM_ACTOR, systemManaged,
-                department(null, "Renamed Managed Department", 1), 0L));
-        assertThrows(IdentityAdministrationService.DataConflictException.class,
-            () -> departments.deleteDepartment(TENANT_ID, SYSTEM_ACTOR, systemManaged, 0L));
+        departments.updateDepartment(TENANT_ID, SYSTEM_ACTOR, systemManaged,
+            department(null, "Renamed Managed Department", 1), 0L);
+        departments.deleteDepartment(TENANT_ID, SYSTEM_ACTOR, systemManaged, 1L);
+        assertNotNull(dsl.select(IAM_DEPARTMENT.DELETED_AT).from(IAM_DEPARTMENT)
+            .where(IAM_DEPARTMENT.ID.eq(systemManaged)).fetchSingle(IAM_DEPARTMENT.DELETED_AT));
 
         long parent = departments.createDepartment(TENANT_ID, SYSTEM_ACTOR,
             department(null, "Lifecycle Department Parent", 1));
@@ -280,16 +280,16 @@ class JooqAdministrationLifecycleIntegrationTest {
     }
 
     @Test
-    void menuDeletionIsSoftAndRejectsProtectedRowsOrDisabledChildren() {
+    void menuDeletionIsSoftAndAllowsSystemManagedRowsWithoutChildren() {
         long systemManaged = menus.createMenu(TENANT_ID, SYSTEM_ACTOR,
             menu(null, "LifecycleManagedMenu", "/lifecycle-managed-menu", 1));
         dsl.update(IAM_MENU).set(IAM_MENU.SYSTEM_MANAGED, true)
             .where(IAM_MENU.ID.eq(systemManaged)).execute();
-        assertThrows(IdentityAdministrationService.DataConflictException.class,
-            () -> menus.updateMenu(TENANT_ID, SYSTEM_ACTOR, systemManaged,
-                menu(null, "LifecycleManagedMenu", "/lifecycle-managed-menu", 1), 0L));
-        assertThrows(IdentityAdministrationService.DataConflictException.class,
-            () -> menus.deleteMenu(TENANT_ID, SYSTEM_ACTOR, systemManaged, 0L));
+        menus.updateMenu(TENANT_ID, SYSTEM_ACTOR, systemManaged,
+            menu(null, "LifecycleManagedMenuRenamed", "/lifecycle-managed-menu-renamed", 1), 0L);
+        menus.deleteMenu(TENANT_ID, SYSTEM_ACTOR, systemManaged, 1L);
+        assertNotNull(dsl.select(IAM_MENU.DELETED_AT).from(IAM_MENU)
+            .where(IAM_MENU.ID.eq(systemManaged)).fetchSingle(IAM_MENU.DELETED_AT));
 
         long parent = menus.createMenu(TENANT_ID, SYSTEM_ACTOR,
             menu(null, "LifecycleMenuParent", "/lifecycle-menu-parent", 1));

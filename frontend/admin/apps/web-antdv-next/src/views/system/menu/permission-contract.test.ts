@@ -48,10 +48,10 @@ describe('menu permission presentation contract', () => {
     expect(canAppendMenuChild(menu('2', 'menu'))).toBe(true);
   });
 
-  it('prevents protected, disabled, and deleted menus from owning children', () => {
+  it('allows active system-managed menus to own children', () => {
     expect(
       canAppendMenuChild(menu('1', 'menu', undefined, { systemManaged: true })),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       canAppendMenuChild(menu('2', 'menu', undefined, { status: 0 })),
     ).toBe(false);
@@ -62,13 +62,13 @@ describe('menu permission presentation contract', () => {
     ).toBe(false);
   });
 
-  it('allows disabled ordinary menus to be managed but never system-managed menus', () => {
+  it('allows disabled and system-managed menus to be managed', () => {
     expect(canManageMenu(menu('1', 'menu', undefined, { status: 0 }))).toBe(
       true,
     );
     expect(
       canManageMenu(menu('2', 'menu', undefined, { systemManaged: true })),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('removes BUTTON nodes from parent choices without mutating the tree', () => {
@@ -95,7 +95,7 @@ describe('menu permission presentation contract', () => {
     ]);
   });
 
-  it('only enables active ordinary non-BUTTON parent choices', () => {
+  it('enables active system-managed non-BUTTON parent choices', () => {
     const result = filterMenuParentOptions([
       menu('1', 'catalog'),
       menu('2', 'menu', undefined, { status: 0 }),
@@ -104,7 +104,10 @@ describe('menu permission presentation contract', () => {
       menu('5', 'menu', undefined, { deletedAt: '2026-08-01T00:00:00Z' }),
     ]);
 
-    expect(result).toEqual([menu('1', 'catalog')]);
+    expect(result).toEqual([
+      menu('1', 'catalog'),
+      menu('4', 'menu', undefined, { systemManaged: true }),
+    ]);
   });
 
   it('pins the current non-selectable parent and its ancestors as read-only', () => {
@@ -156,7 +159,7 @@ describe('menu permission presentation contract', () => {
     ).toBe(true);
   });
 
-  it('shows protected menu actions as disabled instead of hiding them', () => {
+  it('shows system-managed menu actions as enabled', () => {
     const hasAccess = () => true;
     const protectedMenu = menu('1', 'menu', undefined, {
       systemManaged: true,
@@ -168,14 +171,14 @@ describe('menu permission presentation contract', () => {
         PERMISSION_CODES.menuUpdate,
         hasAccess,
       ),
-    ).toEqual({ disabled: true, visible: true });
+    ).toEqual({ disabled: false, visible: true });
     expect(
       getMenuActionPresentation(
         protectedMenu,
         PERMISSION_CODES.menuDelete,
         hasAccess,
       ),
-    ).toEqual({ disabled: true, visible: true });
+    ).toEqual({ disabled: false, visible: true });
   });
 
   it('keeps ordinary menu actions visible and enabled when dependencies exist', () => {

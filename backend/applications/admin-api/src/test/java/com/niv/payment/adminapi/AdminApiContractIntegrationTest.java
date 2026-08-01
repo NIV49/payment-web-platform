@@ -1712,10 +1712,9 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
-    void createdIdentityStaysPendingUntilAControlledActivationCompletes() throws Exception {
+    void createdLocalIdentityUsesTheConfiguredInitialPasswordAndSupportsReset() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String username = "recoverable-disabled-user";
-        String activationInput = "Recoverable-Disabled-Password-2026";
         String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Recoverable Disabled User\","
@@ -1725,39 +1724,40 @@ class AdminApiContractIntegrationTest {
         long userId = Long.parseLong(JsonPath.read(body, "$.data.id"));
 
         assertThat(jdbc.queryForObject("SELECT status FROM iam_user WHERE id=?", String.class, userId))
-            .isEqualTo("PENDING_ACTIVATION");
+            .isEqualTo("ACTIVE");
         assertThat(jdbc.queryForObject(
             "SELECT status FROM iam_authentication_credential WHERE user_id=?", String.class, userId))
-            .isEqualTo("DISABLED");
-        assertThat(jdbc.queryForObject(
-            "SELECT password_hash FROM iam_authentication_credential WHERE user_id=?", String.class, userId))
-            .isNull();
+            .isEqualTo("ACTIVE");
+        String initialHash = jdbc.queryForObject(
+            "SELECT password_hash FROM iam_authentication_credential WHERE user_id=?", String.class, userId);
+        assertThat(passwords.matches(ADMIN_LOGIN_INPUT, initialHash)).isTrue();
         assertThat(jdbc.queryForObject(
             "SELECT status FROM iam_membership WHERE tenant_id=1 AND user_id=?", String.class, userId))
             .isEqualTo("DISABLED");
 
         mvc.perform(get("/api/system/user/list?page=1&pageSize=20&username=" + username).cookie(cookie))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.items[0].identityStatus").value("PENDING_ACTIVATION"))
+            .andExpect(jsonPath("$.data.items[0].identityStatus").value("ACTIVE"))
             .andExpect(jsonPath("$.data.items[0].status").value(0));
         mvc.perform(patch("/api/system/user/" + userId + "/status").cookie(cookie).header("Origin", ORIGIN)
                 .contentType("application/json").content("{\"status\":1,\"userVersion\":0}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.userVersion").value(1));
 
-        mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
-                .content("{\"username\":\"" + username + "\",\"password\":\"" + activationInput + "\"}"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error").value("INVALID_CREDENTIALS"));
-
-        jdbc.update("UPDATE iam_user SET status='ACTIVE' WHERE id=?", userId);
-        jdbc.update("""
-            UPDATE iam_authentication_credential
-               SET password_hash=?,status='ACTIVE'
-             WHERE user_id=?
-            """, passwords.encode(activationInput), userId);
-
-        assertThat(login(username, activationInput)).isNotBlank();
+        assertThat(login(username, ADMIN_LOGIN_INPUT)).isNotBlank();
+        mvc.perform(post("/api/system/user/" + userId + "/password/reset")
+                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"credentialVersion\":0}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.credentialVersion").value(1));
+        String resetHash = jdbc.queryForObject(
+            "SELECT password_hash FROM iam_authentication_credential WHERE user_id=?", String.class, userId);
+        assertThat(resetHash).isNotEqualTo(initialHash);
+        assertThat(passwords.matches(ADMIN_LOGIN_INPUT, resetHash)).isTrue();
+        mvc.perform(post("/api/system/user/" + userId + "/password/reset")
+                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"credentialVersion\":0}"))
+            .andExpect(status().isConflict());
     }
 
     @Test
