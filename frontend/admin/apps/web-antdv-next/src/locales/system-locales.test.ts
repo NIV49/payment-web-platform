@@ -18,6 +18,11 @@ function scalarPaths(value: Record<string, unknown>, prefix = ''): string[] {
 }
 
 describe('system locale contracts', () => {
+  it('uses the user entity name for create and edit action titles', () => {
+    expect(enUS.user.entity).toBe('User');
+    expect(zhCN.user.entity).toBe('用户');
+  });
+
   it.each([
     ['demos', enDemos, zhDemos],
     ['page', enPage, zhPage],

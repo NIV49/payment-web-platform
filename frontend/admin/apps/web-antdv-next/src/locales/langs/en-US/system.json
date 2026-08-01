@@ -4,6 +4,7 @@
   "statusChangeConfirm": "Change the status of “{0}” to “{1}”?",
   "user": {
     "title": "User Management",
+    "entity": "User",
     "list": "User List",
     "name": "Display Name",
     "username": "Login Account",

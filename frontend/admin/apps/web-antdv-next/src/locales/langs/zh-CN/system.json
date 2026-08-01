@@ -4,6 +4,7 @@
   "statusChangeConfirm": "确定将「{0}」的状态切换为「{1}」吗？",
   "user": {
     "title": "用户管理",
+    "entity": "用户",
     "list": "用户列表",
     "name": "用户名称",
     "username": "登录账号",

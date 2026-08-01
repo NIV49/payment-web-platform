@@ -343,7 +343,7 @@ onMounted(() => {
               @click="onCreate"
             >
               <Plus class="size-5" />
-              {{ $t('ui.actionTitle.create', [$t('system.user.name')]) }}
+              {{ $t('ui.actionTitle.create', [$t('system.user.entity')]) }}
             </Button>
           </template>
           <template #action="{ row }">
