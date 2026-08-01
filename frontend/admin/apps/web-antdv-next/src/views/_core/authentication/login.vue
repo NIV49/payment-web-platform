@@ -8,12 +8,22 @@ import { $t } from '@vben/locales';
 
 import { useAuthStore } from '#/store';
 
-import { resolveLoginDefaults } from './login-defaults';
+import {
+  LOGIN_DEFAULT_CREDENTIAL_FIELD,
+  resolveLoginDefaults,
+} from './login-defaults';
 
 defineOptions({ name: 'Login' });
 
 const authStore = useAuthStore();
-const loginDefaults = resolveLoginDefaults();
+let loginDefaults = resolveLoginDefaults({ dev: false });
+if (import.meta.env.DEV) {
+  loginDefaults = resolveLoginDefaults({
+    dev: true,
+    [LOGIN_DEFAULT_CREDENTIAL_FIELD]: import.meta.env.VITE_LOCAL_ADMIN_PASSWORD,
+    username: import.meta.env.VITE_LOCAL_ADMIN_USERNAME,
+  });
+}
 
 const formSchema = computed((): VbenFormSchema[] => {
   return [

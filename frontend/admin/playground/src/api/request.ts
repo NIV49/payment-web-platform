@@ -21,7 +21,10 @@ import { useAuthStore } from '#/store';
 
 import { refreshTokenApi } from './core';
 
-const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+const { apiURL } = useAppConfig(
+  { VITE_GLOB_API_URL: import.meta.env.VITE_GLOB_API_URL },
+  import.meta.env.PROD,
+);
 
 function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   const client = new RequestClient({

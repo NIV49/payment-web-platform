@@ -21,7 +21,10 @@ import { refreshTokenApi } from './core';
 import { resolveApiErrorMessage } from './error-contract';
 import { COOKIE_SESSION_MARKER, formatSessionAuthorization } from './session';
 
-const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+const { apiURL } = useAppConfig(
+  { VITE_GLOB_API_URL: import.meta.env.VITE_GLOB_API_URL },
+  import.meta.env.PROD,
+);
 
 function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   const client = new RequestClient({

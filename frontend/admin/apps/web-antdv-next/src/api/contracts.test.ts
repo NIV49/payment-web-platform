@@ -17,6 +17,7 @@ import { COOKIE_SESSION_MARKER, formatSessionAuthorization } from './session';
 import {
   isRegisteredMenuComponent,
   isVbenLocaleKey,
+  isVbenRouteName,
   menuTypeRequiresRoutePath,
   resolveVbenMenuComponent,
 } from './system/menu-contract';
@@ -201,6 +202,15 @@ describe('admin API contracts', () => {
     expect(isVbenLocaleKey('System Management')).toBe(false);
     expect(isVbenLocaleKey('system')).toBe(false);
     expect(isVbenLocaleKey(undefined)).toBe(false);
+  });
+
+  it('uses Vben route identifiers rather than display text as menu names', () => {
+    expect(isVbenRouteName('SystemUser')).toBe(true);
+    expect(isVbenRouteName('system_user2')).toBe(true);
+    expect(isVbenRouteName('2SystemUser')).toBe(false);
+    expect(isVbenRouteName('system-user')).toBe(false);
+    expect(isVbenRouteName('系统用户')).toBe(false);
+    expect(isVbenRouteName(undefined)).toBe(false);
   });
 
   it('accepts only exact page components registered by the current app', () => {

@@ -25,6 +25,7 @@ import {
 import {
   isRegisteredMenuComponent,
   isVbenLocaleKey,
+  isVbenRouteName,
   menuTypeRequiresRoutePath,
   resolveVbenMenuComponent,
 } from '#/api/system/menu-contract';
@@ -63,6 +64,7 @@ const schema: VbenFormSchema[] = [
       .string()
       .min(2, $t('ui.formRules.minLength', [$t('system.menu.menuName'), 2]))
       .max(30, $t('ui.formRules.maxLength', [$t('system.menu.menuName'), 30]))
+      .refine(isVbenRouteName, $t('system.menu.menuNameFormat'))
       .refine(
         async (value: string) => {
           return !(await isMenuNameExists(value, formData.value?.id));

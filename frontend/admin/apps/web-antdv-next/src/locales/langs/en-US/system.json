@@ -78,6 +78,7 @@
     "titleKeyFormat": "Use an i18n key such as system.title",
     "titleKeyMissing": "This i18n key does not exist in the current locale",
     "menuName": "Menu Name",
+    "menuNameFormat": "Menu Name is a route identifier: start with a letter and use only letters, numbers, and underscores",
     "name": "Menu",
     "type": "Type",
     "typeCatalog": "Catalog",

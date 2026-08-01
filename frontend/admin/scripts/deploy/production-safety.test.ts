@@ -72,6 +72,31 @@ describe('web-antdv-next production safety', () => {
     expect(productEntry).not.toContain('hm.baidu.com');
   });
 
+  it('keeps local login credentials behind a compile-time development branch', async () => {
+    const loginView = await readWorkspaceFile(
+      'apps/web-antdv-next/src/views/_core/authentication/login.vue',
+    );
+    const loginDefaults = await readWorkspaceFile(
+      'apps/web-antdv-next/src/views/_core/authentication/login-defaults.ts',
+    );
+    const requestClient = await readWorkspaceFile(
+      'apps/web-antdv-next/src/api/request.ts',
+    );
+    const thirdPartyLogin = await readWorkspaceFile(
+      'packages/effects/common-ui/src/ui/authentication/third-party-login.vue',
+    );
+
+    expect(loginView).toContain('if (import.meta.env.DEV)');
+    expect(loginView).not.toContain('resolveLoginDefaults();');
+    expect(loginDefaults).not.toContain('import.meta.env');
+    expect(requestClient).not.toContain(
+      'useAppConfig(import.meta.env, import.meta.env.PROD)',
+    );
+    expect(thirdPartyLogin).not.toContain(
+      'useAppConfig(import.meta.env, import.meta.env.PROD)',
+    );
+  });
+
   it('builds and deploys the product application', async () => {
     const dockerfile = await readWorkspaceFile('scripts/deploy/Dockerfile');
 

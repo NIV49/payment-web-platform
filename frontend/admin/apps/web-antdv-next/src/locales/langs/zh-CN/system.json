@@ -91,6 +91,7 @@
     "keepAlive": "缓存标签页",
     "linkSrc": "链接地址",
     "menuName": "菜单名称",
+    "menuNameFormat": "菜单名称是路由标识，必须以英文字母开头，且只能包含英文字母、数字和下划线",
     "menuTitle": "标题",
     "titleKeyFormat": "标题必须使用国际化 key，例如 system.title",
     "titleKeyMissing": "当前语言包中不存在这个国际化 key",

@@ -18,7 +18,15 @@ defineOptions({
 
 const {
   auth: { dingding: dingdingAuthConfig },
-} = useAppConfig(import.meta.env, import.meta.env.PROD);
+} = useAppConfig(
+  {
+    VITE_GLOB_AUTH_DINGDING_CLIENT_ID: import.meta.env
+      .VITE_GLOB_AUTH_DINGDING_CLIENT_ID,
+    VITE_GLOB_AUTH_DINGDING_CORP_ID: import.meta.env
+      .VITE_GLOB_AUTH_DINGDING_CORP_ID,
+  },
+  import.meta.env.PROD,
+);
 </script>
 
 <template>
