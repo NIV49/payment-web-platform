@@ -13,7 +13,7 @@ interface DepartmentParentOption extends SystemDeptApi.SystemDept {
 }
 
 function canManageDepartment(department: SystemDeptApi.SystemDept) {
-  return !department.deletedAt && department.systemManaged !== true;
+  return !department.deletedAt;
 }
 
 function canAppendDepartmentChild(department: SystemDeptApi.SystemDept) {

@@ -15,8 +15,8 @@ import { Alert, Button, Input, Spin } from 'antdv-next';
 import { useVbenForm } from '#/adapter/form';
 import { isOptimisticLockConflict } from '#/api/error-contract';
 import { getMenuList } from '#/api/system/menu';
-import { createRole } from '#/api/system/role';
 import {
+  createRoleConfiguration,
   getGrantablePermissions,
   getRoleGrants,
   replaceRoleConfiguration,
@@ -31,7 +31,6 @@ import {
 import {
   buildRoleConfigurationTree,
   filterAvailableNavigationMenuIds,
-  filterNavigableMenuTree,
   normalizeRoleConfigurationSelection,
 } from '../menu-tree';
 import { createRoleRequestGuard } from '../role-request-guard';
@@ -106,12 +105,18 @@ const [Drawer, drawerApi] = useVbenDrawer({
           status: values.status,
         });
       } else {
-        await createRole({
-          ...values,
-          menuIds: filterAvailableNavigationMenuIds(
-            values.menuIds ?? [],
-            menuOptions.value,
-          ),
+        const configuration = roleConfigurationTree.value;
+        if (!configuration) return;
+        const normalized = normalizeRoleConfigurationSelection(
+          values.menuIds ?? [],
+          configuration,
+        );
+        await createRoleConfiguration({
+          grants: buildTenantRoleGrants(normalized.permissionCodes),
+          menuIds: normalized.menuIds,
+          name: values.name,
+          remark: values.remark,
+          status: values.status,
         });
       }
       if (!requestGuard.isCurrent(currentRequestIdentity, currentScope)) {
@@ -221,9 +226,15 @@ async function initializeForm(existingRole?: SystemRoleApi.SystemRole) {
           : normalized.selectedIds,
       });
     } else {
-      const navigationMenus = filterNavigableMenuTree(await getMenuList());
+      const [rawMenus, grantablePermissions] = await Promise.all([
+        getMenuList(),
+        getGrantablePermissions(),
+      ]);
       if (!requestGuard.isCurrent(requestIdentity, currentScope())) return;
-      const configuration = buildRoleConfigurationTree(navigationMenus, []);
+      const configuration = buildRoleConfigurationTree(
+        rawMenus,
+        grantablePermissions.map(({ permissionCode }) => permissionCode),
+      );
       roleConfigurationTree.value = configuration;
       menuOptions.value = configuration.tree;
       await nextTick();

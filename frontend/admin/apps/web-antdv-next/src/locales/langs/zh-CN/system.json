@@ -29,6 +29,10 @@
     "roleCatalogLoadFailed": "角色加载失败，请重新打开表单后重试。",
     "roleSearchFailed": "角色搜索失败，已保留上一次的有效选项。",
     "retryDepartmentLoad": "重新加载部门",
+    "resetPassword": "重置密码",
+    "resetPasswordConfirm": "确定将「{0}」的密码重置为已配置的统一初始密码吗？该用户的现有会话会立即失效。",
+    "resettingPassword": "正在重置「{0}」的密码",
+    "resetPasswordSuccess": "「{0}」的密码已重置",
     "permission": {
       "view": "查看用户",
       "create": "新增用户",
@@ -93,7 +97,6 @@
     "name": "菜单",
     "operation": "操作",
     "parent": "上级菜单",
-    "protectedAction": "系统预置菜单不可修改或删除",
     "permission": {
       "view": "查看菜单",
       "create": "新增菜单",

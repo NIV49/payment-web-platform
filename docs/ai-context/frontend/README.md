@@ -149,7 +149,11 @@ views/system/*/list.vue
 
 权限按钮通过 action `auth` 或 Cell renderer 的 `auth` 调用 `useAccess().hasAccessByCodes`。这只决定前端是否显示；服务端仍须授权。
 
-用户和角色查询表单只在显式查询或重置时提交；部门树选择是独立的即时筛选，并只发送标量 `deptId`，提供明确清空入口和失败重试。管理列表保留 DISABLED live row 供恢复；墓碑一律隐藏，跨模块部门、角色、菜单候选只提供 ACTIVE live row，编辑历史对象时仅把其当前禁用依赖作为只读固定项。用户新建表单只提供 ACTIVE、assignable、非 system 的角色；只有 `user:create` 而没有 `user:assign-role` 时仍显式提交空 `roleIds`。用户抽屉读取一页 `pageSize=200` 的 ACTIVE 角色并最多 8 并发精确补取当前角色；下拉搜索 300ms 防抖并丢弃旧响应。普通管理员编辑 payload 只含 Membership 字段；`/user/info.systemAdministrator=true` 时才启用 username/name/remark，并提交 user/identity/credential 三版本。角色列表不再提供独立“功能权限”操作；新增和编辑抽屉在同一个多层树中展示 ACTIVE 导航和可分配 BUTTON。勾选导航节点会联动其 ACTIVE 导航后代但不会自动授予 BUTTON，勾选 BUTTON 才维护权限依赖与导航祖先；取消导航节点会清除该导航子树及依赖其 BUTTON 的动作。保存调用原子 configuration API。system/non-assignable 角色不可变更，包含当前页面无法无损表达的 Grant 时整个配置只读。菜单页对 system-managed 预置行保留可见但禁用的编辑/删除操作并说明保护原因，普通菜单的编辑和软删除仍正常可用。
+用户和角色查询表单只在显式查询或重置时提交；部门树选择是独立的即时筛选，并只发送标量 `deptId`，提供明确清空入口和失败重试。管理列表保留 DISABLED live row 供恢复；墓碑一律隐藏，跨模块部门、角色、菜单候选只提供 ACTIVE live row，编辑历史对象时仅把其当前禁用依赖作为只读固定项。用户新建表单只提供 ACTIVE、assignable、非 system 的角色；只有 `user:create` 而没有 `user:assign-role` 时仍显式提交空 `roleIds`。用户抽屉读取一页 `pageSize=200` 的 ACTIVE 角色并最多 8 并发精确补取当前角色；下拉搜索 300ms 防抖并丢弃旧响应。普通管理员编辑 payload 只含 Membership 字段；`/user/info.systemAdministrator=true` 时才启用 username/name/remark，并提交 user/identity/credential 三版本。用户列表只为同时持有 `user:update` 且 `/user/info.systemAdministrator=true` 的当前会话提供重置密码操作，确认后把列表快照的 `credentialVersion` 提交给 `/system/user/{id}/password/reset`，成功或乐观锁冲突后刷新列表。
+
+角色列表不再提供独立“功能权限”操作；新增和编辑抽屉在同一个多层树中展示 ACTIVE 导航和可分配 BUTTON。只有用户显式勾选导航节点时，前端才联动其全部 ACTIVE 导航后代与可分配 BUTTON 后代，并由 BUTTON `authCode` 维护权限依赖和导航祖先；编辑页初始化只按既有 `menuIds` 与 Grant 回显，禁止从导航关系静默推导新 Grant。取消导航节点会清除该导航子树及依赖其 BUTTON 的动作。新建通过 `POST /v1/iam/roles/configuration` 原子提交完整配置，编辑通过 `PUT /v1/iam/roles/{id}/configuration` 原子替换；两者都只把导航 ID 写入 `iam_role_menu`，BUTTON 权限写入 RoleGrant，BUTTON ID 不进入 `menuIds`。system/non-assignable 角色不可变更，包含当前页面无法无损表达的 Grant 时整个配置只读。
+
+部门和菜单管理中的 `systemManaged` 只表示 local bootstrap 来源，不是前端不可变锁。未软删除的预置部门/菜单允许编辑；ACTIVE 预置部门和 ACTIVE 非 BUTTON 预置菜单允许新增下级。BUTTON、禁用父节点、墓碑、自身/后代父节点和权限依赖等通用约束继续执行。
 
 ## 6. API 与类型约定
 

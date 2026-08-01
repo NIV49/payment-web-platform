@@ -217,7 +217,7 @@ describe('role navigable menu tree', () => {
     ).toEqual({
       menuIds: ['10', '11', '14', '13'],
       permissionCodes: ['menu:view'],
-      selectedIds: ['10', '11', '14', '12', '13'],
+      selectedIds: ['10', '11', '14', '13', '12'],
     });
   });
 

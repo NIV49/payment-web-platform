@@ -268,7 +268,7 @@ export function useColumns<T = SystemUserApi.SystemUser>(
       fixed: 'right',
       slots: { default: 'action' },
       title: $t('system.user.operation'),
-      width: 220,
+      width: 300,
     },
   ];
 }

@@ -74,6 +74,14 @@ export namespace SystemUserApi {
   export interface UserStatusResult {
     userVersion: number;
   }
+
+  export interface UserPasswordResetParams {
+    credentialVersion: number;
+  }
+
+  export interface UserPasswordResetResult {
+    credentialVersion: number;
+  }
 }
 
 async function getUserList(params: SystemUserApi.UserListQuery) {
@@ -104,10 +112,27 @@ async function updateUserStatus(
   );
 }
 
+async function resetUserPassword(
+  id: string,
+  data: SystemUserApi.UserPasswordResetParams,
+) {
+  return requestClient.post<SystemUserApi.UserPasswordResetResult>(
+    `/system/user/${id}/password/reset`,
+    data,
+  );
+}
+
 async function deleteUser(id: string, expectedVersion: number) {
   return requestClient.delete(`/system/user/${id}`, {
     params: { expectedVersion },
   });
 }
 
-export { createUser, deleteUser, getUserList, updateUser, updateUserStatus };
+export {
+  createUser,
+  deleteUser,
+  getUserList,
+  resetUserPassword,
+  updateUser,
+  updateUserStatus,
+};

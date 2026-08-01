@@ -17,7 +17,7 @@ function canAppendMenuChild(menu: SystemMenuApi.SystemMenu) {
 }
 
 function canManageMenu(menu: SystemMenuApi.SystemMenu) {
-  return !menu.deletedAt && menu.systemManaged !== true;
+  return !menu.deletedAt;
 }
 
 function canPerformMenuAction(

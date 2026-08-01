@@ -156,7 +156,7 @@ export function normalizeRoleConfigurationSelection(
       if (id !== change.id && !isDescendantOf(id, change.id, configuration)) {
         continue;
       }
-      if (change.checked && navigationSet.has(id)) requestedIds.add(id);
+      if (change.checked) requestedIds.add(id);
       if (!change.checked) {
         requestedIds.delete(id);
         const permission = configuration.permissionByButtonId[id];

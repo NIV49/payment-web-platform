@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createRoleConfiguration,
   getGrantablePermissions,
   getRoleGrants,
   replaceRoleConfiguration,
@@ -9,6 +10,7 @@ import {
 
 const requestClient = vi.hoisted(() => ({
   get: vi.fn(),
+  post: vi.fn(),
   put: vi.fn(),
 }));
 
@@ -77,6 +79,34 @@ describe('role grant administration requests', () => {
 
     expect(requestClient.put).toHaveBeenCalledWith(
       '/v1/iam/roles/2001/configuration',
+      payload,
+    );
+  });
+
+  it('creates the complete role configuration through one atomic endpoint', async () => {
+    const payload = {
+      grants: [
+        {
+          dimensions: [
+            {
+              code: 'TENANT' as const,
+              mode: 'TENANT_ALL' as const,
+              targets: [],
+            },
+          ],
+          grantKey: 'menu-view',
+          permissionCode: 'menu:view',
+        },
+      ],
+      menuIds: ['6000', '6003'],
+      name: 'Menu operator',
+      status: 1 as const,
+    };
+
+    await createRoleConfiguration(payload);
+
+    expect(requestClient.post).toHaveBeenCalledWith(
+      '/v1/iam/roles/configuration',
       payload,
     );
   });

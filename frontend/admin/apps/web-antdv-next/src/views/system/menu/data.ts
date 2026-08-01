@@ -125,8 +125,6 @@ export function useColumns(
                 PERMISSION_CODES.menuUpdate,
                 hasAccessByCodes,
               ).visible,
-            title: (row: SystemMenuApi.SystemMenu) =>
-              row.systemManaged ? $t('system.menu.protectedAction') : undefined,
           },
           {
             auth: PERMISSION_CODES.menuDelete,
@@ -143,8 +141,6 @@ export function useColumns(
                 PERMISSION_CODES.menuDelete,
                 hasAccessByCodes,
               ).visible,
-            title: (row: SystemMenuApi.SystemMenu) =>
-              row.systemManaged ? $t('system.menu.protectedAction') : undefined,
           },
         ],
       },

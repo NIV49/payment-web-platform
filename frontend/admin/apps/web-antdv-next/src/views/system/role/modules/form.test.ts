@@ -8,6 +8,7 @@ import RoleFormDrawer from './form.vue';
 
 const harness = vi.hoisted(() => ({
   createRole: vi.fn(),
+  createRoleConfiguration: vi.fn(),
   drawerApi: {
     close: vi.fn(),
     getData: vi.fn(),
@@ -76,6 +77,7 @@ vi.mock('#/api/system/role', () => ({
   createRole: harness.createRole,
 }));
 vi.mock('#/api/system/role-grant', () => ({
+  createRoleConfiguration: harness.createRoleConfiguration,
   getGrantablePermissions: harness.getGrantablePermissions,
   getRoleGrants: harness.getRoleGrants,
   replaceRoleConfiguration: harness.replaceRoleConfiguration,
@@ -132,6 +134,12 @@ const menu = (
   type: 'menu' as const,
 });
 
+const button = (id: string, authCode: string): SystemMenuApi.SystemMenu => ({
+  ...menu(id),
+  authCode,
+  type: 'button' as const,
+});
+
 describe('role form drawer request isolation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -139,6 +147,7 @@ describe('role form drawer request isolation', () => {
     harness.getMenuList.mockReset();
     harness.getGrantablePermissions.mockReset();
     harness.getRoleGrants.mockReset();
+    harness.createRoleConfiguration.mockReset();
     harness.replaceRoleConfiguration.mockReset();
     harness.formApi.getValues.mockReset();
     harness.formApi.setValues.mockReset().mockResolvedValue(undefined);
@@ -224,7 +233,12 @@ describe('role form drawer request isolation', () => {
 
   it('applies navigation cascading on the new-role tree interaction path', async () => {
     harness.drawerApi.getData.mockReturnValue(undefined);
-    harness.getMenuList.mockResolvedValue([menu('parent', [menu('child')])]);
+    harness.getMenuList.mockResolvedValue([
+      menu('parent', [menu('child', [button('view-button', 'menu:view')])]),
+    ]);
+    harness.getGrantablePermissions.mockResolvedValue([
+      { permissionCode: 'menu:view' },
+    ]);
     harness.formApi.getValues.mockResolvedValue({
       menuIds: ['parent'],
       name: 'New role',
@@ -244,7 +258,69 @@ describe('role form drawer request isolation', () => {
     await flushAsyncWork();
 
     expect(harness.formApi.setValues).toHaveBeenCalledWith({
+      menuIds: ['parent', 'child', 'view-button'],
+    });
+
+    harness.formApi.getValues.mockResolvedValue({
+      menuIds: ['parent', 'child', 'view-button'],
+      name: 'New role',
+      status: 1,
+    });
+    await harness.drawerOptions.onConfirm();
+
+    expect(harness.createRoleConfiguration).toHaveBeenCalledWith({
+      grants: [
+        {
+          dimensions: [{ code: 'TENANT', mode: 'TENANT_ALL', targets: [] }],
+          grantKey: 'menu-view',
+          permissionCode: 'menu:view',
+        },
+      ],
       menuIds: ['parent', 'child'],
+      name: 'New role',
+      status: 1,
+    });
+    expect(harness.createRole).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it('applies navigation cascading on the existing-role tree interaction path', async () => {
+    harness.drawerApi.getData.mockReturnValue({
+      ...role('existing', 3),
+      menuIds: ['parent'],
+    });
+    harness.getMenuList.mockResolvedValue([
+      menu('parent', [menu('child', [button('view-button', 'menu:view')])]),
+    ]);
+    harness.getGrantablePermissions.mockResolvedValue([
+      { permissionCode: 'menu:view' },
+    ]);
+    harness.getRoleGrants.mockResolvedValue({
+      editable: true,
+      grants: [],
+      roleId: 'existing',
+      roleVersion: 3,
+    });
+    harness.formApi.getValues.mockResolvedValue({
+      menuIds: ['parent'],
+      name: 'Existing role',
+      status: 1,
+    });
+
+    const { app, root } = mountDrawer();
+    harness.drawerOptions.onOpenChange(true);
+    await flushAsyncWork();
+    harness.formApi.setValues.mockClear();
+
+    const treeSelect = root.querySelector('[data-testid="tree-select"]');
+    if (!(treeSelect instanceof HTMLButtonElement)) {
+      throw new TypeError('Expected the role tree interaction control');
+    }
+    treeSelect.click();
+    await flushAsyncWork();
+
+    expect(harness.formApi.setValues).toHaveBeenCalledWith({
+      menuIds: ['parent', 'child', 'view-button'],
     });
     app.unmount();
   });

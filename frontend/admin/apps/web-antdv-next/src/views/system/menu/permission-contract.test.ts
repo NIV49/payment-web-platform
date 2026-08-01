@@ -133,7 +133,7 @@ describe('menu permission presentation contract', () => {
         '1',
         'catalog',
         [menu('2', 'menu', [], { disabled: true, status: 0 })],
-        { disabled: true, systemManaged: true },
+        { systemManaged: true },
       ),
     ]);
   });

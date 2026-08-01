@@ -7,6 +7,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useAccess } from '@vben/access';
 import { Page, Tree, useVbenDrawer } from '@vben/common-ui';
 import { Plus, RotateCw, X } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import {
   Alert,
@@ -25,6 +26,7 @@ import {
   getDeptList,
   getUserList,
   PERMISSION_CODES,
+  resetUserPassword,
   updateUserStatus,
 } from '#/api';
 import { isOptimisticLockConflict } from '#/api/error-contract';
@@ -54,6 +56,7 @@ const selectedDeptId = ref<string>();
 const departmentLoadFailed = ref(false);
 const departmentLoading = ref(false);
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const canViewDepartments = computed(() =>
   hasAccessByCodes([PERMISSION_CODES.departmentView]),
 );
@@ -186,6 +189,34 @@ function onDelete(row: SystemUserApi.SystemUser) {
     });
 }
 
+async function onResetPassword(row: SystemUserApi.SystemUser) {
+  if (!canResetUserPassword()) return;
+  const confirmed = await confirm(
+    $t('system.user.resetPasswordConfirm', [row.name]),
+    $t('system.user.resetPassword'),
+  );
+  if (!confirmed) return;
+
+  const hideLoading = message.loading({
+    content: $t('system.user.resettingPassword', [row.name]),
+    duration: 0,
+    key: 'action_process_msg',
+  });
+  try {
+    await resetUserPassword(row.id, {
+      credentialVersion: row.credentialVersion,
+    });
+    message.success({
+      content: $t('system.user.resetPasswordSuccess', [row.name]),
+      key: 'action_process_msg',
+    });
+    onRefresh();
+  } catch (error) {
+    hideLoading();
+    if (isOptimisticLockConflict(error)) onRefresh();
+  }
+}
+
 function onRefresh() {
   gridApi.query();
 }
@@ -208,6 +239,13 @@ function canDeleteUser() {
 
 function canChangeUserStatus() {
   return hasAllAccessCodes(USER_STATUS_PERMISSION_CODES, hasAccessByCodes);
+}
+
+function canResetUserPassword() {
+  return (
+    userStore.userInfo?.systemAdministrator === true &&
+    hasAccessByCodes([PERMISSION_CODES.userUpdate])
+  );
 }
 
 async function loadDeptList() {
@@ -323,6 +361,13 @@ onMounted(() => {
                   auth: PERMISSION_CODES.userUpdate,
                   ifShow: canEditUser,
                   onClick: () => onEdit(row),
+                },
+                {
+                  text: $t('system.user.resetPassword'),
+                  icon: 'lucide:key-round',
+                  auth: PERMISSION_CODES.userUpdate,
+                  ifShow: canResetUserPassword,
+                  onClick: () => onResetPassword(row),
                 },
               ]"
               :dropdown-actions="[

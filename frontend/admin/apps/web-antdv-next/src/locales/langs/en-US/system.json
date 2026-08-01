@@ -29,6 +29,10 @@
     "roleCatalogLoadFailed": "Failed to load roles. Reopen the form to retry.",
     "roleSearchFailed": "Failed to search roles. The previous options are still available.",
     "retryDepartmentLoad": "Retry loading departments",
+    "resetPassword": "Reset Password",
+    "resetPasswordConfirm": "Reset the password for “{0}” to the configured initial password? Existing sessions for this user will be invalidated immediately.",
+    "resettingPassword": "Resetting the password for “{0}”",
+    "resetPasswordSuccess": "The password for “{0}” has been reset",
     "permission": {
       "view": "View Users",
       "create": "Create User",
@@ -63,7 +67,6 @@
     "list": "Menu List",
     "title": "Menu Management",
     "parent": "Parent Menu",
-    "protectedAction": "System menus cannot be changed or deleted",
     "permission": {
       "view": "View Menus",
       "create": "Create Menu",

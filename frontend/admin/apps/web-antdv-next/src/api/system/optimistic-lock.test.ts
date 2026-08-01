@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDept, deleteDept, updateDept } from './dept';
 import { createMenu, deleteMenu, updateMenu } from './menu';
 import { createRole, deleteRole, updateRole, updateRoleStatus } from './role';
-import { deleteUser, updateUser, updateUserStatus } from './user';
+import {
+  deleteUser,
+  resetUserPassword,
+  updateUser,
+  updateUserStatus,
+} from './user';
 
 const requestClient = vi.hoisted(() => ({
   delete: vi.fn(),
@@ -159,5 +164,14 @@ describe('administration optimistic-lock requests', () => {
     expect(requestClient.delete).toHaveBeenCalledWith('/system/user/51', {
       params: { expectedVersion: 9 },
     });
+  });
+
+  it('sends only the credential version when resetting a user password', async () => {
+    await resetUserPassword('51', { credentialVersion: 4 });
+
+    expect(requestClient.post).toHaveBeenCalledWith(
+      '/system/user/51/password/reset',
+      { credentialVersion: 4 },
+    );
   });
 });
