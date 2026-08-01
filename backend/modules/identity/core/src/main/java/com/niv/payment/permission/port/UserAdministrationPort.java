@@ -9,5 +9,7 @@ public interface UserAdministrationPort {
     void updateUser(long tenantId, AdministrationActor actor, long userId,
                     IdentityModels.MembershipUpdateCommand command);
     long updateUserStatus(long tenantId, AdministrationActor actor, long userId, int status, long userVersion);
+    IdentityModels.PasswordResetResult resetUserPassword(long tenantId, AdministrationActor actor,
+                                                         long userId, long credentialVersion);
     void deleteUser(long tenantId, AdministrationActor actor, long userId, long expectedVersion);
 }

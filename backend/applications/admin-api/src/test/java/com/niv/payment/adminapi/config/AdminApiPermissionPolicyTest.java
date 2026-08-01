@@ -27,6 +27,8 @@ class AdminApiPermissionPolicyTest {
             .isEqualTo(List.of("user:update", "user:disable", "user:assign-role"));
         assertThat(policy.requiredPermissions("PATCH", "/api/system/user/100/status"))
             .isEqualTo(List.of("user:disable"));
+        assertThat(policy.requiredPermissions("POST", "/api/system/user/100/password/reset"))
+            .isEqualTo(List.of("user:update"));
         assertThat(policy.requiredPermissions("DELETE", "/api/system/user/100")).isEqualTo(List.of("user:delete"));
         assertThat(policy.requiredPermissions("GET", "/api/system/role/list")).isEqualTo(List.of("role:view"));
         assertThat(policy.requiredPermissions("PATCH", "/api/system/role/2000/status"))

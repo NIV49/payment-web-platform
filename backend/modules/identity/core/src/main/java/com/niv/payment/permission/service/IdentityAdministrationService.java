@@ -93,6 +93,11 @@ public final class IdentityAdministrationService {
         validStatus(status);
         return users.updateUserStatus(tenantId, validActor(actor), positiveId(id), status, validVersion(version));
     }
+    public IdentityModels.PasswordResetResult resetUserPassword(long tenantId, AdministrationActor actor,
+                                                                long id, long credentialVersion) {
+        return users.resetUserPassword(tenantId, validActor(actor), positiveId(id),
+            validVersion(credentialVersion));
+    }
     public void deleteUser(long tenantId, AdministrationActor actor, long id, long expectedVersion) {
         users.deleteUser(tenantId, validActor(actor), positiveId(id), validVersion(expectedVersion));
     }

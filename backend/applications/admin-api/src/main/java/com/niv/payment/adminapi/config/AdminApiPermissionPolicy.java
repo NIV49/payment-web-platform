@@ -11,6 +11,8 @@ import java.util.regex.Pattern;
 public final class AdminApiPermissionPolicy {
     private static final Pattern USER_ITEM = Pattern.compile("^/api/system/user/[1-9][0-9]*$");
     private static final Pattern USER_STATUS = Pattern.compile("^/api/system/user/[1-9][0-9]*/status$");
+    private static final Pattern USER_PASSWORD_RESET =
+        Pattern.compile("^/api/system/user/[1-9][0-9]*/password/reset$");
     private static final Pattern ROLE_ITEM = Pattern.compile("^/api/system/role/[1-9][0-9]*$");
     private static final Pattern ROLE_STATUS = Pattern.compile("^/api/system/role/[1-9][0-9]*/status$");
     private static final Pattern MENU_ITEM = Pattern.compile("^/api/system/menu/[1-9][0-9]*$");
@@ -32,6 +34,9 @@ public final class AdminApiPermissionPolicy {
             return List.of("user:update", "user:disable", "user:assign-role");
         }
         if ("PATCH".equals(method) && USER_STATUS.matcher(path).matches()) return List.of("user:disable");
+        if ("POST".equals(method) && USER_PASSWORD_RESET.matcher(path).matches()) {
+            return List.of("user:update");
+        }
         if ("DELETE".equals(method) && USER_ITEM.matcher(path).matches()) return List.of("user:delete");
 
         if ("GET".equals(method) && "/api/system/role/list".equals(path)) return List.of("role:view");

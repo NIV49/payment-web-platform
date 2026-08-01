@@ -30,6 +30,7 @@ import org.jooq.DSLContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import tools.jackson.databind.ObjectMapper;
@@ -50,8 +51,13 @@ public class IdentityConfiguration {
 
     @Bean
     JooqUserAdministrationRepository userAdministrationRepository(
-        DSLContext dsl, JooqIdentityQueryRepository queries) {
-        return new JooqUserAdministrationRepository(dsl, queries, RequestTrace::current);
+        DSLContext dsl, JooqIdentityQueryRepository queries, BCryptPasswordEncoder passwordEncoder,
+        Environment environment) {
+        String fixtureCredential = environment.getProperty("payment.bootstrap-password");
+        return new JooqUserAdministrationRepository(dsl, queries, RequestTrace::current,
+            () -> fixtureCredential == null || fixtureCredential.isBlank()
+                ? null
+                : passwordEncoder.encode(fixtureCredential));
     }
 
     @Bean

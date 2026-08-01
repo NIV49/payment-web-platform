@@ -1015,6 +1015,64 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void passwordResetRequiresPlatformSystemAdministratorEvenWithUserUpdatePermission() throws Exception {
+        long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES(?,1,?,?,'PLATFORM',true,false,'ACTIVE')
+            """, roleId, "password-reset-operator-" + roleId, "Password Reset Operator " + roleId);
+        assertThat(jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            SELECT ?,1,?,id,'password-reset','ACTIVE'
+              FROM iam_permission WHERE permission_code='user:update'
+            """, grantId, roleId)).isOne();
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES(?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,802,?,802)
+            """, roleId);
+        jdbc.update("""
+            UPDATE iam_membership SET permission_version=permission_version+1
+             WHERE tenant_id=1 AND id=802
+            """);
+
+        try {
+            Cookie restricted = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            long credentialVersion = jdbc.queryForObject("""
+                SELECT row_version FROM iam_authentication_credential WHERE user_id=100
+                """, Long.class);
+            String hashBefore = jdbc.queryForObject("""
+                SELECT password_hash FROM iam_authentication_credential WHERE user_id=100
+                """, String.class);
+
+            mvc.perform(post("/api/system/user/100/password/reset")
+                    .cookie(restricted).header("Origin", ORIGIN).contentType("application/json")
+                    .content("{\"credentialVersion\":" + credentialVersion + "}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+
+            assertThat(jdbc.queryForObject("""
+                SELECT password_hash FROM iam_authentication_credential WHERE user_id=100
+                """, String.class)).isEqualTo(hashBefore);
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802 AND role_id=?", roleId);
+            jdbc.update("DELETE FROM iam_grant_dimension WHERE id=?", dimensionId);
+            jdbc.update("DELETE FROM iam_role_grant WHERE id=?", grantId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+            jdbc.update("""
+                UPDATE iam_membership SET permission_version=permission_version+1
+                 WHERE tenant_id=1 AND id=802
+                """);
+        }
+    }
+
+    @Test
     void disabledMembershipInvalidatesTheExistingSessionWith401() throws Exception {
         Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
         jdbc.update("UPDATE iam_membership SET status='DISABLED' WHERE tenant_id=1 AND id=802");
@@ -1789,19 +1847,61 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.userVersion").value(1));
 
-        assertThat(login(username, ADMIN_LOGIN_INPUT)).isNotBlank();
+        Cookie createdUserCookie = cookie(login(username, ADMIN_LOGIN_INPUT));
+        long otherMembershipId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status)
+            VALUES(?,2,?,20,'ACTIVE')
+            """, otherMembershipId, userId);
+        List<Long> sessionVersionsBefore = jdbc.queryForList("""
+            SELECT session_version FROM iam_membership
+             WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class, userId);
+        List<Long> rowVersionsBefore = jdbc.queryForList("""
+            SELECT row_version FROM iam_membership
+             WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class, userId);
+        long resetCredentialVersion = jdbc.queryForObject("""
+            SELECT row_version FROM iam_authentication_credential WHERE user_id=?
+            """, Long.class, userId);
+
         mvc.perform(post("/api/system/user/" + userId + "/password/reset")
                 .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
-                .content("{\"credentialVersion\":0}"))
+                .content("{\"credentialVersion\":" + resetCredentialVersion + "}"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.credentialVersion").value(1));
+            .andExpect(jsonPath("$.data.credentialVersion").value(resetCredentialVersion + 1));
         String resetHash = jdbc.queryForObject(
             "SELECT password_hash FROM iam_authentication_credential WHERE user_id=?", String.class, userId);
         assertThat(resetHash).isNotEqualTo(initialHash);
         assertThat(passwords.matches(ADMIN_LOGIN_INPUT, resetHash)).isTrue();
+        assertThat(jdbc.queryForList("""
+            SELECT session_version FROM iam_membership
+             WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class, userId)).containsExactly(
+                sessionVersionsBefore.get(0) + 1,
+                sessionVersionsBefore.get(1) + 1);
+        assertThat(jdbc.queryForList("""
+            SELECT row_version FROM iam_membership
+             WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class, userId)).containsExactly(
+                rowVersionsBefore.get(0) + 1,
+                rowVersionsBefore.get(1) + 1);
+        assertThat(jdbc.queryForMap("""
+            SELECT action_code,permission_code,after_value::text AS after_value
+              FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='USER' AND target_ref=?
+             ORDER BY occurred_at DESC,id DESC LIMIT 1
+            """, Long.toString(userId)))
+            .containsEntry("action_code", "RESET_PASSWORD")
+            .containsEntry("permission_code", "user:update")
+            .containsEntry("after_value", "{}")
+            .doesNotContainValue(ADMIN_LOGIN_INPUT);
+        mvc.perform(get("/api/user/info").cookie(createdUserCookie))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error").value("SESSION_INVALID"));
         mvc.perform(post("/api/system/user/" + userId + "/password/reset")
                 .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
-                .content("{\"credentialVersion\":0}"))
+                .content("{\"credentialVersion\":" + resetCredentialVersion + "}"))
             .andExpect(status().isConflict());
     }
 

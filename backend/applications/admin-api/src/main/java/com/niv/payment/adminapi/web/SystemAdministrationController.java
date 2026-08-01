@@ -98,6 +98,18 @@ public class SystemAdministrationController {
         return ApiResponse.success(new UserStatusResponse(version));
     }
 
+    @PostMapping("/user/{id}/password/reset")
+    ApiResponse<PasswordResetResponse> resetUserPassword(
+        @PathVariable("id") long id,
+        @Valid @RequestBody PasswordResetRequest body,
+        HttpServletRequest request) {
+        AuthorizationSubject subject = AuthUserMenuController.subject(request);
+        IdentityModels.PasswordResetResult result = identities.resetUserPassword(
+            subject.tenantId(), actor(subject), id, body.credentialVersion());
+        return ApiResponse.success(new PasswordResetResponse(
+            result.credentialVersion(), result.identityVersion(), result.userVersion()));
+    }
+
     @DeleteMapping("/user/{id}")
     ApiResponse<Void> deleteUser(@PathVariable("id") long id,
                                  @RequestParam("expectedVersion") @Min(0) long expectedVersion,
@@ -311,6 +323,7 @@ public class SystemAdministrationController {
                         String authCode,Map<String,Object> meta,int status,long rowVersion,boolean systemManaged,
                         List<MenuResponse> children) { }
     record UserStatusResponse(long userVersion) { }
+    record PasswordResetResponse(long credentialVersion, long identityVersion, long userVersion) { }
 
     record UserCreateRequest(@NotBlank @Size(max=100) String username,@NotBlank @Size(max=128) String name,
         @NotBlank @Pattern(regexp="[1-9][0-9]*") String deptId,
@@ -338,6 +351,7 @@ public class SystemAdministrationController {
         }
     }
     record UserStatusRequest(@NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion) { }
+    record PasswordResetRequest(@NotNull @Min(0) Long credentialVersion) { }
     record RoleRequest(@NotBlank @Size(max=128) String name,@NotNull @Size(max=2048) List<@Pattern(regexp="[1-9][0-9]{0,18}") String> menuIds,
                        @NotNull @Min(0) @Max(1) Integer status,@Size(max=500) String remark) {
         IdentityModels.RoleCommand command(){ return new IdentityModels.RoleCommand(name,

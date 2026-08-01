@@ -39,14 +39,24 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
     private final DSLContext dsl;
     private final JooqIdentityQueryRepository queries;
     private final JooqAdministrationSupport support;
+    private final Supplier<String> initialPasswordHashSupplier;
     private final RoleAssignmentPolicy roleAssignmentPolicy = new RoleAssignmentPolicy();
 
     public JooqUserAdministrationRepository(DSLContext dsl,
                                             JooqIdentityQueryRepository queries,
                                             Supplier<String> traceIdSupplier) {
+        this(dsl, queries, traceIdSupplier, () -> null);
+    }
+
+    public JooqUserAdministrationRepository(DSLContext dsl,
+                                            JooqIdentityQueryRepository queries,
+                                            Supplier<String> traceIdSupplier,
+                                            Supplier<String> initialPasswordHashSupplier) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
         this.queries = Objects.requireNonNull(queries, "queries");
         this.support = new JooqAdministrationSupport(dsl, traceIdSupplier);
+        this.initialPasswordHashSupplier = Objects.requireNonNull(
+            initialPasswordHashSupplier, "initialPasswordHashSupplier");
     }
 
     @Override
@@ -64,13 +74,15 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         String state = status(command.status());
         requireMembershipDepartment(tenantId, command.departmentId(), state, null);
         String username = command.username().trim().toLowerCase(Locale.ROOT);
+        String initialPasswordHash = optionalInitialPasswordHash();
+        boolean loginCapable = initialPasswordHash != null;
 
         dsl.insertInto(IAM_USER)
             .set(IAM_USER.ID, userId)
             .set(IAM_USER.IDP_ISSUER, "local")
             .set(IAM_USER.IDP_SUBJECT, username)
             .set(IAM_USER.DISPLAY_NAME, command.name().trim())
-            .set(IAM_USER.STATUS, PENDING_ACTIVATION)
+            .set(IAM_USER.STATUS, loginCapable ? ACTIVE : PENDING_ACTIVATION)
             .set(IAM_USER.REMARK, JooqAdministrationSupport.blankToNull(command.remark()))
             .execute();
         dsl.insertInto(IAM_MEMBERSHIP)
@@ -83,7 +95,8 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         dsl.insertInto(IAM_AUTHENTICATION_CREDENTIAL)
             .set(IAM_AUTHENTICATION_CREDENTIAL.USER_ID, userId)
             .set(IAM_AUTHENTICATION_CREDENTIAL.USERNAME, username)
-            .set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, DISABLED)
+            .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, initialPasswordHash)
+            .set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, loginCapable ? ACTIVE : DISABLED)
             .execute();
         replaceRoles(tenantId, membershipId, command.roleIds(), actor.membershipId());
         support.audit(tenantId, actor.membershipId(), "USER", userId, "CREATE", "user:create");
@@ -240,6 +253,111 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
                 .and(IAM_ROLE.SYSTEM_ROLE.isTrue())
                 .and(IAM_ROLE.STATUS.eq(ACTIVE))
                 .and(IAM_ROLE.DELETED_AT.isNull())));
+    }
+
+    @Override
+    @Transactional
+    public IdentityModels.PasswordResetResult resetUserPassword(long tenantId,
+                                                                AdministrationActor actor,
+                                                                long userId,
+                                                                long expectedCredentialVersion) {
+        support.requirePlatformTenant(tenantId);
+        support.lockTenant(tenantId, actor);
+        if (!isPlatformSystemAdministrator(tenantId, actor.membershipId())) {
+            throw new SecurityException(
+                "Platform system administrator is required for password reset");
+        }
+
+        var target = dsl.select(
+                IAM_MEMBERSHIP.ROW_VERSION,
+                IAM_USER.IDP_ISSUER,
+                IAM_USER.ROW_VERSION,
+                IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION)
+            .from(IAM_MEMBERSHIP)
+            .join(IAM_USER).on(IAM_USER.ID.eq(IAM_MEMBERSHIP.USER_ID))
+            .join(IAM_AUTHENTICATION_CREDENTIAL)
+                .on(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(IAM_USER.ID))
+            .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
+                .and(IAM_MEMBERSHIP.USER_ID.eq(userId))
+                .and(IAM_MEMBERSHIP.STATUS.ne(TERMINATED)))
+            .forUpdate()
+            .of(IAM_MEMBERSHIP, IAM_USER, IAM_AUTHENTICATION_CREDENTIAL)
+            .fetchOne();
+        if (target == null) {
+            throw notFound("User");
+        }
+        if (!"local".equals(target.get(IAM_USER.IDP_ISSUER))) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "External identity password cannot be reset");
+        }
+        if (!Objects.equals(target.get(IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION),
+            expectedCredentialVersion)) {
+            throw new IdentityAdministrationService.OptimisticLockException();
+        }
+
+        String passwordHash = requiredInitialPasswordHash();
+        int credentialUpdated = dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
+            .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, passwordHash)
+            .set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, ACTIVE)
+            .set(IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION,
+                IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION.plus(1L))
+            .set(IAM_AUTHENTICATION_CREDENTIAL.UPDATED_AT, DSL.currentOffsetDateTime())
+            .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(userId)
+                .and(IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION.eq(expectedCredentialVersion)))
+            .execute();
+        if (credentialUpdated != 1) {
+            throw new IdentityAdministrationService.OptimisticLockException();
+        }
+
+        int identityUpdated = dsl.update(IAM_USER)
+            .set(IAM_USER.STATUS, ACTIVE)
+            .set(IAM_USER.ROW_VERSION, IAM_USER.ROW_VERSION.plus(1L))
+            .set(IAM_USER.UPDATED_AT, DSL.currentOffsetDateTime())
+            .where(IAM_USER.ID.eq(userId)
+                .and(IAM_USER.ROW_VERSION.eq(target.get(IAM_USER.ROW_VERSION))))
+            .execute();
+        if (identityUpdated != 1) {
+            throw new IdentityAdministrationService.OptimisticLockException();
+        }
+
+        int affectedMemberships = dsl.update(IAM_MEMBERSHIP)
+            .set(IAM_MEMBERSHIP.SESSION_VERSION, IAM_MEMBERSHIP.SESSION_VERSION.plus(1L))
+            .set(IAM_MEMBERSHIP.ROW_VERSION, IAM_MEMBERSHIP.ROW_VERSION.plus(1L))
+            .set(IAM_MEMBERSHIP.UPDATED_AT, DSL.currentOffsetDateTime())
+            .where(IAM_MEMBERSHIP.USER_ID.eq(userId)
+                .and(IAM_MEMBERSHIP.STATUS.ne(TERMINATED)))
+            .execute();
+        if (affectedMemberships < 1) {
+            throw notFound("User");
+        }
+
+        support.audit(tenantId, actor.membershipId(), "USER", userId,
+            "RESET_PASSWORD", "user:update");
+        return new IdentityModels.PasswordResetResult(
+            expectedCredentialVersion + 1,
+            target.get(IAM_USER.ROW_VERSION) + 1,
+            target.get(IAM_MEMBERSHIP.ROW_VERSION) + 1);
+    }
+
+    private String optionalInitialPasswordHash() {
+        String passwordHash = initialPasswordHashSupplier.get();
+        if (passwordHash == null || passwordHash.isBlank()) {
+            return null;
+        }
+        if (!LoginCredentialPolicy.isLoginCapableHash(passwordHash)) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "Configured initial password hash is invalid");
+        }
+        return passwordHash;
+    }
+
+    private String requiredInitialPasswordHash() {
+        String passwordHash = optionalInitialPasswordHash();
+        if (passwordHash == null) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "Initial password is not configured");
+        }
+        return passwordHash;
     }
 
     private void requireUniqueUsername(long userId, String issuer, String username) {

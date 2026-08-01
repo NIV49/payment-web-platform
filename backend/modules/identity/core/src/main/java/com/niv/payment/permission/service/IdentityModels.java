@@ -51,6 +51,9 @@ public final class IdentityModels {
         public UserCreateCommand { roleIds = List.copyOf(roleIds); }
     }
 
+    public record PasswordResetResult(long credentialVersion, long identityVersion,
+                                      long userVersion) { }
+
     public record MembershipUpdateCommand(String username, String name, long departmentId,
                                           List<Long> roleIds, int status, long userVersion,
                                           Long identityVersion, Long credentialVersion, String remark) {
