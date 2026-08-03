@@ -18,6 +18,7 @@
     "docs/adr/0005-bounded-context-owned-adapters-and-composition-roots.md",
     "docs/adr/0006-redis-protocol-cache-product-boundary.md",
     "docs/adr/0007-separate-production-migrations-from-local-fixtures.md",
+    "docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md",
     "docs/ai-context/README.md",
     "docs/ai-context/backend/README.md",
     "docs/ai-context/development-workflow.md",

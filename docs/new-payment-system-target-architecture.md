@@ -1295,7 +1295,7 @@ flowchart TD
 
 ## 30. 开放问题
 
-<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
 进入技术实施计划前必须回答：
 
@@ -1310,13 +1310,14 @@ flowchart TD
 9. UNKNOWN 状态由谁处理，处理时需要哪些证据和审批？
 10. 商户通知成功回执协议如何定义？
 11. 代理商允许查看哪些订单字段，历史订单脱敏清单是什么？
-12. 是否允许一个全局用户加入多个租户？
-13. 是否需要平台强制解除代理关系？
-14. 目标云平台、区域、可用区和合规要求是什么？
-15. 团队是否具备 PostgreSQL、Kafka、Keycloak、ClickHouse 和 Temporal 运维能力？
-16. 旧系统历史订单是否迁移到新库，还是保留统一查询层？
-17. 新旧系统并行期预计多久？
-18. 谁拥有账本、渠道、权限、数据迁移和生产发布的最终决策权？
+12. 是否需要平台强制解除代理关系？
+13. 目标云平台、区域、可用区和合规要求是什么？
+14. 团队是否具备 PostgreSQL、Kafka、Keycloak、ClickHouse 和 Temporal 运维能力？
+15. 旧系统历史订单是否迁移到新库，还是保留统一查询层？
+16. 新旧系统并行期预计多久？
+17. 谁拥有账本、渠道、权限、数据迁移和生产发布的最终决策权？
+
+全局 User 与工作区问题已由 [ADR-0008](adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 关闭：三后台为独立应用账号域，同域多 Membership 保留，客户端不提供工作区切换，可信服务端上下文无法唯一解析时失败关闭。
 
 ## 31. 发布门禁
 

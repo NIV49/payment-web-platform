@@ -13,9 +13,9 @@
 
 必须先确认：
 
-<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
-- [待确认，IAM-GLOBAL-USER-MULTI-TENANT] 一个全局 User 是否允许关联多个 TenantMembership，以及登录后的工作空间选择方式。[ADR-0001](../../adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md) 定义受控的跨资源归属租户访问，[ADR-0004](../../adr/0004-external-idp-and-application-authorization-boundary.md) 定义 IdP subject 到全局 User 和 active Membership 的认证边界；两者均未决定 Membership 基数。结论须由产品、安全与架构共同确认，并写入产品基线或 accepted ADR 后方可实施；
+- [已确认，IAM-GLOBAL-USER-MULTI-TENANT] [ADR-0008](../../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 要求三后台应用 User 与会话跨域隔离；同域多 Membership 保留，可信服务端入口无法唯一解析工作区时失败关闭。迁移必须先报告跨域或无法归属的 User，由人工拆分账号后重试，不能复制凭据或改写审计归属来猜测；
 - 平台、代理商、直连/间连商户预置角色；
 - 第一批权限码；
 - FUND 权限和职责分离矩阵；

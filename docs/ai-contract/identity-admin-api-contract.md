@@ -1,8 +1,8 @@
 # Identity Admin API Contract
 
 > 状态：已实现的本地原型契约，非生产认证与资金权限方案<br>
-> 适用应用：`frontend/admin/apps/web-antdv-next`、`backend/applications/admin-api`<br>
-> 复核日期：2026-08-01
+> 适用应用：当前 `frontend/admin/apps/web-antdv-next`、`backend/applications/admin-api`；目标增加商户/代理部署产物与 API 组合根<br>
+> 复核日期：2026-08-03
 > 事实优先级：已接受 ADR / 已批准契约 > 实现；集成测试证明实现现状，但无权把偶然实现升级为架构决策
 
 本文分三层记录：
@@ -12,6 +12,10 @@
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
 当前结论：登录、Cookie 会话、当前用户、19 个本地 system-admin 管理权限码、动态菜单以及用户/角色/菜单/部门管理页面和 API 已形成可启动原型。RoleGrant 已提供仅覆盖 18 个 NORMAL、TENANT/TENANT_ALL 管理权限的受限管理闭环；`local` profile 支持统一初始密码和系统管理员重置密码。外部 IdP、MFA、生产用户邀请/激活/重置、支付数据范围、资金权限和正式可观测性仍未完成。
+
+## 已接受但尚未实现的 IAM-001 目标契约
+
+[ADR-0008](../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 已关闭 `IAM-GLOBAL-USER-MULTI-TENANT`：PLATFORM、MERCHANT、AGENT 是独立应用账号域，同一个应用 User 不跨域；同域多 Membership 仍允许。三个服务端入口分别固定账号域、可信 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace。登录目标请求只包含 `username` 与 `password`，不得接受 `tenantId`、portal 或 workspace selector；可信服务端上下文无法唯一解析 ACTIVE Membership 时统一返回无枚举信息的认证失败。当前下面记录的单入口、`PAYMENT_SESSION` 和可选 `tenantId` 仍是实现事实，必须由 IAM-001 的 RED/GREEN 与三端黑盒收敛后才能移入 Current Contract。
 
 ---
 
@@ -994,7 +998,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 
 # 5. Uncertainty
 
-> Uncertain：登录 API 已支持可选 `tenantId`；多个 ACTIVE Membership 时省略会返回通用 401，但前端尚未提供工作空间选择/发现流程。
+> 已定版偏差：当前登录 API 仍支持可选 `tenantId`，违反 ADR-0008 的可信服务端工作区边界；IAM-001 必须删除该字段，并在同域多 ACTIVE Membership 无法由可信上下文唯一解析时返回通用 401。
 
 > Uncertain：本地 username/password 过渡方案何时切换为外部 IdP，以及是否保留紧急本地管理员。
 

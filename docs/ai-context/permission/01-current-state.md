@@ -61,11 +61,11 @@
 - 用户、角色、关系、密码、MFA 变化后旧权限必须及时失效；
 - 资金权限必须独立、可审计，不能归入普通订单管理。
 
-### 2.2 未决项
+### 2.2 已决项与未决项
 
-<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
-> 不确定：一个全局用户是否允许加入多个租户，以及登录时如何选择工作空间；产品文档要求技术评审确认。
+> 已确认：[ADR-0008](../../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 将 PLATFORM、MERCHANT、AGENT 定义为独立应用账号域；同一个应用 User 不跨域，同域多 Membership 仍允许。工作区只能由可信服务端入口/上下文解析，客户端不得通过 `tenantId` 切换；无法唯一解析时失败关闭。
 
 > 不确定：权限撤销的最终 SLA；架构候选为普通权限 60 秒内、资金权限立即生效。
 
