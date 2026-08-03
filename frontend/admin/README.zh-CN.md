@@ -2,6 +2,8 @@
 
 本目录是支付平台 Admin 的 pnpm + Turborepo 前端工作区，基于 Vben 5.7.0。产品应用固定使用 `web-antdv-next` 和 `antdv-next`；Playground 仅用于查阅框架示例，backend-mock 仅用于本地隔离开发。
 
+编辑器统一从仓库根目录打开；共享配置位于仓库根目录 `.vscode`。不要把本目录作为独立编辑器工作区打开。
+
 [English](./README.md) · [日本語](./README.ja-JP.md)
 
 ## 环境要求

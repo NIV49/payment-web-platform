@@ -6,6 +6,7 @@
 
 ```text
 payment-web-platform/
+├── .vscode/     # 仓库根工作区的统一编辑器配置
 ├── frontend/
 │   ├── admin/   # Vben Admin、Playground 和本地 Mock 服务
 │   └── portal/  # Nuxt 4 多应用 Monorepo（待初始化）
@@ -14,6 +15,10 @@ payment-web-platform/
 ├── infra/       # 部署与基础设施配置
 └── .agents/     # 项目级 AI 工作流技能
 ```
+
+## 开发工作区
+
+统一从仓库根目录 `payment-web-platform` 打开编辑器。仓库根目录的 `.vscode` 是唯一共享编辑器配置；不要从 `frontend/admin` 单独打开，也不要在子工程中新增嵌套 `.vscode` 或 `.code-workspace`。
 
 ## 前端开发
 

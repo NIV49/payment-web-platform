@@ -9,7 +9,7 @@
       "url": "http://localhost:5555",
       "env": { "NODE_ENV": "development" },
       "sourceMaps": true,
-      "webRoot": "${workspaceFolder}/playground"
+      "webRoot": "${workspaceFolder}/frontend/admin/playground"
     },
     {
       "type": "chrome",
@@ -18,7 +18,7 @@
       "url": "http://localhost:5999",
       "env": { "NODE_ENV": "development" },
       "sourceMaps": true,
-      "webRoot": "${workspaceFolder}/apps/web-antdv-next"
+      "webRoot": "${workspaceFolder}/frontend/admin/apps/web-antdv-next"
     }
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "tailwindCSS.experimental.configFile": "internal/tailwind-config/src/theme.css",
+  "tailwindCSS.experimental.configFile": "frontend/admin/internal/tailwind-config/src/theme.css",
   "tailwindCSS.lint.suggestCanonicalClasses": "ignore",
   // workbench
   "workbench.list.smoothScrolling": true,
@@ -12,8 +12,6 @@
   "workbench.editor.limit.value": 5,
 
   // editor
-  "editor.tabSize": 2,
-  "editor.detectIndentation": false,
   "editor.cursorBlinking": "expand",
   "editor.largeFileOptimizations": true,
   "editor.accessibilitySupport": "off",
@@ -39,8 +37,8 @@
   // lint && format
   "oxc.enable": true,
   "oxc.typeAware": true,
-  "oxc.configPath": "oxlint.config.ts",
-  "oxc.fmt.configPath": "oxfmt.config.ts",
+  "oxc.configPath": "frontend/admin/oxlint.config.ts",
+  "oxc.fmt.configPath": "frontend/admin/oxfmt.config.ts",
   "eslint.useFlatConfig": true,
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit",
@@ -48,33 +46,45 @@
     "source.fixAll.stylelint": "explicit",
     "source.organizeImports": "never"
   },
-  "editor.defaultFormatter": "oxc.oxc-vscode",
   "[html]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false
   },
   "[css]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false
   },
   "[scss]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false
   },
   "[javascript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false
   },
   "[typescript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false
   },
   "[json]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[markdown]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false
   },
   "[jsonc]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false
   },
   "[vue]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false
   },
 
   // extensions
@@ -180,7 +190,7 @@
   "stylelint.customSyntax": "postcss-html",
   "stylelint.snippet": ["css", "less", "postcss", "scss", "vue"],
 
-  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "js/ts.tsdk.path": "frontend/admin/node_modules/typescript/lib",
   "js/ts.inlayHints.enumMemberValues.enabled": true,
   "js/ts.preferences.preferTypeOnlyAutoImports": true,
   "js/ts.preferences.includePackageJsonAutoImports": "on",
@@ -210,12 +220,14 @@
     "yaml": false
   },
 
-  "cssVariables.lookupFiles": ["packages/@core/base/design/src/**/*.css"],
+  "cssVariables.lookupFiles": [
+    "frontend/admin/packages/@core/base/design/src/**/*.css"
+  ],
 
   "i18n-ally.localesPaths": [
-    "packages/locales/src/langs",
-    "playground/src/locales/langs",
-    "apps/*/src/locales/langs"
+    "frontend/admin/packages/locales/src/langs",
+    "frontend/admin/playground/src/locales/langs",
+    "frontend/admin/apps/*/src/locales/langs"
   ],
   "i18n-ally.pathMatcher": "{locale}/{namespace}.{ext}",
   "i18n-ally.enabledParsers": ["json"],

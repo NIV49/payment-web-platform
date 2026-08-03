@@ -1,4 +1,5 @@
 .DS_Store
+.turbo
 
 # Python tooling caches
 __pycache__/

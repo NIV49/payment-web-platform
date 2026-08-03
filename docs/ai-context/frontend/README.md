@@ -40,7 +40,7 @@ apps/web-antdv-next
 | `scripts/vsh` | 循环依赖、依赖、lint、发布检查 CLI | 工程质量门禁 |
 | `scripts/deploy` | 产品 Admin 容器/Nginx 构建与生产安全回归测试 | 只构建、复制 `web-antdv-next`，禁止部署 Playground |
 | `.changeset` | 上游包版本变更 | 当前业务仓库暂不发布 Vben 包 |
-| `.vscode` | 推荐开发配置 | 编辑器辅助 |
+| 仓库根目录 `.vscode` | 全仓统一编辑器配置 | Admin 工具路径必须带 `frontend/admin/` 前缀；子工程不再维护嵌套配置 |
 | `pnpm-workspace.yaml` | workspace 范围和依赖 catalog | 增删 package 必须同步 |
 | `turbo.json` | task 依赖、缓存和输出 | 新任务需声明缓存语义 |
 | `vitest.config.ts` | 单测环境与排除项 | 当前使用 happy-dom |
@@ -163,6 +163,8 @@ views/system/*/list.vue
 
 ## 7. 开发和验证
 
+编辑器统一从仓库根目录打开。共享配置位于仓库根目录 `.vscode`；其中 Tailwind、Oxc、TypeScript SDK、i18n、CSS Variables 和调试配置使用 `frontend/admin/` 前缀定位本工作区。两空格缩进和 Oxc 默认 formatter 只绑定前端语言，不能覆盖后端 Java 或全仓 Markdown。禁止在 `frontend/admin` 下恢复嵌套 `.vscode` 或 `.code-workspace`，避免同一工具在不同打开方式下产生不同结果。
+
 从 `frontend/admin` 执行：
 
 ```bash
@@ -209,6 +211,7 @@ pnpm -F @vben/playground run test:e2e
 ## 9. 证据索引
 
 - 版本与依赖：`frontend/admin/package.json`、`pnpm-workspace.yaml`。
+- 编辑器配置：仓库根目录 `.vscode`。
 - 应用依赖：`apps/web-antdv-next/package.json`。
 - 启动链：`src/main.ts`、`src/bootstrap.ts`、`src/app.vue`。
 - 路由权限：`src/router/access.ts`、`guard.ts`、`packages/effects/access/src/accessible.ts`。
