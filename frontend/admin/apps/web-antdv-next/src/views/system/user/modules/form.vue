@@ -54,6 +54,7 @@ const canEditIdentity = computed(
   () => isEditing.value && userStore.userInfo?.systemAdministrator === true,
 );
 const currentDepartmentId = computed(() => formData.value?.deptId);
+const departmentRequestVersion = ref(0);
 const roleCatalog = ref<SystemRoleApi.SystemRole[]>([]);
 const roleAssignmentReady = ref(false);
 const roleSearchLoading = ref(false);
@@ -77,6 +78,7 @@ const [Form, formApi] = useVbenForm({
     roleOptions,
     roleSearchLoading,
     onRoleSearch,
+    departmentRequestVersion,
   ),
   showDefaultActions: false,
 });
@@ -147,6 +149,7 @@ async function initializeForm(isOpen: boolean) {
   formApi.reset();
   formData.value = data?.id ? data : undefined;
   id.value = data?.id;
+  departmentRequestVersion.value = loadSequence;
 
   try {
     const catalogResult = canAssignRoles.value

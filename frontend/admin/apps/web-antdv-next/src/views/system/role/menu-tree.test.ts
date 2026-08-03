@@ -130,7 +130,7 @@ describe('role navigable menu tree', () => {
     });
   });
 
-  it('hides actions whose permission dependencies are not represented by buttons', () => {
+  it('keeps every grantable button independent of unrelated catalog entries', () => {
     const configuration = buildRoleConfigurationTree(
       [
         makeMenu('10', 'menu', [
@@ -143,11 +143,15 @@ describe('role navigable menu tree', () => {
 
     expect(configuration.tree[0]?.children?.map(({ id }) => id)).toEqual([
       '11',
+      '12',
     ]);
-    expect(configuration.permissionByButtonId).toEqual({ '11': 'user:view' });
+    expect(configuration.permissionByButtonId).toEqual({
+      '11': 'user:view',
+      '12': 'user:create',
+    });
   });
 
-  it('selecting a button adds navigation ancestors and the permission dependency closure', () => {
+  it('selecting a button adds only its navigation ancestors', () => {
     const source = [
       makeMenu('10', 'catalog', [
         makeMenu('11', 'menu', [
@@ -167,13 +171,70 @@ describe('role navigable menu tree', () => {
 
     expect(normalizeRoleConfigurationSelection(['15'], configuration)).toEqual({
       menuIds: ['10', '11'],
-      permissionCodes: [
+      permissionCodes: ['user:create'],
+      selectedIds: ['10', '11', '15'],
+    });
+  });
+
+  it('selecting one button keeps sibling and cross-branch permissions independent', () => {
+    const configuration = buildRoleConfigurationTree(
+      [
+        makeMenu('10', 'catalog', [
+          makeMenu('11', 'menu', [
+            makeButton('12', 'user:view'),
+            makeButton('13', 'user:update'),
+            makeButton('14', 'user:disable'),
+            makeButton('15', 'user:assign-role'),
+          ]),
+          makeMenu('20', 'menu', [
+            makeButton('21', 'role:view'),
+            makeButton('22', 'department:view'),
+          ]),
+        ]),
+      ],
+      [
         'department:view',
         'role:view',
-        'user:create',
+        'user:assign-role',
+        'user:disable',
+        'user:update',
         'user:view',
       ],
-      selectedIds: ['10', '11', '12', '13', '14', '15'],
+    );
+
+    expect(
+      normalizeRoleConfigurationSelection(['13'], configuration, {
+        checked: true,
+        id: '13',
+      }),
+    ).toEqual({
+      menuIds: ['10', '11'],
+      permissionCodes: ['user:update'],
+      selectedIds: ['10', '11', '13'],
+    });
+  });
+
+  it('unchecking one button preserves every other selected permission', () => {
+    const configuration = buildRoleConfigurationTree(
+      [
+        makeMenu('10', 'menu', [
+          makeButton('11', 'user:view'),
+          makeButton('12', 'user:update'),
+          makeButton('13', 'user:disable'),
+        ]),
+      ],
+      ['user:disable', 'user:update', 'user:view'],
+    );
+
+    expect(
+      normalizeRoleConfigurationSelection(['10', '11', '13'], configuration, {
+        checked: false,
+        id: '12',
+      }),
+    ).toEqual({
+      menuIds: ['10'],
+      permissionCodes: ['user:disable', 'user:view'],
+      selectedIds: ['10', '11', '13'],
     });
   });
 
@@ -281,7 +342,7 @@ describe('role navigable menu tree', () => {
     });
   });
 
-  it('removing a navigation subtree removes cross-branch actions that depend on its buttons', () => {
+  it('removing a navigation subtree preserves permissions in other branches', () => {
     const configuration = buildRoleConfigurationTree(
       [
         makeMenu('10', 'menu', [makeButton('11', 'role:view')]),
@@ -302,12 +363,12 @@ describe('role navigable menu tree', () => {
       ),
     ).toEqual({
       menuIds: ['20'],
-      permissionCodes: ['department:view', 'user:view'],
-      selectedIds: ['20', '21', '22'],
+      permissionCodes: ['department:view', 'user:create', 'user:view'],
+      selectedIds: ['20', '21', '22', '23'],
     });
   });
 
-  it('removing a dependency also removes actions that can no longer be granted', () => {
+  it('removing one button does not remove another selected button', () => {
     const configuration = buildRoleConfigurationTree(
       [
         makeMenu('10', 'catalog', [
@@ -320,18 +381,16 @@ describe('role navigable menu tree', () => {
       ],
       ['menu:view', 'role:create', 'role:view'],
     );
-    const selected = normalizeRoleConfigurationSelection(['14'], configuration);
-
     expect(
       normalizeRoleConfigurationSelection(
-        selected.selectedIds.filter((id) => id !== '12'),
+        ['10', '11', '13', '14'],
         configuration,
         { checked: false, id: '12' },
       ),
     ).toEqual({
       menuIds: ['10', '11'],
-      permissionCodes: ['menu:view'],
-      selectedIds: ['10', '11', '13'],
+      permissionCodes: ['menu:view', 'role:create'],
+      selectedIds: ['10', '11', '13', '14'],
     });
   });
 });

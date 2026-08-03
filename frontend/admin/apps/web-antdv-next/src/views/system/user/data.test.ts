@@ -29,6 +29,7 @@ describe('system user form schema', () => {
       computed(() => []),
       ref(false),
       vi.fn(),
+      ref(0),
     );
 
     for (const fieldName of ['username', 'name', 'remark']) {
@@ -51,6 +52,7 @@ describe('system user form schema', () => {
 
   it('reactively reloads department options after the edited user is known', () => {
     const currentDepartmentId = ref<string>();
+    const departmentRequestVersion = ref(0);
     const schema = useFormSchema(
       computed(() => true),
       computed(() => true),
@@ -59,6 +61,7 @@ describe('system user form schema', () => {
       computed(() => []),
       ref(false),
       vi.fn(),
+      departmentRequestVersion,
     );
     const componentProps = schema.find(
       (field) => field.fieldName === 'deptId',
@@ -70,10 +73,15 @@ describe('system user form schema', () => {
     };
     expect(resolveProps().params).toEqual({
       currentDepartmentId: undefined,
+      requestVersion: 0,
     });
 
     currentDepartmentId.value = '30';
+    departmentRequestVersion.value = 1;
 
-    expect(resolveProps().params).toEqual({ currentDepartmentId: '30' });
+    expect(resolveProps().params).toEqual({
+      currentDepartmentId: '30',
+      requestVersion: 1,
+    });
   });
 });

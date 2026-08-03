@@ -2,11 +2,6 @@ import type { SystemMenuApi } from '#/api/system/menu';
 
 import { PERMISSION_CODES } from '#/api/permission-codes';
 
-import {
-  permissionDependencies,
-  reconcilePermissionSelection,
-} from './grant-contract';
-
 export interface RoleConfigurationTree {
   buttonIdByPermission: Record<string, string>;
   navigationIds: string[];
@@ -90,24 +85,9 @@ export function buildRoleConfigurationTree(
     });
 
   const tree = visit(menuTree);
-  const availablePermissions = new Set(Object.keys(buttonIdByPermission));
-  let removedDependency = true;
-  while (removedDependency) {
-    removedDependency = false;
-    for (const permission of availablePermissions) {
-      if (
-        permissionDependencies(permission).some(
-          (dependency) => !availablePermissions.has(dependency),
-        )
-      ) {
-        availablePermissions.delete(permission);
-        removedDependency = true;
-      }
-    }
-  }
   const availableButtonIdByPermission: Record<string, string> = {};
   const availablePermissionByButtonId: Record<string, string> = {};
-  for (const permission of availablePermissions) {
+  for (const permission of Object.keys(buttonIdByPermission)) {
     const buttonId = buttonIdByPermission[permission];
     if (!buttonId) continue;
     availableButtonIdByPermission[permission] = buttonId;
@@ -147,7 +127,6 @@ export function normalizeRoleConfigurationSelection(
 ) {
   const navigationSet = new Set(configuration.navigationIds);
   const requestedIds = new Set(selectedIds);
-  const removedPermissions = new Set<string>();
   if (change && navigationSet.has(change.id)) {
     for (const id of [
       ...configuration.navigationIds,
@@ -157,49 +136,14 @@ export function normalizeRoleConfigurationSelection(
         continue;
       }
       if (change.checked) requestedIds.add(id);
-      if (!change.checked) {
-        requestedIds.delete(id);
-        const permission = configuration.permissionByButtonId[id];
-        if (permission) removedPermissions.add(permission);
-      }
+      if (!change.checked) requestedIds.delete(id);
     }
   }
 
-  const requestedPermissions = [...requestedIds].flatMap((id) => {
-    const permission = configuration.permissionByButtonId[id];
-    return permission ? [permission] : [];
-  });
-  const changedPermission = change
-    ? configuration.permissionByButtonId[change.id]
-    : undefined;
-  let permissions: string[];
-  if (change && changedPermission) {
-    permissions = reconcilePermissionSelection(
-      requestedPermissions,
-      changedPermission,
-      change.checked,
-    );
-  } else if (removedPermissions.size > 0) {
-    let remainingPermissions = requestedPermissions;
-    for (const removedPermission of removedPermissions) {
-      remainingPermissions = reconcilePermissionSelection(
-        remainingPermissions,
-        removedPermission,
-        false,
-      );
-    }
-    permissions = [];
-    for (const permission of remainingPermissions) {
-      permissions = reconcilePermissionSelection(permissions, permission, true);
-    }
-  } else {
-    permissions = [];
-    for (const permission of requestedPermissions) {
-      permissions = reconcilePermissionSelection(permissions, permission, true);
-    }
-  }
-  const availablePermissions = permissions.filter(
-    (permission) => configuration.buttonIdByPermission[permission],
+  const availablePermissions = Object.entries(
+    configuration.buttonIdByPermission,
+  ).flatMap(([permission, buttonId]) =>
+    requestedIds.has(buttonId) ? [permission] : [],
   );
   const nextIds = new Set(
     [...requestedIds].filter((id) => navigationSet.has(id)),

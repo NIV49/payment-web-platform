@@ -198,4 +198,32 @@ describe('system user query contract', () => {
     });
     expect(options.some(({ id }) => id === '40')).toBe(false);
   });
+
+  it('removes disabled children when their active parent remains selectable', () => {
+    const options = buildUserDepartmentOptions([
+      {
+        children: [
+          {
+            id: '31',
+            name: 'Disabled child',
+            pid: '30',
+            rowVersion: 0,
+            status: 0,
+          },
+        ],
+        id: '30',
+        name: 'Active parent',
+        pid: '0',
+        rowVersion: 0,
+        status: 1,
+      },
+    ]);
+
+    expect(options).toEqual([
+      expect.objectContaining({
+        children: [],
+        id: '30',
+      }),
+    ]);
+  });
 });

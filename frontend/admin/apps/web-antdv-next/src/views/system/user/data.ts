@@ -26,6 +26,7 @@ export function useFormSchema(
   roleOptions: ComputedRef<RoleAssignmentOption[]>,
   roleSearchLoading: Ref<boolean>,
   onRoleSearch: (value: string) => void,
+  departmentRequestVersion: Ref<number>,
 ): VbenFormSchema[] {
   return [
     {
@@ -50,7 +51,10 @@ export function useFormSchema(
       component: 'ApiTreeSelect',
       componentProps: () => ({
         allowClear: true,
-        api: async (params?: { currentDepartmentId?: string }) =>
+        api: async (params?: {
+          currentDepartmentId?: string;
+          requestVersion?: number;
+        }) =>
           buildUserDepartmentOptions(
             await getDeptList(),
             params?.currentDepartmentId,
@@ -58,7 +62,10 @@ export function useFormSchema(
         childrenField: 'children',
         class: 'w-full',
         labelField: 'name',
-        params: { currentDepartmentId: currentDepartmentId.value },
+        params: {
+          currentDepartmentId: currentDepartmentId.value,
+          requestVersion: departmentRequestVersion.value,
+        },
         valueField: 'id',
       }),
       fieldName: 'deptId',

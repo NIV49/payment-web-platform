@@ -106,7 +106,7 @@ function buildUserDepartmentOptions(
           option: {
             ...department,
             ...(active ? {} : { disabled: true }),
-            ...(children.length > 0
+            ...(department.children
               ? { children: children.map(({ option }) => option) }
               : {}),
           },

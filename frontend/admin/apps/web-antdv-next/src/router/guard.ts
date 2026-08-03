@@ -9,6 +9,7 @@ import { accessRoutes, coreRouteNames } from '#/router/routes';
 import { useAuthStore } from '#/store';
 
 import { generateAccess } from './access';
+import { resolvePostLoginPath } from './post-login-redirect';
 
 /**
  * 通用守卫配置
@@ -107,13 +108,18 @@ function setupAccessGuard(router: Router) {
     accessStore.setAccessMenus(accessibleMenus);
     accessStore.setAccessRoutes(accessibleRoutes);
     accessStore.setIsAccessChecked(true);
-    const redirectPath = (from.query.redirect ??
-      (to.path === preferences.app.defaultHomePath
-        ? userInfo.homePath || preferences.app.defaultHomePath
-        : to.fullPath)) as string;
+    const homePath = userInfo.homePath || preferences.app.defaultHomePath;
+    const requestedPath =
+      to.path === preferences.app.defaultHomePath ? homePath : to.fullPath;
+    const redirectPath = resolvePostLoginPath({
+      homePath,
+      isAccessible: (path) => router.resolve(path).name !== 'FallbackNotFound',
+      requestedPath,
+      requestedRedirect: from.query.redirect,
+    });
 
     return {
-      ...router.resolve(decodeURIComponent(redirectPath)),
+      ...router.resolve(redirectPath),
       replace: true,
     };
   });

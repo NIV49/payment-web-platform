@@ -627,7 +627,7 @@ BUTTON.authCode   -> 权限目录在树中的展示绑定
 RoleGrant         -> 后端动作和数据范围
 ```
 
-三者已在数据库模型和写入契约中分离。角色新增和编辑抽屉在同一个多层树中展示 ACTIVE 导航节点及其可分配 BUTTON。用户主动勾选导航节点表示对该分支执行批量授权：前端显式选中其全部 ACTIVE 导航后代和可分配 BUTTON 后代，并在请求中分别生成 navigation `menuIds` 与 BUTTON 对应的 RoleGrant intent；取消导航节点清除该子树及依赖动作。单独勾选 BUTTON 仍会补齐必要权限和导航祖先。BUTTON ID 绝不写入 `iam_role_menu`，服务端也不得仅根据收到的 navigation menuIds 暗推 Grant。新增调用 `POST /api/v1/iam/roles/configuration`，编辑调用 `PUT /api/v1/iam/roles/{roleId}/configuration`，都在一个事务中写角色字段、ACTIVE 可路由 menuIds 和页面可无损表达的 RoleGrant。替换导航时只删除当前 ACTIVE、未删除、可路由菜单的旧关系，已禁用、BUTTON 或墓碑菜单的既有 `iam_role_menu` 必须保留为历史。未知、高风险、有效期、多维度或带 target 的现有 Grant 会使表单只读，禁止静默覆盖。
+三者已在数据库模型和写入契约中分离。角色新增和编辑抽屉在同一个多层树中展示 ACTIVE 导航节点及其可分配 BUTTON。用户主动勾选导航节点表示对该分支执行批量授权：前端显式选中其全部 ACTIVE 导航后代和可分配 BUTTON 后代，并在请求中分别生成 navigation `menuIds` 与 BUTTON 对应的 RoleGrant intent；取消导航节点只清除该子树。单独勾选 BUTTON 只补齐导航祖先，不自动选择兄弟或跨分支权限；单独取消 BUTTON 也不取消其他权限。BUTTON ID 绝不写入 `iam_role_menu`，服务端也不得根据 navigation menuIds 或前端动作依赖暗推 Grant。新增调用 `POST /api/v1/iam/roles/configuration`，编辑调用 `PUT /api/v1/iam/roles/{roleId}/configuration`，都在一个事务中写角色字段、ACTIVE 可路由 menuIds 和页面可无损表达的 RoleGrant。替换导航时只删除当前 ACTIVE、未删除、可路由菜单的旧关系，已禁用、BUTTON 或墓碑菜单的既有 `iam_role_menu` 必须保留为历史。未知、高风险、有效期、多维度或带 target 的现有 Grant 会使表单只读，禁止静默覆盖。
 
 `local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线。升级完成后，`system_managed` 只表示 local bootstrap 来源：预留菜单仍须保有固定 ID、tenant 和来源标记，但允许正常编辑或写入墓碑且重启不回填；预置部门允许业务字段和 rowVersion 推进。物理缺失、租户/来源所有权漂移、预置 authCode 出现第二个活动绑定，以及身份/系统角色/Grant/role-menu 固定关系漂移仍失败关闭。
 
@@ -673,7 +673,7 @@ grantable 元数据使用绑定维度与模式的对象数组：
 
 请求不得提交风险、审批或 step-up 元数据；服务端从 ACTIVE Permission Catalog 校验并补齐。第一阶段拒绝 targets、有效期、FUND、approval 和非 TENANT/TENANT_ALL 授权。PUT 在同一事务内锁 tenant/actor/role，替换 grants/dimensions，递增 role rowVersion 与受影响 Membership permissionVersion，并追加 before/after audit 与 append-only outbox；`iam_role_menu` 保持不变。
 
-第一阶段授权 UI 还要维护当前管理页面的可执行依赖：用户新增同时需要 `user:view/department:view/role:view`；用户完整编辑同时需要 `user:view/user:update/user:disable/user:assign-role/department:view/role:view`；角色新增或编辑同时需要 `role:view/menu:view`；菜单和部门写操作分别依赖同资源的 view 权限。选择动作权限时 UI 自动补齐这些依赖，取消依赖时移除已不可用的动作；已有缺依赖组合会明确告警并禁止保存，不能把“成功写入但页面和 API 不可用”当成有效授权。
+第一阶段授权 UI 允许管理员逐个选择 Grant，不自动改写其他 BUTTON。当前管理页面的组合操作仍按其真实调用链失败关闭：用户新增需要 `user:view/department:view/role:view` 才能完整加载表单；用户完整编辑需要 `user:view/user:update/user:disable/user:assign-role/department:view/role:view`；角色新增或编辑需要 `role:view/menu:view`；菜单和部门写操作分别依赖同资源的 view 权限。缺少组合操作所需权限时，对应前端操作不可用，后端接口仍按 endpoint policy 拒绝；角色配置页不得因此自动补权、自动撤权或把已有角色强制设为只读。
 
 ## 1.11 Department API
 

@@ -24,10 +24,7 @@ import {
 import { $t } from '#/locales';
 
 import { useFormSchema } from '../data';
-import {
-  buildTenantRoleGrants,
-  findMissingPermissionDependencies,
-} from '../grant-contract';
+import { buildTenantRoleGrants } from '../grant-contract';
 import {
   buildRoleConfigurationTree,
   filterAvailableNavigationMenuIds,
@@ -191,15 +188,10 @@ async function initializeForm(existingRole?: SystemRoleApi.SystemRole) {
       const unsupportedPermission = permissionCodes.some(
         (permissionCode) => !configuration.buttonIdByPermission[permissionCode],
       );
-      const missingDependencies =
-        findMissingPermissionDependencies(permissionCodes).length > 0;
       const versionChanged =
         grantDetail.roleVersion !== existingRole.rowVersion;
       configurationReadOnly.value =
-        !grantDetail.editable ||
-        unsupportedPermission ||
-        missingDependencies ||
-        versionChanged;
+        !grantDetail.editable || unsupportedPermission || versionChanged;
       roleConfigurationTree.value = configuration;
       menuOptions.value = configuration.tree;
 
@@ -319,7 +311,7 @@ const getDrawerTitle = computed(() => {
             multiple
             bordered
             check-strictly
-            auto-check-parent
+            :auto-check-parent="false"
             :disabled="configurationReadOnly"
             :default-expanded-level="2"
             v-bind="slotProps"
