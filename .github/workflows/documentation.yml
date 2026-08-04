@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   verify:
+    name: documentation-verify
     runs-on: ubuntu-24.04
     container:
       image: python:3.13.14-bookworm@sha256:b4d62b6602fd5b284f82cb9b733cc550f237f847c065b84cbb54dfe28ce837a2
