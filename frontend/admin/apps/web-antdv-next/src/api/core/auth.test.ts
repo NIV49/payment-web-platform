@@ -57,7 +57,7 @@ describe('authentication request client', () => {
     adapter
       .mockRejectedValueOnce({
         response: {
-          data: { code: 40_102, error: 'INVALID_CREDENTIALS' },
+          data: { code: 40_101, error: 'INVALID_CREDENTIALS' },
           status: 401,
         },
       })
@@ -70,7 +70,7 @@ describe('authentication request client', () => {
       }));
 
     await expect(loginApi(credentials('invalid'))).rejects.toMatchObject({
-      code: 40_102,
+      code: 40_101,
       error: 'INVALID_CREDENTIALS',
     });
     await expect(loginApi(credentials('retry'))).resolves.toEqual(result);
