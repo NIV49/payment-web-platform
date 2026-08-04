@@ -21,7 +21,7 @@ from typing import Any, Iterable, Sequence
 
 SLICE_ID = "IAM-001-three-backoffice-session-isolation"
 TURN_ID = "019f7fea-28fb-7da3-808e-4e5f9c74533e"
-TARGET_BASE_SHA = "1ca8a89b7884cca5b2e7ed929f447a73b8a3ef18"
+TARGET_BASE_SHA = "741927d40838bd515f9ae1bd357ce25c92f55043"
 PROCESS_CHECK_ID = "IAM-001-PROCESS-BOUNDARY"
 MUTATION_CHECK_ID = "IAM-001-MUTATION-SENSITIVITY"
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")

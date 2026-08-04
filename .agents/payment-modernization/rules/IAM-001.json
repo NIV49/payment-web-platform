@@ -1,6 +1,6 @@
 {
   "ruleId": "IAM-001",
-  "status": "candidate",
+  "status": "approved",
   "statement": "Each backoffice accepts only its server-fixed account domain and uses a session, cookie, origin, login realm, and cache namespace that cannot be reused by another backoffice.",
   "scope": [
     "platform operations backoffice",
@@ -32,7 +32,7 @@
     {
       "kind": "decision",
       "source": "docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md",
-      "targetBaseSha": "1ca8a89b7884cca5b2e7ed929f447a73b8a3ef18",
+      "targetBaseSha": "741927d40838bd515f9ae1bd357ce25c92f55043",
       "location": "Decision"
     }
   ],
