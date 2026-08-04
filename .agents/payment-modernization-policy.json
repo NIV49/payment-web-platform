@@ -60,5 +60,20 @@
     "scripts/tests/test_modernization_contracts.py",
     "scripts/tests/test_payment_modernization_governance.py"
   ],
-  "trustedReviewers": []
+  "trustedReviewers": [
+    {
+      "reviewerId": "iam001-business-security",
+      "reviewerRole": "business-security",
+      "keyId": "iam001-business-security-ed25519-v1",
+      "signatureAlgorithm": "Ed25519",
+      "publicKey": "2pyZPATp3ukJW7NrV1f82lzBGGRX9pZfRRsJXz+B7CM="
+    },
+    {
+      "reviewerId": "iam001-implementation-adversary",
+      "reviewerRole": "implementation-adversary",
+      "keyId": "iam001-implementation-adversary-ed25519-v1",
+      "signatureAlgorithm": "Ed25519",
+      "publicKey": "1MaJ2rM2QzxUje3rClS+2bh67R6LFj4aBWS9uRX1GTM="
+    }
+  ]
 }
