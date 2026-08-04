@@ -282,9 +282,10 @@ class DocumentationPythonRuntimeSecurityTest(unittest.TestCase):
         self.assertEqual({"verify"}, set(jobs))
         verify_job = jobs["verify"]
         self.assertEqual(
-            {"runs-on", "container", "timeout-minutes", "steps"},
+            {"name", "runs-on", "container", "timeout-minutes", "steps"},
             set(verify_job),
         )
+        self.assertEqual("documentation-verify", verify_job["name"])
         self.assertEqual("ubuntu-24.04", verify_job["runs-on"])
         self.assertEqual(20, verify_job["timeout-minutes"])
         self.assertEqual({"image", "options"}, set(verify_job["container"]))
