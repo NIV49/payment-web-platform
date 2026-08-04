@@ -20,6 +20,7 @@ The application `User` is a business account, not the canonical record for a nat
 6. Session state records the account domain. Every authenticated request verifies the root domain, session domain, Tenant/User/Credential/Membership ACTIVE state, and permission/session versions before authorization. Disable, role or grant revocation, and password changes invalidate old sessions.
 7. Departments remain organization and data-scope inputs. Navigation comes from Role-to-Menu assignment; API and button authority comes from RoleGrant. Frontend visibility is never an authorization boundary.
 8. Merchant and agent phase-one roots expose only login, logout, current user, dynamic menu, permission codes, health, and the IAM checks required to enforce this boundary. No payment, ledger, channel, settlement, or funds behavior is introduced by this decision.
+9. An ACTIVE Membership is necessary but not sufficient to enter a back office. Its roles must provide the root-specific `backoffice:{platform|merchant|agent}-access` RoleGrant. The access Grant uses the canonical `system-backoffice-access` key, exact `TENANT/TENANT_ALL` scope, and is created and preserved only by the server. It is evaluated from the server-side catalog and returned by `/auth/codes`, but is not exposed through the tenant-managed 18-permission editor. It is never inferred from Membership state, Department, navigation, or a client field.
 
 ## Consequences
 
@@ -28,9 +29,15 @@ The application `User` is a business account, not the canonical record for a nat
 - The three frontends may share source and Vben framework packages, but each deployment artifact has its own title, storage namespace, API origin, entry URL, component allowlist, and build output. Frontend configuration is presentation and routing input only.
 - Existing same-domain multi-Membership accounts are not deleted or merged. Until a trusted workspace resolver exists for such an account, the generic login entry rejects the ambiguous login.
 - Independent Cookie names are necessary because browser Cookies are not isolated by port. Independent Sa-Token login types and Redis namespaces remain mandatory even if token values or numeric IDs collide.
+- V19 creates the three server-owned entry permissions and backfills one canonical entry Grant for every non-deleted historical role according to its Tenant account domain. V20 then deterministically renames any pre-V19 tenant Grant that legally used the now-reserved `system-backoffice-access` key, preserving its permission, status, dimensions, targets and validity while recording audit and version evidence. New roles receive the protected Grant inside their creation transaction; malformed, missing, wrong-domain or multiply defined entry Grants make migration and the role administration surface fail closed.
 
 ## Migration And Rollback
 
-The database change is forward-only and additive. Before schema cutover, run a deterministic preflight that reports every cross-domain or unresolved User and stop on any result. During cutover, freeze all IAM writes, deploy the three roots and browser artifacts, and run the cross-domain smoke matrix before lifting the freeze. Failure inside that window can restore the complete pre-cutover state with zero IAM write loss.
+The database change is forward-only and additive. Before schema cutover, run the repository-owned deterministic preflight below and stop if it returns any row; each row has a stable `issue_code` and sorted domain evidence for an explicit account-splitting decision. During cutover, freeze all IAM writes, deploy the three roots and browser artifacts, and run the cross-domain smoke matrix before lifting the freeze. Failure inside that window can restore the complete pre-cutover state with zero IAM write loss.
+
+```bash
+psql "$PAYMENT_DB_URL" -v ON_ERROR_STOP=1 \
+  -f backend/scripts/iam001-account-domain-preflight.sql
+```
 
 After merchant or agent entries accept traffic, the pre-decision binary is not a valid rollback target because it trusts client `tenantId` and has no realm boundary. Incident response must stop the affected entries, preserve new IAM and audit data, and forward-fix. This ADR can be superseded only by another accepted decision with an explicit account/session migration; disabling the new entries does not authorize reusing accounts or sessions across domains.

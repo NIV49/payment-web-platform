@@ -1,5 +1,9 @@
 interface AuthenticationProps {
   /**
+   * @zh_CN 记住账号的存储命名空间
+   */
+  rememberMeNamespace?: string;
+  /**
    * @zh_CN 验证码登录路径
    */
   codeLoginPath?: string;

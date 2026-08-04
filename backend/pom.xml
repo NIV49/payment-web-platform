@@ -15,6 +15,9 @@
     <modules>
         <module>modules/identity</module>
         <module>applications/admin-api</module>
+        <module>applications/merchant-admin-api</module>
+        <module>applications/agent-admin-api</module>
+        <module>tests/iam001-blackbox</module>
     </modules>
 
     <properties>
@@ -54,6 +57,11 @@
             <dependency>
                 <groupId>com.niv.payment</groupId>
                 <artifactId>identity-session-satoken</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.niv.payment</groupId>
+                <artifactId>identity-backoffice-web</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

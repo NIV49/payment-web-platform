@@ -136,6 +136,22 @@ public class IamAuthenticationCredentialRecord extends UpdatableRecordImpl<IamAu
         return (Long) get(7);
     }
 
+    /**
+     * Setter for
+     * <code>public.iam_authentication_credential.account_domain</code>.
+     */
+    public void setAccountDomain(String value) {
+        set(8, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.iam_authentication_credential.account_domain</code>.
+     */
+    public String getAccountDomain() {
+        return (String) get(8);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -159,7 +175,7 @@ public class IamAuthenticationCredentialRecord extends UpdatableRecordImpl<IamAu
     /**
      * Create a detached, initialised IamAuthenticationCredentialRecord
      */
-    public IamAuthenticationCredentialRecord(Long userId, String username, String passwordHash, String status, OffsetDateTime lastLoginAt, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion) {
+    public IamAuthenticationCredentialRecord(Long userId, String username, String passwordHash, String status, OffsetDateTime lastLoginAt, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String accountDomain) {
         super(IamAuthenticationCredential.IAM_AUTHENTICATION_CREDENTIAL);
 
         setUserId(userId);
@@ -170,6 +186,7 @@ public class IamAuthenticationCredentialRecord extends UpdatableRecordImpl<IamAu
         setCreatedAt(createdAt);
         setUpdatedAt(updatedAt);
         setRowVersion(rowVersion);
+        setAccountDomain(accountDomain);
         resetTouchedOnNotNull();
     }
 }

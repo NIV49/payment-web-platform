@@ -1,12 +1,6 @@
-export const MENU_PAGE_COMPONENTS = [
-  '/dashboard/analytics/index',
-  '/dashboard/workspace/index',
-  '/demos/antd/index',
-  '/system/dept/list',
-  '/system/menu/list',
-  '/system/role/list',
-  '/system/user/list',
-] as const;
+import { DEPLOYMENT_MENU_PAGE_COMPONENTS } from '#/deployment-policy';
+
+export const MENU_PAGE_COMPONENTS = DEPLOYMENT_MENU_PAGE_COMPONENTS;
 
 export const VBEN_IFRAME_COMPONENT = 'IFrameView';
 

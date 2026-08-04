@@ -7,7 +7,7 @@
 
 ## 1. 工程定位
 
-`frontend/admin` 是独立 pnpm + Turborepo monorepo。它保留一个产品应用、一个 Mock 应用和 Playground，同时保留 Vben 共享包与工程工具。`frontend/portal` 是未来 Nuxt 4 多应用 monorepo 的占位目录，不属于本工程工作区。
+`frontend/admin` 是独立 pnpm + Turborepo monorepo。一个产品源码应用通过 PLATFORM、MERCHANT、AGENT 三个构建策略生成相互隔离的后台产物；它另保留 Mock 应用、Playground、Vben 共享包与工程工具。`frontend/portal` 是未来 Nuxt 4 多应用 monorepo 的占位目录，不是后台入口。
 
 运行时主要依赖方向：
 
@@ -106,7 +106,8 @@ apps/web-antdv-next
 | `locales` | 应用语言包与 Antdv/Day.js locale | `setupI18n`, `$t` |
 | `router/routes/core.ts` | 登录、错误页等无业务核心路由 | 永久注册 |
 | `router/routes/modules` | mixed 模式本地 allowlist 与未注册参考源码 | 产品只注册 `profile.ts` |
-| `router/product-access.ts` | 固定 mixed 模式和本地 Profile name/path 冲突保护 | `PRODUCT_ACCESS_MODE` |
+| `router/product-access.ts` | 固定 mixed 模式，递归保护核心/fallback/Profile canonical name/path | `PRODUCT_ACCESS_MODE` |
+| `router/route-lifecycle.ts` | 按启动时冻结的核心 route name 清除用户动态路由；route generation 阻止旧路由回挂，session generation 阻止旧身份与权限码回写 | 登录换用户、退出 |
 | `router/access.ts` | pageMap/layoutMap、后端菜单加载和合并前校验 | `generateAccess` |
 | `router/guard.ts` | token、用户信息、动态路由注入 | `setupAccessGuard` |
 | `store/auth.ts` | 登录、用户/权限码加载、退出 | `useAuthStore` |
@@ -126,14 +127,14 @@ login.vue
   -> GET /user/info + GET /auth/codes
   -> router guard
   -> GET /menu/all
-  -> reject reserved Profile name/path collisions
+  -> reject static core/fallback/local route name/path collisions
   -> backend route conversion + local Profile
   -> accessStore menus/routes
 ```
 
-前端 store 保存的是 `cookie-session` 非敏感状态标记，真正会话由 `PAYMENT_SESSION` HttpOnly Cookie 持有。`api/core/user-contract.ts` 对 `/user/info` 做显式运行时映射：`userId/avatar/desc/homePath/roles` 等字段必须满足契约，`token` 必须精确等于 `cookie-session`；`systemAdministrator` 只有严格为 `true` 才启用系统角色管理能力，缺失或畸形时默认拒绝；未知附加字段会被忽略。该 marker 不会在获取用户信息时写回 access-token store。请求设置 `withCredentials: true`。这个方案与 Vben 默认 Bearer token 示例不同，修改认证代码时必须同时核对 `api/session.ts`、`api/request.ts`、Auth Store 和后端 Sa-Token Cookie 配置。
+前端 store 保存的是 `cookie-session` 非敏感状态标记，真正会话由当前账号域独立的 `PAYMENT_PLATFORM_SESSION`、`PAYMENT_MERCHANT_SESSION` 或 `PAYMENT_AGENT_SESSION` HttpOnly Cookie 持有。`api/core/user-contract.ts` 对 `/user/info` 做显式运行时映射；marker 不会作为 Authorization 发送。三种构建策略使用独立 title、storage namespace、API 同源路径和 literal component glob/allowlist，MERCHANT/AGENT 产物不能静态包含 PLATFORM 系统管理页面。登录页只保留用户名/密码方式；记住用户名的 key 包含 `VITE_APP_NAMESPACE` 与 `location.host`，不能跨账号域或端口复用。前端配置只约束展示；服务端仍固定并验证账号域与入口 RoleGrant。
 
-登录后的 redirect 只接受当前动态路由中可访问的站内绝对路径；历史双重编码值最多解两层，根路径、登录页、站外或不可访问路径统一回退到后端 `/user/info.homePath`，避免受限角色被固定 `/dashboard` 导向 404。退出登录把原始当前路径交给 Vue Router 编码，不再手工预编码查询参数。
+登录后的 redirect 只接受当前动态路由中可访问的站内绝对路径；历史双重编码值最多解两层，根路径、登录页、站外或不可访问路径统一回退到后端 `/user/info.homePath`，避免受限角色被固定 `/dashboard` 导向 404。退出登录把原始当前路径交给 Vue Router 编码，不再手工预编码查询参数。同一前端实例对重复 login 使用 single-flight，并按响应完成顺序串行 login→logout 和 logout→login，避免迟到的 `Set-Cookie` 或清 Cookie 响应覆盖较新的会话；共享登录组件在 loading 时也拒绝 Enter/点击重复提交。登录和退出使用专用认证请求客户端：它保留 Cookie、响应解包和错误提示，但不安装业务请求的 401 refresh/re-auth 拦截器，因此错误凭证只拒绝当前登录，logout 401 也不会再次调用 logout。新的登录尝试及退出都会清空旧用户、权限码、会话 marker 与动态路由，并推进 session generation 和 route generation；`/user/info` 与 `/auth/codes` 必须同时返回且 session generation 仍有效才原子写入，旧菜单请求还必须通过 route generation 复核才能写 Router 或 access store。真实 memory Router 与 store 回归覆盖正常清理、退出发生在菜单请求完成前、login/logout 响应排序、401 后重试和旧身份请求延迟返回，保证单一前端实例内旧身份、按钮权限、Cookie 写顺序和路由不回挂，且 `/auth/login` 始终解析为原始 `Login`。跨标签页认证写请求尚未使用 Web Locks 或服务端 attempt nonce 串行化，仍属于真实浏览器安全演练项。
 
 本地开发服务器可在进程环境中注入 `VITE_LOCAL_ADMIN_USERNAME` 和 `VITE_LOCAL_ADMIN_PASSWORD`，登录页只在 `import.meta.env.DEV=true` 时预填，仍由开发者点击登录。真实值不得写入受版本控制的 `.env*`、源码、日志、截图或测试产物；生产模式即使存在同名变量也必须返回空默认值，并用合成哨兵构建确认产物不包含凭据。
 
@@ -180,21 +181,24 @@ views/system/*/list.vue
 
 ```bash
 pnpm install
-pnpm dev:antdv-next
+pnpm -F @vben/web-antdv-next run dev:platform  # 127.0.0.1:5999
+pnpm -F @vben/web-antdv-next run dev:merchant  # 127.0.0.1:6002
+pnpm -F @vben/web-antdv-next run dev:agent     # 127.0.0.1:6001
 pnpm run lint
 pnpm -F @vben/web-antdv-next run typecheck
 pnpm run test:production-safety
-pnpm build:antdv-next
+pnpm -F @vben/web-antdv-next run build:all
+node scripts/deploy/verify-three-artifacts.mjs
 pnpm test:unit
 ```
 
 ### 生产部署边界
 
-- `apps/web-antdv-next/.env.production` 固定使用同源 `/api`；生产入口网关必须把 `/api` 转发到后端，产品构建不得连接 Vben 公网 Mock。
+- `.env.platform`、`.env.merchant`、`.env.agent` 固定使用同源 `/api`；生产入口网关必须把每个产物的 `/api` 转发到匹配的账号域 API 根，产品构建不得连接 Vben 公网 Mock。
 - 产品入口默认不加载第三方统计脚本。确需接入分析服务时必须单独完成数据合规、安全评审和显式配置，不能在 HTML 中硬编码。
-- `scripts/deploy/Dockerfile` 只执行 `build:antdv-next`，且只复制 `apps/web-antdv-next/dist`。Playground 仅用于本地示例，禁止进入产品镜像。
+- `scripts/deploy/Dockerfile` 只接受 PLATFORM/MERCHANT/AGENT allowlist 变体并只复制对应 `dist/<variant>`；每次单变体构建只清理自身 `dist/<variant>`，保留 sibling 变体。`verify-three-artifacts.mjs` 校验三个产物集合、manifest、namespace、API、禁止 component，并拒绝 manifest 未引用的残留 JS/CSS。Playground 仅用于本地示例，禁止进入产品镜像。
 - 依赖安装 lifecycle 不使用 `npx`/`pnpm dlx`；原 `preinstall: npx only-allow pnpm` 已删除，`production-safety.test.ts` 会扫描 lifecycle 脚本防止回归。手动 `update:deps`/`catalog` 命令不是安装 lifecycle，不得在未评审情况下自动触发。
-- `scripts/deploy/production-safety.test.ts` 守护上述边界；业务 CI 只由仓库根目录 `.github/workflows/frontend.yml` 定义，并在前端变更时执行 frozen install、全量 lint、产品 app typecheck、单测、production-safety 和产品构建。`frontend/admin` 内不保留嵌套 `.github`，避免出现 GitHub 不会加载的失效工作流和仓库元数据。
+- `scripts/deploy/production-safety.test.ts` 守护上述边界；业务 CI 在前端变更时执行 frozen install、全量 lint、产品 app typecheck、单测、production-safety、三产物构建和产物隔离验证。
 
 Playground：
 

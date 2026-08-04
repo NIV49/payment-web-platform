@@ -12,6 +12,7 @@ import java.util.Set;
 /** Constrained administration surface for normal, tenant-wide IAM grants. */
 public final class RoleGrantAdministrationService {
     public static final String GRANT_UPDATE_PERMISSION = "role:grant-update";
+    public static final String PROTECTED_PORTAL_GRANT_KEY = "system-backoffice-access";
     public static final Set<String> GRANTABLE_CODES = Set.of(
         "user:view", "user:create", "user:update", "user:delete", "user:disable", "user:assign-role",
         "role:view", "role:create", "role:update", "role:delete",
@@ -69,6 +70,9 @@ public final class RoleGrantAdministrationService {
         Set<String> keys = new HashSet<>();
         Set<String> permissions = new HashSet<>();
         for (RoleGrantModels.Selection grant : command.grants()) {
+            if (PROTECTED_PORTAL_GRANT_KEY.equals(grant.grantKey())) {
+                throw new IllegalArgumentException("Grant key is reserved for server-managed backoffice access");
+            }
             if (!GRANTABLE_CODES.contains(grant.permission().value())) {
                 throw new IllegalArgumentException("Permission is not grantable from this administration surface");
             }

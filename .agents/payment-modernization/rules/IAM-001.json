@@ -1,0 +1,44 @@
+{
+  "ruleId": "IAM-001",
+  "status": "candidate",
+  "statement": "Each backoffice accepts only its server-fixed account domain and uses a session, cookie, origin, login realm, and cache namespace that cannot be reused by another backoffice.",
+  "scope": [
+    "platform operations backoffice",
+    "merchant backoffice",
+    "agent backoffice",
+    "identity login and session authorization"
+  ],
+  "given": [
+    "three independently deployed backoffice entries",
+    "an account and membership assigned to exactly one account domain"
+  ],
+  "when": [
+    "a principal logs in or calls an authenticated API",
+    "an administrator disables a membership, changes a password, or changes role grants"
+  ],
+  "then": [
+    "the server derives the account domain from the application entry and never from tenantId supplied by the client",
+    "credentials, active membership, tenant type, session realm, cookie, origin, and cache namespace must all match that account domain",
+    "unknown routes and direct requests without effective permission are denied",
+    "old sessions fail after membership disable, password change, revocation, or permission version change"
+  ],
+  "counterexamples": [
+    "a platform cookie authenticates a merchant or agent request",
+    "a login request selects another workspace by supplying tenantId",
+    "a cached platform grant authorizes a merchant session",
+    "a hidden frontend action succeeds when called directly without its permission"
+  ],
+  "evidence": [
+    {
+      "kind": "decision",
+      "source": "docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md",
+      "targetBaseSha": "1ca8a89b7884cca5b2e7ed929f447a73b8a3ef18",
+      "location": "Decision"
+    }
+  ],
+  "confidence": "high",
+  "judgeTests": [
+    "IAM-001-MUTATION-SENSITIVITY",
+    "IAM-001-PROCESS-BOUNDARY"
+  ]
+}

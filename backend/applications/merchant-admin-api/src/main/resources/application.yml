@@ -1,0 +1,53 @@
+server:
+  address: ${PAYMENT_MERCHANT_BIND_ADDRESS:127.0.0.1}
+  port: ${PAYMENT_MERCHANT_PORT:8082}
+  forward-headers-strategy: NONE
+
+spring:
+  application:
+    name: payment-merchant-admin-api
+  datasource:
+    url: ${PAYMENT_DB_URL}
+    username: ${PAYMENT_DB_USERNAME}
+    password: ${PAYMENT_DB_PASSWORD}
+  data:
+    redis:
+      host: ${PAYMENT_REDIS_HOST}
+      port: ${PAYMENT_REDIS_PORT}
+      password: ${PAYMENT_REDIS_PASSWORD}
+  flyway:
+    enabled: ${PAYMENT_FLYWAY_ENABLED:false}
+    locations: classpath:db/migration
+  jooq:
+    sql-dialect: POSTGRES
+  jackson:
+    default-property-inclusion: non_null
+    deserialization:
+      fail-on-unknown-properties: true
+
+sa-token:
+  token-name: PAYMENT_MERCHANT_SESSION
+  timeout: 28800
+  active-timeout: 1800
+  is-concurrent: false
+  is-share: false
+  is-read-cookie: true
+  is-read-header: false
+  is-read-body: false
+  is-write-header: false
+  is-lasting-cookie: true
+  right-now-create-token-session: true
+  cookie:
+    http-only: true
+    secure: ${PAYMENT_COOKIE_SECURE:true}
+    same-site: Strict
+    path: /
+
+payment:
+  identity:
+    login-type: merchant-admin
+  security:
+    allowed-origin: ${PAYMENT_MERCHANT_ALLOWED_ORIGIN:http://127.0.0.1:6002}
+    max-request-body-bytes: 262144
+  menu:
+    allowed-page-components: /dashboard/workspace/index

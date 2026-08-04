@@ -30,6 +30,7 @@ const props = withDefaults(defineProps<Props>(), {
   formSchema: () => [],
   loading: false,
   qrCodeLoginPath: '/auth/qrcode-login',
+  rememberMeNamespace: 'vben',
   registerPath: '/auth/register',
   showCodeLogin: true,
   showForgetPassword: true,
@@ -58,13 +59,14 @@ const [Form, formApi] = useVbenForm(
 );
 const router = useRouter();
 
-const REMEMBER_ME_KEY = `REMEMBER_ME_USERNAME_${location.hostname}`;
+const REMEMBER_ME_KEY = `${props.rememberMeNamespace}:REMEMBER_ME_USERNAME:${location.host}`;
 
 const localUsername = localStorage.getItem(REMEMBER_ME_KEY) || '';
 
 const rememberMe = ref(!!localUsername);
 
 async function handleSubmit() {
+  if (props.loading) return;
   const { valid } = await formApi.validate();
   const values = await formApi.getValues();
   if (valid) {

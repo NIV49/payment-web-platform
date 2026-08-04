@@ -1,7 +1,4 @@
-package com.niv.payment.adminapi.web;
-
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+package com.niv.payment.permission.backoffice;
 
 import java.util.Arrays;
 import java.util.Locale;
@@ -11,7 +8,6 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /** Validates the persisted string form consumed by Vben's backend-route converter. */
-@Component
 public final class VbenMenuContract {
     private static final String IFRAME_COMPONENT = "IFrameView";
     private static final Set<String> TYPES = Set.of("catalog", "menu", "embedded", "link", "button");
@@ -32,7 +28,7 @@ public final class VbenMenuContract {
 
     private final Set<String> allowedPageComponents;
 
-    public VbenMenuContract(@Value("${payment.menu.allowed-page-components:}") String components) {
+    public VbenMenuContract(String components) {
         this.allowedPageComponents = Set.copyOf(Arrays.stream(components.split(","))
             .map(String::trim).filter(value -> !value.isEmpty()).toList());
     }
@@ -70,7 +66,7 @@ public final class VbenMenuContract {
      * Full route validation is intentionally write-only; historical display text is not
      * executable, while external navigation fields are.
      */
-    void validateStoredMetadata(String typeValue, Map<String, Object> meta) {
+    public void validateStoredMetadata(String typeValue, Map<String, Object> meta) {
         String type = menuType(typeValue);
         validateMetadata(meta);
         validateExternalNavigation(type, meta);

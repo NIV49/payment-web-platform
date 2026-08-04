@@ -1,6 +1,10 @@
 import type { COOKIE_SESSION_MARKER } from '../session';
 
-import { baseRequestClient, requestClient } from '#/api/request';
+import {
+  authenticationRequestClient,
+  baseRequestClient,
+  requestClient,
+} from '#/api/request';
 
 export const LOGIN_CREDENTIAL_FIELD = 'password' as const;
 
@@ -26,7 +30,7 @@ export namespace AuthApi {
  * 登录
  */
 export async function loginApi(data: AuthApi.LoginParams) {
-  return requestClient.post<AuthApi.LoginResult>('/auth/login', {
+  return authenticationRequestClient.post<AuthApi.LoginResult>('/auth/login', {
     [LOGIN_CREDENTIAL_FIELD]: data.password,
     username: data.username,
   });
@@ -46,7 +50,7 @@ export async function refreshTokenApi() {
  * 退出登录
  */
 export async function logoutApi() {
-  return baseRequestClient.post('/auth/logout', null);
+  return authenticationRequestClient.post('/auth/logout', null);
 }
 
 /**

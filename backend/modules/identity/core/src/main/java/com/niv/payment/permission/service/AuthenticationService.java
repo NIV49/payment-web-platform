@@ -1,5 +1,7 @@
 package com.niv.payment.permission.service;
 
+import com.niv.payment.permission.domain.AccountDomain;
+
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -10,12 +12,15 @@ public final class AuthenticationService {
     private final LoginAttemptLimiter limiter;
     private final SessionIssuer sessions;
     private final String dummyPasswordHash;
+    private final AccountDomain accountDomain;
 
-    public AuthenticationService(CredentialLookup credentials,
+    public AuthenticationService(AccountDomain accountDomain,
+                                 CredentialLookup credentials,
                                  PasswordVerifier passwordVerifier,
                                  LoginAttemptLimiter limiter,
                                  SessionIssuer sessions,
                                  String dummyPasswordHash) {
+        this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
         this.credentials = Objects.requireNonNull(credentials, "credentials");
         this.passwordVerifier = Objects.requireNonNull(passwordVerifier, "passwordVerifier");
         this.limiter = Objects.requireNonNull(limiter, "limiter");
@@ -31,7 +36,8 @@ public final class AuthenticationService {
         String username = normalizeUsername(command.username());
         limiter.acquire(command.clientKey(), username);
 
-        Optional<CredentialAccount> found = credentials.findActiveByUsername(username, command.tenantId());
+        Optional<CredentialAccount> found = credentials.findActiveByUsername(username, accountDomain)
+            .filter(account -> account.accountDomain() == accountDomain);
         Optional<CredentialAccount> loginCapable = found.filter(account ->
             LoginCredentialPolicy.isLoginCapableHash(account.passwordHash()));
         String encodedPassword = loginCapable.map(CredentialAccount::passwordHash).orElse(dummyPasswordHash);
@@ -65,17 +71,10 @@ public final class AuthenticationService {
         return normalized;
     }
 
-    public record LoginCommand(String username, String password, Long tenantId, String clientKey) {
+    public record LoginCommand(String username, String password, String clientKey) {
         public LoginCommand {
             Objects.requireNonNull(password, "password");
             Objects.requireNonNull(clientKey, "clientKey");
-            if (tenantId != null && tenantId <= 0) {
-                throw new AuthenticationFailedException();
-            }
-        }
-
-        public LoginCommand(String username, String password, String clientKey) {
-            this(username, password, null, clientKey);
         }
     }
 
@@ -85,12 +84,14 @@ public final class AuthenticationService {
                                     Long departmentId,
                                     long permissionVersion,
                                     long sessionVersion,
+                                    AccountDomain accountDomain,
                                     String passwordHash) {
         public CredentialAccount {
             if (userId <= 0 || membershipId <= 0 || tenantId <= 0
                 || permissionVersion < 0 || sessionVersion < 0) {
                 throw new IllegalArgumentException("Credential identity is invalid");
             }
+            Objects.requireNonNull(accountDomain, "accountDomain");
             Objects.requireNonNull(passwordHash, "passwordHash");
         }
     }
@@ -105,7 +106,7 @@ public final class AuthenticationService {
 
     @FunctionalInterface
     public interface CredentialLookup {
-        Optional<CredentialAccount> findActiveByUsername(String normalizedUsername, Long tenantId);
+        Optional<CredentialAccount> findActiveByUsername(String normalizedUsername, AccountDomain accountDomain);
 
         default void markLoginSucceeded(long userId) {
         }

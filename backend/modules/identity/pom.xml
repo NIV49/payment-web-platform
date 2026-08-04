@@ -22,5 +22,6 @@
         <module>persistence-postgres</module>
         <module>cache-redis</module>
         <module>session-satoken</module>
+        <module>backoffice-web</module>
     </modules>
 </project>

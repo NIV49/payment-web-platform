@@ -1,5 +1,6 @@
 package com.niv.payment.adminapi.config;
 
+import com.niv.payment.permission.backoffice.BackofficeSchemaReadinessGuard;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.flyway.autoconfigure.FlywayProperties;
 import org.springframework.boot.sql.init.dependency.DatabaseInitializationDependencyConfigurer;
@@ -23,9 +24,10 @@ import javax.sql.DataSource;
 class FlywaySchemaReadinessConfiguration {
     @Bean
     @DependsOnDatabaseInitialization
-    FlywaySchemaReadinessGuard flywaySchemaReadinessGuard(DataSource dataSource,
-                                                          FlywayProperties properties,
-                                                          ResourceLoader resourceLoader) {
-        return new FlywaySchemaReadinessGuard(dataSource, properties, resourceLoader.getClassLoader());
+    BackofficeSchemaReadinessGuard flywaySchemaReadinessGuard(DataSource dataSource,
+                                                              FlywayProperties properties,
+                                                              ResourceLoader resourceLoader) {
+        return new BackofficeSchemaReadinessGuard(
+            dataSource, properties, resourceLoader.getClassLoader());
     }
 }

@@ -82,6 +82,7 @@ public class JooqRoleConfigurationRepository implements RoleConfigurationPort {
             .set(IAM_ROLE.STATUS, status(command.status()))
             .set(IAM_ROLE.REMARK, JooqAdministrationSupport.blankToNull(command.remark()))
             .execute();
+        grants.insertProtectedPortalGrant(command.tenantId(), roleId, command.actor().membershipId());
         replaceMenus(command.tenantId(), roleId, menuIds);
         grants.replaceGrantRows(
             command.tenantId(), roleId, command.actor().membershipId(),

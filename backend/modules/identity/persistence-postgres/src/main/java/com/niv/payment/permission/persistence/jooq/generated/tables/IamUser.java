@@ -116,6 +116,11 @@ public class IamUser extends TableImpl<IamUserRecord> {
      */
     public final TableField<IamUserRecord, String> REMARK = createField(DSL.name("remark"), SQLDataType.VARCHAR(500), this, "");
 
+    /**
+     * The column <code>public.iam_user.account_domain</code>.
+     */
+    public final TableField<IamUserRecord, String> ACCOUNT_DOMAIN = createField(DSL.name("account_domain"), SQLDataType.VARCHAR(16).nullable(false), this, "");
+
     private IamUser(Name alias, Table<IamUserRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -190,33 +195,63 @@ public class IamUser extends TableImpl<IamUserRecord> {
 
     @Override
     public List<UniqueKey<IamUserRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.UK_IAM_USER_IDP_IDENTITY);
+        return Arrays.asList(Keys.UK_IAM_USER_ID_ACCOUNT_DOMAIN, Keys.UK_IAM_USER_IDP_IDENTITY);
     }
 
-    private transient IamAuthenticationCredentialPath _iamAuthenticationCredential;
+    private transient IamAuthenticationCredentialPath _fkIamAuthenticationUserDomain;
 
     /**
      * Get the implicit to-many join path to the
-     * <code>public.iam_authentication_credential</code> table
+     * <code>public.iam_authentication_credential</code> table, via the
+     * <code>fk_iam_authentication_user_domain</code> key
      */
-    public IamAuthenticationCredentialPath iamAuthenticationCredential() {
-        if (_iamAuthenticationCredential == null)
-            _iamAuthenticationCredential = new IamAuthenticationCredentialPath(this, null, Keys.IAM_AUTHENTICATION_CREDENTIAL__IAM_AUTHENTICATION_CREDENTIAL_USER_ID_FKEY.getInverseKey());
+    public IamAuthenticationCredentialPath fkIamAuthenticationUserDomain() {
+        if (_fkIamAuthenticationUserDomain == null)
+            _fkIamAuthenticationUserDomain = new IamAuthenticationCredentialPath(this, null, Keys.IAM_AUTHENTICATION_CREDENTIAL__FK_IAM_AUTHENTICATION_USER_DOMAIN.getInverseKey());
 
-        return _iamAuthenticationCredential;
+        return _fkIamAuthenticationUserDomain;
     }
 
-    private transient IamMembershipPath _iamMembership;
+    private transient IamMembershipPath _fkIamMembershipUserDomain;
 
     /**
      * Get the implicit to-many join path to the
-     * <code>public.iam_membership</code> table
+     * <code>public.iam_membership</code> table, via the
+     * <code>fk_iam_membership_user_domain</code> key
      */
-    public IamMembershipPath iamMembership() {
-        if (_iamMembership == null)
-            _iamMembership = new IamMembershipPath(this, null, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_USER_ID_FKEY.getInverseKey());
+    public IamMembershipPath fkIamMembershipUserDomain() {
+        if (_fkIamMembershipUserDomain == null)
+            _fkIamMembershipUserDomain = new IamMembershipPath(this, null, Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_USER_DOMAIN.getInverseKey());
 
-        return _iamMembership;
+        return _fkIamMembershipUserDomain;
+    }
+
+    private transient IamAuthenticationCredentialPath _iamAuthenticationCredentialUserIdFkey;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_authentication_credential</code> table, via the
+     * <code>iam_authentication_credential_user_id_fkey</code> key
+     */
+    public IamAuthenticationCredentialPath iamAuthenticationCredentialUserIdFkey() {
+        if (_iamAuthenticationCredentialUserIdFkey == null)
+            _iamAuthenticationCredentialUserIdFkey = new IamAuthenticationCredentialPath(this, null, Keys.IAM_AUTHENTICATION_CREDENTIAL__IAM_AUTHENTICATION_CREDENTIAL_USER_ID_FKEY.getInverseKey());
+
+        return _iamAuthenticationCredentialUserIdFkey;
+    }
+
+    private transient IamMembershipPath _iamMembershipUserIdFkey;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_membership</code> table, via the
+     * <code>iam_membership_user_id_fkey</code> key
+     */
+    public IamMembershipPath iamMembershipUserIdFkey() {
+        if (_iamMembershipUserIdFkey == null)
+            _iamMembershipUserIdFkey = new IamMembershipPath(this, null, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_USER_ID_FKEY.getInverseKey());
+
+        return _iamMembershipUserIdFkey;
     }
 
     /**
@@ -224,12 +259,13 @@ public class IamUser extends TableImpl<IamUserRecord> {
      * <code>public.iam_tenant</code> table
      */
     public IamTenantPath iamTenant() {
-        return iamMembership().iamTenant();
+        return iamMembershipUserIdFkey().iamMembershipTenantIdFkey();
     }
 
     @Override
     public List<Check<IamUserRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("ck_iam_user_account_domain"), "(((account_domain)::text = ANY ((ARRAY['PLATFORM'::character varying, 'MERCHANT'::character varying, 'AGENT'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_user_status"), "(((status)::text = ANY ((ARRAY['PENDING_ACTIVATION'::character varying, 'ACTIVE'::character varying, 'DISABLED'::character varying, 'LOCKED'::character varying])::text[])))", true)
         );
     }

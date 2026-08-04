@@ -10,6 +10,12 @@ import { useAuthStore } from '#/store';
 
 import { generateAccess } from './access';
 import { resolvePostLoginPath } from './post-login-redirect';
+import {
+  getProductSessionGeneration,
+  isProductRouteGenerationCurrent,
+  isProductSessionGenerationCurrent,
+  startProductRouteGeneration,
+} from './route-lifecycle';
 
 /**
  * 通用守卫配置
@@ -91,18 +97,38 @@ function setupAccessGuard(router: Router) {
       return true;
     }
 
+    const routeGeneration = startProductRouteGeneration();
+    const sessionGeneration = getProductSessionGeneration();
+
     // 生成路由表
     // 当前登录用户拥有的角色标识列表
-    const userInfo = userStore.userInfo || (await authStore.fetchUserInfo());
+    const userInfo =
+      userStore.userInfo || (await authStore.fetchUserInfo(sessionGeneration));
+    if (
+      !isProductRouteGenerationCurrent(routeGeneration) ||
+      !isProductSessionGenerationCurrent(sessionGeneration)
+    ) {
+      return false;
+    }
     const userRoles = userInfo.roles ?? [];
 
     // 生成菜单和路由
     const { accessibleMenus, accessibleRoutes } = await generateAccess({
+      canCommitRoutes: () =>
+        isProductRouteGenerationCurrent(routeGeneration) &&
+        isProductSessionGenerationCurrent(sessionGeneration),
       roles: userRoles,
       router,
       // 则会在菜单中显示，但是访问会被重定向到403
       routes: accessRoutes,
     });
+
+    if (
+      !isProductRouteGenerationCurrent(routeGeneration) ||
+      !isProductSessionGenerationCurrent(sessionGeneration)
+    ) {
+      return false;
+    }
 
     // 保存菜单信息和路由信息
     accessStore.setAccessMenus(accessibleMenus);

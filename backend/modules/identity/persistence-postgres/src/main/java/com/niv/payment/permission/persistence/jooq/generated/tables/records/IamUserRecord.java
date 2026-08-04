@@ -174,6 +174,20 @@ public class IamUserRecord extends UpdatableRecordImpl<IamUserRecord> {
         return (String) get(10);
     }
 
+    /**
+     * Setter for <code>public.iam_user.account_domain</code>.
+     */
+    public void setAccountDomain(String value) {
+        set(11, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_user.account_domain</code>.
+     */
+    public String getAccountDomain() {
+        return (String) get(11);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -197,7 +211,7 @@ public class IamUserRecord extends UpdatableRecordImpl<IamUserRecord> {
     /**
      * Create a detached, initialised IamUserRecord
      */
-    public IamUserRecord(Long id, String idpIssuer, String idpSubject, String displayName, byte[] emailCipher, byte[] phoneCipher, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark) {
+    public IamUserRecord(Long id, String idpIssuer, String idpSubject, String displayName, byte[] emailCipher, byte[] phoneCipher, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark, String accountDomain) {
         super(IamUser.IAM_USER);
 
         setId(id);
@@ -211,6 +225,7 @@ public class IamUserRecord extends UpdatableRecordImpl<IamUserRecord> {
         setUpdatedAt(updatedAt);
         setRowVersion(rowVersion);
         setRemark(remark);
+        setAccountDomain(accountDomain);
         resetTouchedOnNotNull();
     }
 }

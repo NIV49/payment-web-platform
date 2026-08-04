@@ -16,14 +16,25 @@
   },
   "type": "module",
   "scripts": {
-    "build": "pnpm vite build --mode production",
-    "build:analyze": "pnpm vite build --mode analyze",
+    "build": "pnpm run build:all",
+    "build:analyze": "pnpm run build:platform",
+    "build:platform": "pnpm vite build --mode platform",
+    "build:merchant": "pnpm vite build --mode merchant",
+    "build:agent": "pnpm vite build --mode agent",
+    "build:all": "pnpm exec rimraf dist && pnpm run build:platform && pnpm run build:merchant && pnpm run build:agent",
     "dev": "pnpm vite --mode development",
-    "preview": "vite preview",
+    "dev:agent": "pnpm vite --mode agent --port 6001 --strictPort",
+    "dev:merchant": "pnpm vite --mode merchant --port 6002 --strictPort",
+    "dev:platform": "pnpm vite --mode platform --port 5999 --strictPort",
+    "preview": "pnpm run preview:platform",
+    "preview:agent": "vite preview --mode agent --outDir dist/agent --port 6001 --strictPort",
+    "preview:merchant": "vite preview --mode merchant --outDir dist/merchant --port 6002 --strictPort",
+    "preview:platform": "vite preview --mode platform --outDir dist/platform --port 5999 --strictPort",
     "typecheck": "vue-tsc --noEmit --skipLibCheck"
   },
   "imports": {
-    "#/*": "./src/*"
+    "#/*": "./src/*",
+    "#/deployment-policy": "./src/deployments/platform.ts"
   },
   "dependencies": {
     "@vben-core/menu-ui": "workspace:*",

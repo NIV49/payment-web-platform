@@ -1,6 +1,7 @@
 package com.niv.payment.adminapi.web;
 
 import com.niv.payment.adminapi.config.AdminAuthorizationEnforcer;
+import com.niv.payment.permission.backoffice.VbenMenuContract;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;

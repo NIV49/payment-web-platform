@@ -1,5 +1,6 @@
 package com.niv.payment.adminapi.web;
 
+import com.niv.payment.permission.backoffice.VbenMenuContract;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;

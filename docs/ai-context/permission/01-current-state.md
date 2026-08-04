@@ -67,6 +67,8 @@
 
 > 已确认：[ADR-0008](../../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 将 PLATFORM、MERCHANT、AGENT 定义为独立应用账号域；同一个应用 User 不跨域，同域多 Membership 仍允许。工作区只能由可信服务端入口/上下文解析，客户端不得通过 `tenantId` 切换；无法唯一解析时失败关闭。
 
+> 已实现：V18 固化 Tenant/User/Credential/Membership 的账号域不变量，V19/V20 建立 canonical portal Grant 并兼容历史普通 Grant 的保留 key；三个后端组合根和三个前端产物分别固定 Origin、Cookie、login type、Redis/cache namespace 与 component/route allowlist。三端 login/logout Origin 负例及独立 semantic mutants、真实 Router 重置回归已纳入 Judge。MERCHANT/AGENT 第一阶段仅提供认证、当前用户、菜单、权限码和健康检查，不承载支付业务。正式 Judge closed 仍取决于外部受信 reviewer 证据。
+
 > 不确定：权限撤销的最终 SLA；架构候选为普通权限 60 秒内、资金权限立即生效。
 
 > 不确定：市场、渠道和资金账户是否全部成为第一期数据范围维度。

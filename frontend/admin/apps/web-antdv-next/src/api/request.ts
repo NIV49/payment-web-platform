@@ -26,7 +26,11 @@ const { apiURL } = useAppConfig(
   import.meta.env.PROD,
 );
 
-function createRequestClient(baseURL: string, options?: RequestClientOptions) {
+function createRequestClient(
+  baseURL: string,
+  options?: RequestClientOptions,
+  enableSessionRecovery = true,
+) {
   const client = new RequestClient({
     ...options,
     baseURL,
@@ -90,16 +94,17 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
     }),
   );
 
-  // token过期的处理
-  client.addResponseInterceptor(
-    authenticateResponseInterceptor({
-      client,
-      doReAuthenticate,
-      doRefreshToken,
-      enableRefreshToken: preferences.app.enableRefreshToken,
-      formatToken: formatSessionAuthorization,
-    }),
-  );
+  if (enableSessionRecovery) {
+    client.addResponseInterceptor(
+      authenticateResponseInterceptor({
+        client,
+        doReAuthenticate,
+        doRefreshToken,
+        enableRefreshToken: preferences.app.enableRefreshToken,
+        formatToken: formatSessionAuthorization,
+      }),
+    );
+  }
 
   // 通用的错误处理,如果没有进入上面的错误处理逻辑，就会进入这里
   client.addResponseInterceptor(
@@ -117,6 +122,14 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
 export const requestClient = createRequestClient(apiURL, {
   responseReturn: 'data',
 });
+
+// Login/logout failures are terminal to that mutation and must not recursively
+// enter the global expired-session logout flow.
+export const authenticationRequestClient = createRequestClient(
+  apiURL,
+  { responseReturn: 'data' },
+  false,
+);
 
 export const baseRequestClient = new RequestClient({
   baseURL: apiURL,

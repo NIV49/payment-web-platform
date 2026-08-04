@@ -29,6 +29,10 @@ async function generateAccessible(
   // 生成路由
   const accessibleRoutes = await generateRoutes(mode, options);
 
+  if (options.canCommitRoutes && !options.canCommitRoutes()) {
+    return { accessibleMenus: [], accessibleRoutes: [] };
+  }
+
   const root = router.getRoutes().find((item) => item.path === '/');
 
   // 获取已有的路由名称列表

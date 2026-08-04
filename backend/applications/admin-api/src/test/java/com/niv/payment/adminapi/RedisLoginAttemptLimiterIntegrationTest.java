@@ -1,6 +1,7 @@
 package com.niv.payment.adminapi;
 
 import com.niv.payment.permission.cache.RedisLoginAttemptLimiter;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.service.AuthenticationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,10 +48,10 @@ class RedisLoginAttemptLimiterIntegrationTest {
         connectionFactory.start();
         redis = new StringRedisTemplate(connectionFactory);
         redis.afterPropertiesSet();
-        Set<String> existingKeys = redis.keys("iam:login-attempt:*");
+        Set<String> existingKeys = redis.keys("iam:platform:login-attempt:*");
         if (!existingKeys.isEmpty()) redis.delete(existingKeys);
         limiter = new RedisLoginAttemptLimiter(
-            redis, CLIENT_LIMIT, CLIENT_USERNAME_LIMIT, Duration.ofMinutes(15));
+            AccountDomain.PLATFORM, redis, CLIENT_LIMIT, CLIENT_USERNAME_LIMIT, Duration.ofMinutes(15));
     }
 
     @AfterEach
@@ -108,7 +109,7 @@ class RedisLoginAttemptLimiterIntegrationTest {
 
         limiter.acquire(client, username);
 
-        Set<String> keys = redis.keys("iam:login-attempt:*");
+        Set<String> keys = redis.keys("iam:platform:login-attempt:*");
         assertThat(keys).hasSize(2);
         String firstHashTag = hashTag(keys.iterator().next());
         assertThat(keys).allSatisfy(key -> {

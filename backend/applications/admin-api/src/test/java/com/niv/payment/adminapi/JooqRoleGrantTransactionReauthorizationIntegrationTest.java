@@ -324,6 +324,7 @@ class JooqRoleGrantTransactionReauthorizationIntegrationTest {
             .set(IAM_TENANT.TENANT_NAME, "Transaction Reauthorization Test")
             .set(IAM_TENANT.TENANT_TYPE, "PLATFORM")
             .set(IAM_TENANT.STATUS, "ACTIVE")
+            .set(IAM_TENANT.ACCOUNT_DOMAIN, "PLATFORM")
             .execute();
         dsl.insertInto(IAM_USER)
             .set(IAM_USER.ID, USER_ID)
@@ -331,6 +332,7 @@ class JooqRoleGrantTransactionReauthorizationIntegrationTest {
             .set(IAM_USER.IDP_SUBJECT, "tx-reauth-user")
             .set(IAM_USER.DISPLAY_NAME, "Transaction Reauthorization User")
             .set(IAM_USER.STATUS, "ACTIVE")
+            .set(IAM_USER.ACCOUNT_DOMAIN, "PLATFORM")
             .execute();
         dsl.insertInto(IAM_MEMBERSHIP)
             .set(IAM_MEMBERSHIP.ID, MEMBERSHIP_ID)
@@ -339,12 +341,14 @@ class JooqRoleGrantTransactionReauthorizationIntegrationTest {
             .set(IAM_MEMBERSHIP.STATUS, "ACTIVE")
             .set(IAM_MEMBERSHIP.PERMISSION_VERSION, PERMISSION_VERSION)
             .set(IAM_MEMBERSHIP.SESSION_VERSION, SESSION_VERSION)
+            .set(IAM_MEMBERSHIP.ACCOUNT_DOMAIN, "PLATFORM")
             .execute();
         dsl.insertInto(IAM_AUTHENTICATION_CREDENTIAL)
             .set(IAM_AUTHENTICATION_CREDENTIAL.USER_ID, USER_ID)
             .set(IAM_AUTHENTICATION_CREDENTIAL.USERNAME, "tx-reauth-user")
             .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, TEST_PASSWORD_HASH)
             .set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, "ACTIVE")
+            .set(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN, "PLATFORM")
             .execute();
 
         dsl.insertInto(IAM_ROLE)

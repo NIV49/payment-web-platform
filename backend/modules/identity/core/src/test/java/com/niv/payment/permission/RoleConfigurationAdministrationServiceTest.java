@@ -76,6 +76,8 @@ class RoleConfigurationAdministrationServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.replace(command(List.of(
             selection("unknown", "payout:view")))));
         assertThrows(IllegalArgumentException.class, () -> service.replace(command(List.of(
+            selection("system-backoffice-access", "user:view")))));
+        assertThrows(IllegalArgumentException.class, () -> service.replace(command(List.of(
             new RoleGrantModels.Selection("wrong-scope", PermissionCode.of("user:view"),
                 ScopeDimension.DEPARTMENT, ScopeMode.DEPARTMENT)))));
     }

@@ -116,6 +116,11 @@ public class IamMembership extends TableImpl<IamMembershipRecord> {
      */
     public final TableField<IamMembershipRecord, Long> ROW_VERSION = createField(DSL.name("row_version"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
+    /**
+     * The column <code>public.iam_membership.account_domain</code>.
+     */
+    public final TableField<IamMembershipRecord, String> ACCOUNT_DOMAIN = createField(DSL.name("account_domain"), SQLDataType.VARCHAR(16).nullable(false), this, "");
+
     private IamMembership(Name alias, Table<IamMembershipRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -185,7 +190,7 @@ public class IamMembership extends TableImpl<IamMembershipRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.IDX_IAM_MEMBERSHIP_TENANT_STATUS, Indexes.IDX_IAM_MEMBERSHIP_USER);
+        return Arrays.asList(Indexes.IDX_IAM_MEMBERSHIP_DOMAIN_USER, Indexes.IDX_IAM_MEMBERSHIP_TENANT_STATUS, Indexes.IDX_IAM_MEMBERSHIP_USER);
     }
 
     @Override
@@ -195,12 +200,12 @@ public class IamMembership extends TableImpl<IamMembershipRecord> {
 
     @Override
     public List<UniqueKey<IamMembershipRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.UK_IAM_MEMBERSHIP_TENANT_ID, Keys.UK_IAM_MEMBERSHIP_TENANT_USER);
+        return Arrays.asList(Keys.UK_IAM_MEMBERSHIP_DOMAIN_ID, Keys.UK_IAM_MEMBERSHIP_TENANT_ID, Keys.UK_IAM_MEMBERSHIP_TENANT_USER);
     }
 
     @Override
     public List<ForeignKey<IamMembershipRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_DEPARTMENT, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_TENANT_ID_FKEY, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_USER_ID_FKEY);
+        return Arrays.asList(Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_DEPARTMENT, Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_TENANT_DOMAIN, Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_USER_DOMAIN, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_TENANT_ID_FKEY, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_USER_ID_FKEY);
     }
 
     private transient IamDepartmentPath _iamDepartment;
@@ -216,28 +221,56 @@ public class IamMembership extends TableImpl<IamMembershipRecord> {
         return _iamDepartment;
     }
 
-    private transient IamTenantPath _iamTenant;
+    private transient IamTenantPath _fkIamMembershipTenantDomain;
 
     /**
-     * Get the implicit join path to the <code>public.iam_tenant</code> table.
+     * Get the implicit join path to the <code>public.iam_tenant</code> table,
+     * via the <code>fk_iam_membership_tenant_domain</code> key.
      */
-    public IamTenantPath iamTenant() {
-        if (_iamTenant == null)
-            _iamTenant = new IamTenantPath(this, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_TENANT_ID_FKEY, null);
+    public IamTenantPath fkIamMembershipTenantDomain() {
+        if (_fkIamMembershipTenantDomain == null)
+            _fkIamMembershipTenantDomain = new IamTenantPath(this, Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_TENANT_DOMAIN, null);
 
-        return _iamTenant;
+        return _fkIamMembershipTenantDomain;
     }
 
-    private transient IamUserPath _iamUser;
+    private transient IamUserPath _fkIamMembershipUserDomain;
 
     /**
-     * Get the implicit join path to the <code>public.iam_user</code> table.
+     * Get the implicit join path to the <code>public.iam_user</code> table, via
+     * the <code>fk_iam_membership_user_domain</code> key.
      */
-    public IamUserPath iamUser() {
-        if (_iamUser == null)
-            _iamUser = new IamUserPath(this, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_USER_ID_FKEY, null);
+    public IamUserPath fkIamMembershipUserDomain() {
+        if (_fkIamMembershipUserDomain == null)
+            _fkIamMembershipUserDomain = new IamUserPath(this, Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_USER_DOMAIN, null);
 
-        return _iamUser;
+        return _fkIamMembershipUserDomain;
+    }
+
+    private transient IamTenantPath _iamMembershipTenantIdFkey;
+
+    /**
+     * Get the implicit join path to the <code>public.iam_tenant</code> table,
+     * via the <code>iam_membership_tenant_id_fkey</code> key.
+     */
+    public IamTenantPath iamMembershipTenantIdFkey() {
+        if (_iamMembershipTenantIdFkey == null)
+            _iamMembershipTenantIdFkey = new IamTenantPath(this, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_TENANT_ID_FKEY, null);
+
+        return _iamMembershipTenantIdFkey;
+    }
+
+    private transient IamUserPath _iamMembershipUserIdFkey;
+
+    /**
+     * Get the implicit join path to the <code>public.iam_user</code> table, via
+     * the <code>iam_membership_user_id_fkey</code> key.
+     */
+    public IamUserPath iamMembershipUserIdFkey() {
+        if (_iamMembershipUserIdFkey == null)
+            _iamMembershipUserIdFkey = new IamUserPath(this, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_USER_ID_FKEY, null);
+
+        return _iamMembershipUserIdFkey;
     }
 
     private transient IamAuditEventPath _iamAuditEvent;
@@ -312,6 +345,7 @@ public class IamMembership extends TableImpl<IamMembershipRecord> {
     @Override
     public List<Check<IamMembershipRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("ck_iam_membership_account_domain"), "(((account_domain)::text = ANY ((ARRAY['PLATFORM'::character varying, 'MERCHANT'::character varying, 'AGENT'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_membership_status"), "(((status)::text = ANY ((ARRAY['INVITED'::character varying, 'ACTIVE'::character varying, 'DISABLED'::character varying, 'TERMINATED'::character varying])::text[])))", true)
         );
     }

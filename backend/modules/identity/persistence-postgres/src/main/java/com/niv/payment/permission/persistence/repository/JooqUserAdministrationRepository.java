@@ -79,6 +79,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
 
         dsl.insertInto(IAM_USER)
             .set(IAM_USER.ID, userId)
+            .set(IAM_USER.ACCOUNT_DOMAIN, "PLATFORM")
             .set(IAM_USER.IDP_ISSUER, "local")
             .set(IAM_USER.IDP_SUBJECT, username)
             .set(IAM_USER.DISPLAY_NAME, command.name().trim())
@@ -87,6 +88,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
             .execute();
         dsl.insertInto(IAM_MEMBERSHIP)
             .set(IAM_MEMBERSHIP.ID, membershipId)
+            .set(IAM_MEMBERSHIP.ACCOUNT_DOMAIN, "PLATFORM")
             .set(IAM_MEMBERSHIP.TENANT_ID, tenantId)
             .set(IAM_MEMBERSHIP.USER_ID, userId)
             .set(IAM_MEMBERSHIP.DEPARTMENT_ID, command.departmentId())
@@ -94,6 +96,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
             .execute();
         dsl.insertInto(IAM_AUTHENTICATION_CREDENTIAL)
             .set(IAM_AUTHENTICATION_CREDENTIAL.USER_ID, userId)
+            .set(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN, "PLATFORM")
             .set(IAM_AUTHENTICATION_CREDENTIAL.USERNAME, username)
             .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, initialPasswordHash)
             .set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, loginCapable ? ACTIVE : DISABLED)

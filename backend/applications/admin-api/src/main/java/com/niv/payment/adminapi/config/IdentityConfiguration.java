@@ -1,12 +1,17 @@
 package com.niv.payment.adminapi.config;
 
+import cn.dev33.satoken.config.SaTokenConfig;
+import cn.dev33.satoken.stp.StpLogic;
 import com.niv.payment.permission.application.CachedPermissionGrantLoader;
 import com.niv.payment.permission.application.DefaultAuthorizationService;
 import com.niv.payment.permission.application.DefaultScopeMatcher;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.cache.JacksonGrantSnapshotCodec;
 import com.niv.payment.permission.cache.RedisLoginAttemptLimiter;
 import com.niv.payment.permission.cache.RedisPermissionGrantCache;
 import com.niv.payment.permission.cache.SpringStringRedisValueStore;
+import com.niv.payment.permission.backoffice.VbenMenuContract;
+import com.niv.payment.permission.backoffice.VbenMenuTreeMapper;
 import com.niv.payment.adminapi.web.RequestTrace;
 import com.niv.payment.permission.persistence.repository.JooqCredentialRepository;
 import com.niv.payment.permission.persistence.repository.JooqDepartmentAdministrationRepository;
@@ -21,7 +26,7 @@ import com.niv.payment.permission.persistence.repository.JooqRoleConfigurationRe
 import com.niv.payment.permission.persistence.repository.JooqUserAdministrationRepository;
 import com.niv.payment.permission.security.SaTokenSessionBridge;
 import com.niv.payment.permission.security.SaTokenSessionIssuer;
-import com.niv.payment.permission.security.StpUtilSaTokenFacade;
+import com.niv.payment.permission.security.StpLogicSaTokenFacade;
 import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.RoleGrantAdministrationService;
@@ -62,8 +67,9 @@ public class IdentityConfiguration {
 
     @Bean
     JooqRoleAdministrationRepository roleAdministrationRepository(
-        DSLContext dsl, JooqIdentityQueryRepository queries) {
-        return new JooqRoleAdministrationRepository(dsl, queries, RequestTrace::current);
+        DSLContext dsl, JooqIdentityQueryRepository queries,
+        JooqRoleGrantAdministrationRepository grants) {
+        return new JooqRoleAdministrationRepository(dsl, queries, grants, RequestTrace::current);
     }
 
     @Bean
@@ -123,7 +129,7 @@ public class IdentityConfiguration {
         CachedPermissionGrantLoader loader = new CachedPermissionGrantLoader(
             new JooqMembershipVersionRepository(dsl),
             new JooqPermissionGrantRepository(dsl),
-            new RedisPermissionGrantCache(new SpringStringRedisValueStore(redis),
+            new RedisPermissionGrantCache(AccountDomain.PLATFORM, new SpringStringRedisValueStore(redis),
                 new JacksonGrantSnapshotCodec(json), Duration.ofMinutes(5)));
         return new DefaultAuthorizationService(loader, new DefaultScopeMatcher(
             (ancestorDepartmentId, childDepartmentId) -> false,
@@ -137,17 +143,40 @@ public class IdentityConfiguration {
     }
 
     @Bean
-    AuthenticationService authenticationService(JooqCredentialRepository repository,
-                                                BCryptPasswordEncoder encoder,
-                                                StringRedisTemplate redis) {
-        return new AuthenticationService(repository, encoder::matches,
-            new RedisLoginAttemptLimiter(redis, 30, 5, Duration.ofMinutes(15)),
-            new SaTokenSessionIssuer(), encoder.encode("dummy-password-not-used"));
+    VbenMenuContract vbenMenuContract(
+        @Value("${payment.menu.allowed-page-components:}") String components) {
+        return new VbenMenuContract(components);
     }
 
     @Bean
-    SaTokenSessionBridge sessionBridge(DSLContext dsl) {
-        return new SaTokenSessionBridge(new StpUtilSaTokenFacade(),
+    VbenMenuTreeMapper vbenMenuTreeMapper(ObjectMapper json, VbenMenuContract contract) {
+        return new VbenMenuTreeMapper(json, contract);
+    }
+
+    @Bean
+    AuthenticationService authenticationService(JooqCredentialRepository repository,
+                                                BCryptPasswordEncoder encoder,
+                                                StringRedisTemplate redis,
+                                                StpLogic stpLogic) {
+        return new AuthenticationService(AccountDomain.PLATFORM, repository, encoder::matches,
+            new RedisLoginAttemptLimiter(AccountDomain.PLATFORM, redis, 30, 5, Duration.ofMinutes(15)),
+            new SaTokenSessionIssuer(stpLogic, AccountDomain.PLATFORM),
+            encoder.encode("dummy-password-not-used"));
+    }
+
+    @Bean
+    StpLogic stpLogic(SaTokenConfig config,
+                      @Value("${payment.identity.login-type}") String configuredLoginType) {
+        if (!AccountDomain.PLATFORM.loginType().equals(configuredLoginType)
+            || !AccountDomain.PLATFORM.cookieName().equals(config.getTokenName())) {
+            throw new IllegalStateException("Platform Sa-Token realm does not match the fixed account domain");
+        }
+        return new StpLogic(AccountDomain.PLATFORM.loginType()).setConfig(config);
+    }
+
+    @Bean
+    SaTokenSessionBridge sessionBridge(DSLContext dsl, StpLogic stpLogic) {
+        return new SaTokenSessionBridge(AccountDomain.PLATFORM, new StpLogicSaTokenFacade(stpLogic),
             new JooqMembershipSessionVersionRepository(dsl));
     }
 

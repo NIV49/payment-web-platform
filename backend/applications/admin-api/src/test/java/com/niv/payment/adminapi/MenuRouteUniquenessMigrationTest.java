@@ -115,7 +115,7 @@ class MenuRouteUniquenessMigrationTest {
     @Test
     void databaseConstraintRejectsCanonicalPathDuplicatesAfterV9() throws Exception {
         migrateToLatest();
-        insertTenant(TENANT_A, "post-v9-route-constraint");
+        insertTenantAfterV18(TENANT_A, "post-v9-route-constraint");
         insertMenu(9_310_501L, TENANT_A, "FirstPostV9Path", "/Reports///");
 
         assertThatThrownBy(() -> insertMenu(
@@ -128,6 +128,20 @@ class MenuRouteUniquenessMigrationTest {
              PreparedStatement statement = connection.prepareStatement("""
                  INSERT INTO iam_tenant(id, tenant_code, tenant_name, tenant_type, status)
                  VALUES (?, ?, ?, 'PLATFORM', 'ACTIVE')
+                 """)) {
+            statement.setLong(1, tenantId);
+            statement.setString(2, tenantCode);
+            statement.setString(3, tenantCode);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void insertTenantAfterV18(long tenantId, String tenantCode) throws Exception {
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                 INSERT INTO iam_tenant(
+                     id, tenant_code, tenant_name, tenant_type, status, account_domain
+                 ) VALUES (?, ?, ?, 'PLATFORM', 'ACTIVE', 'PLATFORM')
                  """)) {
             statement.setLong(1, tenantId);
             statement.setString(2, tenantCode);

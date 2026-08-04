@@ -1,6 +1,9 @@
 package com.niv.payment.adminapi.web;
 
 import com.niv.payment.permission.domain.AuthorizationSubject;
+import com.niv.payment.permission.domain.AccountDomain;
+import com.niv.payment.permission.backoffice.VbenMenuContract;
+import com.niv.payment.permission.backoffice.VbenMenuTreeMapper;
 import com.niv.payment.permission.port.DepartmentAdministrationPort;
 import com.niv.payment.permission.port.IdentityQueryPort;
 import com.niv.payment.permission.port.MenuAdministrationPort;
@@ -37,17 +40,17 @@ class AuthUserMenuControllerTest {
                 "{\"title\":\"system.child.title\"}")
         );
         AuthUserMenuController controller = new AuthUserMenuController(
-            authentication(), identities(storedMenus), new ObjectMapper(), new VbenMenuContract(""));
+            authentication(), identities(storedMenus), menuMapper());
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(AuthorizationSubject.class.getName(),
             new AuthorizationSubject(100, 1_000, 1, 10L, 0, 0, false));
 
-        ApiResponse<List<AuthUserMenuController.MenuResponse>> response = controller.allMenus(request);
+        ApiResponse<List<VbenMenuTreeMapper.MenuRoute>> response = controller.allMenus(request);
 
-        assertThat(response.data()).extracting(AuthUserMenuController.MenuResponse::name)
+        assertThat(response.data()).extracting(VbenMenuTreeMapper.MenuRoute::name)
             .containsExactly("System");
         assertThat(response.data().getFirst().children())
-            .extracting(AuthUserMenuController.MenuResponse::name)
+            .extracting(VbenMenuTreeMapper.MenuRoute::name)
             .containsExactly("SafePage");
     }
 
@@ -60,12 +63,12 @@ class AuthUserMenuControllerTest {
                 "{\"title\":\"page.dashboard.workspace\"}")
         );
         AuthUserMenuController controller = new AuthUserMenuController(
-            authentication(), identities(storedMenus), new ObjectMapper(), new VbenMenuContract(""));
+            authentication(), identities(storedMenus), menuMapper());
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(AuthorizationSubject.class.getName(),
             new AuthorizationSubject(100, 1_000, 1, 10L, 0, 0, false));
 
-        ApiResponse<List<AuthUserMenuController.MenuResponse>> response = controller.allMenus(request);
+        ApiResponse<List<VbenMenuTreeMapper.MenuRoute>> response = controller.allMenus(request);
 
         assertThat(response.data().getFirst().redirect()).isEqualTo("/dashboard/workspace");
     }
@@ -76,7 +79,7 @@ class AuthUserMenuControllerTest {
             100, "admin", "Platform Administrator", "", List.of("platform-admin"), "/dashboard", true);
         AuthUserMenuController controller = new AuthUserMenuController(
             authentication(), identities(List.of(), Optional.of(currentUser)),
-            new ObjectMapper(), new VbenMenuContract(""));
+            menuMapper());
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(AuthorizationSubject.class.getName(),
             new AuthorizationSubject(100, 1_000, 1, 10L, 0, 0, false));
@@ -100,7 +103,7 @@ class AuthUserMenuControllerTest {
         );
         AuthUserMenuController controller = new AuthUserMenuController(
             authentication(), identities(storedMenus, Optional.of(currentUser)),
-            new ObjectMapper(), new VbenMenuContract(""));
+            menuMapper());
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(AuthorizationSubject.class.getName(),
             new AuthorizationSubject(100, 1_000, 1, 10L, 0, 0, false));
@@ -116,13 +119,19 @@ class AuthUserMenuControllerTest {
 
     private static IdentityModels.Menu menu(long id, Long parentId, String type, String name,
                                             String path, String redirect, String metaJson) {
-        return new IdentityModels.Menu(id, parentId, type, name, path, null,
+        return new IdentityModels.Menu(id, parentId, type, name, path,
+            "menu".equals(type) ? "/test/index" : null,
             redirect, null, metaJson, 1, 0);
+    }
+
+    private static VbenMenuTreeMapper menuMapper() {
+        return new VbenMenuTreeMapper(new ObjectMapper(), new VbenMenuContract("/test/index"));
     }
 
     private static AuthenticationService authentication() {
         return new AuthenticationService(
-            (username, tenantId) -> Optional.empty(),
+            AccountDomain.PLATFORM,
+            (username, domain) -> Optional.empty(),
             (raw, encoded) -> false,
             new AuthenticationService.LoginAttemptLimiter() {
                 @Override public void acquire(String clientKey, String normalizedUsername) { }

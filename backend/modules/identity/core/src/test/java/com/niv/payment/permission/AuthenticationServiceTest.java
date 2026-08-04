@@ -1,5 +1,6 @@
 package com.niv.payment.permission;
 
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.AuthenticationService.AuthenticationFailedException;
 import com.niv.payment.permission.service.AuthenticationService.CredentialAccount;
@@ -20,7 +21,8 @@ class AuthenticationServiceTest {
     void limiterFailureStopsBeforeCredentialOrPasswordWork() {
         AtomicBoolean credentialLookupCalled = new AtomicBoolean();
         AuthenticationService service = new AuthenticationService(
-            (username, tenantId) -> {
+            AccountDomain.PLATFORM,
+            (username, domain) -> {
                 credentialLookupCalled.set(true);
                 return Optional.empty();
             },
@@ -46,11 +48,13 @@ class AuthenticationServiceTest {
     @Test
     void successfulLoginUsesNormalizedUsernameAndClearsTheFailureBucket() {
         AtomicBoolean cleared = new AtomicBoolean();
-        CredentialAccount account = new CredentialAccount(1, 2, 3, 4L, 5, 6, SUPPORTED_DUMMY_HASH);
+        CredentialAccount account = new CredentialAccount(
+            1, 2, 3, 4L, 5, 6, AccountDomain.PLATFORM, SUPPORTED_DUMMY_HASH);
         AuthenticationService service = new AuthenticationService(
-            (username, tenantId) -> {
+            AccountDomain.PLATFORM,
+            (username, domain) -> {
                 assertEquals("admin", username);
-                assertNull(tenantId);
+                assertEquals(AccountDomain.PLATFORM, domain);
                 return Optional.of(account);
             },
             (raw, encoded) -> raw.equals("correct") && encoded.equals(SUPPORTED_DUMMY_HASH),
@@ -75,7 +79,8 @@ class AuthenticationServiceTest {
     void unknownUserAndWrongPasswordHaveTheSamePublicFailure() {
         AtomicBoolean attemptReserved = new AtomicBoolean();
         AuthenticationService service = new AuthenticationService(
-            (username, tenantId) -> Optional.empty(),
+            AccountDomain.PLATFORM,
+            (username, domain) -> Optional.empty(),
             (raw, encoded) -> false,
             new AuthenticationService.LoginAttemptLimiter() {
                 public void acquire(String client, String username) { attemptReserved.set(true); }
@@ -95,12 +100,14 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    void explicitTenantSelectionIsPassedToCredentialLookup() {
-        CredentialAccount account = new CredentialAccount(1, 2, 9, 4L, 5, 6, SUPPORTED_DUMMY_HASH);
+    void serverFixedAccountDomainIsPassedToCredentialLookup() {
+        CredentialAccount account = new CredentialAccount(
+            1, 2, 9, 4L, 5, 6, AccountDomain.PLATFORM, SUPPORTED_DUMMY_HASH);
         AuthenticationService service = new AuthenticationService(
-            (username, tenantId) -> {
+            AccountDomain.PLATFORM,
+            (username, domain) -> {
                 assertEquals("admin", username);
-                assertEquals(9L, tenantId);
+                assertEquals(AccountDomain.PLATFORM, domain);
                 return Optional.of(account);
             },
             (raw, encoded) -> true,
@@ -112,18 +119,19 @@ class AuthenticationServiceTest {
             SUPPORTED_DUMMY_HASH
         );
 
-        LoginSession session = service.login(new LoginCommand("admin", "correct", 9L, "ip-hash"));
+        LoginSession session = service.login(new LoginCommand("admin", "correct", "ip-hash"));
 
         assertEquals("selected-workspace-session", session.token());
     }
 
     @Test
     void unsupportedStoredHashFailsClosedWithoutReachingTheRealHashVerifier() {
-        CredentialAccount account = new CredentialAccount(1, 2, 3, 4L, 5, 6,
+        CredentialAccount account = new CredentialAccount(1, 2, 3, 4L, 5, 6, AccountDomain.PLATFORM,
             "$2a$99$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy");
         AtomicBoolean sessionIssued = new AtomicBoolean();
         AuthenticationService service = new AuthenticationService(
-            (username, tenantId) -> Optional.of(account),
+            AccountDomain.PLATFORM,
+            (username, domain) -> Optional.of(account),
             (raw, encoded) -> {
                 assertEquals(SUPPORTED_DUMMY_HASH, encoded);
                 return false;
@@ -142,5 +150,24 @@ class AuthenticationServiceTest {
         assertThrows(AuthenticationFailedException.class,
             () -> service.login(new LoginCommand("admin", "correct", "ip-hash")));
         assertFalse(sessionIssued.get());
+    }
+
+    @Test
+    void adapterCannotReturnAnAccountFromAnotherDomain() {
+        CredentialAccount merchant = new CredentialAccount(
+            1, 2, 3, 4L, 5, 6, AccountDomain.MERCHANT, SUPPORTED_DUMMY_HASH);
+        AuthenticationService service = new AuthenticationService(
+            AccountDomain.PLATFORM,
+            (username, domain) -> Optional.of(merchant),
+            (raw, encoded) -> true,
+            new AuthenticationService.LoginAttemptLimiter() {
+                public void acquire(String client, String username) { }
+                public void recordSuccess(String client, String username) { fail("must not run"); }
+            },
+            authenticated -> { throw new AssertionError("session must not be issued"); },
+            SUPPORTED_DUMMY_HASH);
+
+        assertThrows(AuthenticationFailedException.class,
+            () -> service.login(new LoginCommand("admin", "correct", "ip-hash")));
     }
 }

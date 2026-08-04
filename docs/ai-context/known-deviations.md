@@ -44,7 +44,7 @@ RoleGrant PUT 和角色 configuration PUT 已关闭该边界：它们在锁定 t
 
 ## 已解决：Sa-Token 安全属性在 Web Server 启动后才设置
 
-Sa-Token 的 Cookie 和 token 安全属性现在由 `application.yml` 交给 Boot auto-configuration，在 ApplicationContext 创建期完成绑定；不再使用 Web Server 已可接受请求后才执行的 `ApplicationRunner`。集成测试断言 runner bean 不存在，并在 context 中核对 `PAYMENT_SESSION`、Cookie-only、HttpOnly、SameSite Strict、Secure、超时与禁止并发/共享等最终属性。
+Sa-Token 的 Cookie 和 token 安全属性现在由三个 composition root 的 `application.yml` 交给 Boot auto-configuration，在 ApplicationContext 创建期完成绑定；不再使用 Web Server 已可接受请求后才执行的 `ApplicationRunner`。集成测试核对各自的 `PAYMENT_PLATFORM_SESSION`、`PAYMENT_MERCHANT_SESSION`、`PAYMENT_AGENT_SESSION`、Cookie-only、HttpOnly、SameSite Strict、Secure、超时与禁止并发/共享等最终属性。
 
 ## 已解决：写事务发现 stale actor 时只返回 403
 
@@ -158,12 +158,12 @@ Admin 创建用户在 `local` profile 使用运行时统一初始密码生成独
 
 `frontend/portal` 只有 `.gitkeep`。在创建 Nuxt 4 大型 pnpm monorepo 前，需要先确定：按国家拆 app 的命名、共享 layers/packages、运行时配置、i18n、支付收银台安全边界、官网与收银台的部署关系。不能复制 Admin 的 Vben package 层次作为默认答案。
 
-## P1：代理商与商户后台身份边界已定版但尚未实现
+## 已收敛：三后台账号与会话隔离
 
 <!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
 产品已通过 [ADR-0008](../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 确认平台、代理商和商户使用独立应用账号域。`User` 是一个账号域内的业务账号，不再承担跨后台自然人主记录；同一自然人需要多个后台时使用独立账号。未来外部 IdP subject 可以关联自然人，但不得合并业务账号、Membership、RoleGrant 或会话。同域多 Membership 仍然合法，客户端不得选择工作区，可信服务端上下文无法唯一解析时失败关闭。
 
-当前实现仍只有一个 `frontend/admin/apps/web-antdv-next` 和一个 `backend/applications/admin-api`。认证模型尚未持久化账号域，`backend/applications/admin-api/src/main/java/com/niv/payment/adminapi/web/AuthUserMenuController.java` 的 `LoginRequest` 仍接受可选 `tenantId`，Cookie、Sa-Token login type 和 Redis key 也尚未分域。这些是必须由 IAM-001 收敛的实现偏差，不再是待定产品规则。
+IAM-001 已增加 `admin-api`、`merchant-admin-api`、`agent-admin-api` 三个独立组合根，以及同一 Vben 源码生成的三个隔离部署产物。服务端分别固定账号域、Origin、Cookie、session realm/login type 与 Redis/cache namespace；登录 DTO 删除 `tenantId` 并拒绝未知字段。每个 ACTIVE Membership 还必须经角色取得本端 `backoffice:{platform|merchant|agent}-access` RoleGrant，不能从部门、导航或 Membership 状态推导入口权限。V18 以前向迁移为 Tenant/User/Credential/Membership 固化账号域和复合外键，跨域或无法唯一归属数据会阻断迁移而不会猜测修复；升级前使用 `backend/scripts/iam001-account-domain-preflight.sql` 输出稳定问题清单，非空即停止。V19 为历史和新建角色维护服务端专用的 canonical 入口 Grant；V20 保语义重命名历史普通 Permission 对保留 key 的合法占用，并对 portal 异常存量及同角色目标 key 占用失败关闭。18 项租户授权编辑器不能查看、授予或删除 canonical Grant，运行期再现保留 key、重复 key/Permission 或额外 portal 存量时只读。前端对所有部署保护核心/fallback/local 路由；退出或换用户会同时推进 session 与 route generation，使已在途的旧用户信息、权限码和菜单不能在清理后重新写入 store 或 Router；同一前端实例还 single-flight 重复 login 并串行 login/logout，避免乱序 Cookie 响应。登录/退出的专用请求客户端不安装全局 401 session-recovery，错误登录和已失效退出不会递归进入 store logout。local bootstrap 以真实登录相同的角色/Grant 条件复核 MERCHANT/AGENT fixture；三端构建分别清理自己的输出目录，制品门禁拒绝 manifest 未引用的残留 JS/CSS。IAM-001 mutation 只在绑定的 JUnit classname/method 产生唯一断言 failure、每个 JUnit suite 的 failure 汇总与正文一致且整份报告无 error/skip 时计为检出；基础设施 error、skip、错误方法失败、非 JUnit root、汇总不一致或不可解析报告一律失败关闭。
 
-实施必须增加商户端、代理商端独立入口和 API 组合根，固定各端 Origin、Cookie、session realm/login type 与 Redis/cache namespace，并用前向迁移阻止同一 User 跨账号域 Membership。当前可选 `tenantId` 仅是待删除的原型行为；在实现和对抗测试通过前，ADR 已接受不代表该偏差已关闭。
+MERCHANT/AGENT 第一阶段仅开放登录、退出、当前用户、动态菜单、权限码和健康检查，不包含支付或 IAM 管理写接口。进程级黑盒已覆盖错误账号域、跨端 Cookie/cache、非 ACTIVE Membership、改密/撤权旧会话、未知路由和并发撤权。剩余偏差是生产 IdP/MFA/身份生命周期、同账号域跨标签页认证写请求排序、真实部署安全演练和正式受信 reviewer 签署；本地技术 PASS 不能替代 Judge closed。

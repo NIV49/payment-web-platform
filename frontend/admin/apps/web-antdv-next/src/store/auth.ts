@@ -19,6 +19,11 @@ import {
 } from '#/api';
 import { COOKIE_SESSION_MARKER } from '#/api/session';
 import { $t } from '#/locales';
+import {
+  isProductSessionGenerationCurrent,
+  resetProductRoutes,
+  startProductSessionGeneration,
+} from '#/router/route-lifecycle';
 
 export const useAuthStore = defineStore('auth', () => {
   const accessStore = useAccessStore();
@@ -26,38 +31,73 @@ export const useAuthStore = defineStore('auth', () => {
   const router = useRouter();
 
   const loginLoading = ref(false);
+  type AuthLoginResult = { userInfo: null | UserInfo };
+  let pendingLogin: null | Promise<AuthLoginResult> = null;
+  let pendingLoginResponse: null | Promise<void> = null;
+  let pendingLogout: null | Promise<void> = null;
+
+  function clearAuthenticatedRouteState() {
+    const sessionGeneration = startProductSessionGeneration();
+    resetProductRoutes(router);
+    accessStore.setAccessToken(null);
+    accessStore.setAccessCodes([]);
+    accessStore.setAccessMenus([]);
+    accessStore.setAccessRoutes([]);
+    accessStore.setIsAccessChecked(false);
+    userStore.setUserInfo(null);
+    return sessionGeneration;
+  }
 
   /**
    * 异步处理登录操作
    * Asynchronously handle the login process
    * @param params 登录表单数据
    */
-  async function authLogin(
+  async function performAuthLogin(
     params: Recordable<any>,
     onSuccess?: () => Promise<void> | void,
-  ) {
+  ): Promise<AuthLoginResult> {
     // 异步处理用户登录操作并获取 accessToken
-    let userInfo: UserInfo;
+    let userInfo: null | UserInfo = null;
+    const sessionGeneration = clearAuthenticatedRouteState();
     try {
       loginLoading.value = true;
-      const loginResult = await loginApi({
+      const loginRequest = loginApi({
         [LOGIN_CREDENTIAL_FIELD]: String(params.password ?? ''),
         username: String(params.username ?? ''),
       });
+      const loginResponse = loginRequest.then(
+        () => undefined,
+        () => undefined,
+      );
+      pendingLoginResponse = loginResponse;
+      let loginResult;
+      try {
+        loginResult = await loginRequest;
+      } finally {
+        if (pendingLoginResponse === loginResponse) {
+          pendingLoginResponse = null;
+        }
+      }
       const sessionMarker = loginResult.accessToken;
 
       // 真实会话只存在于 HttpOnly Cookie，store 仅保存非敏感登录态标记。
       if (sessionMarker !== COOKIE_SESSION_MARKER) {
         throw new Error('Invalid cookie-session login response');
       }
+      if (!isProductSessionGenerationCurrent(sessionGeneration)) {
+        return { userInfo };
+      }
       accessStore.setAccessToken(COOKIE_SESSION_MARKER);
 
-      // 获取用户信息并存储到 accessStore 中
       const [fetchUserInfoResult, accessCodes] = await Promise.all([
-        fetchUserInfo(),
+        getUserInfoApi(),
         getAccessCodesApi(),
       ]);
 
+      if (!isProductSessionGenerationCurrent(sessionGeneration)) {
+        return { userInfo };
+      }
       userInfo = fetchUserInfoResult;
 
       userStore.setUserInfo(userInfo);
@@ -81,7 +121,9 @@ export const useAuthStore = defineStore('auth', () => {
         });
       }
     } finally {
-      loginLoading.value = false;
+      if (isProductSessionGenerationCurrent(sessionGeneration)) {
+        loginLoading.value = false;
+      }
     }
 
     return {
@@ -89,19 +131,51 @@ export const useAuthStore = defineStore('auth', () => {
     };
   }
 
+  function authLogin(
+    params: Recordable<any>,
+    onSuccess?: () => Promise<void> | void,
+  ): Promise<AuthLoginResult> {
+    if (pendingLogout) {
+      return pendingLogout.then(
+        () => authLogin(params, onSuccess),
+        () => authLogin(params, onSuccess),
+      );
+    }
+    if (pendingLogin) {
+      return pendingLogin;
+    }
+    const login = performAuthLogin(params, onSuccess);
+    pendingLogin = login;
+    const clearPendingLogin = () => {
+      if (pendingLogin === login) {
+        pendingLogin = null;
+      }
+    };
+    login.then(clearPendingLogin, clearPendingLogin);
+    return login;
+  }
+
   const isLoggingOut = ref(false);
 
-  async function logout(redirect: boolean = true) {
-    if (isLoggingOut.value) return;
-    isLoggingOut.value = true;
+  async function performLogout(
+    redirect: boolean,
+    sessionGeneration: number,
+    loginResponse: null | Promise<void>,
+  ) {
+    await loginResponse;
     try {
       await logoutApi();
     } catch {
       // 不做任何处理
     } finally {
-      resetAllStores();
-      accessStore.setLoginExpired(false);
-      isLoggingOut.value = false;
+      if (isProductSessionGenerationCurrent(sessionGeneration)) {
+        resetAllStores();
+        accessStore.setLoginExpired(false);
+      }
+    }
+
+    if (!isProductSessionGenerationCurrent(sessionGeneration)) {
+      return;
     }
 
     // 回登录页带上当前路由地址
@@ -115,9 +189,32 @@ export const useAuthStore = defineStore('auth', () => {
     });
   }
 
-  async function fetchUserInfo() {
+  function logout(redirect: boolean = true): Promise<void> {
+    if (pendingLogout) return pendingLogout;
+    isLoggingOut.value = true;
+    const sessionGeneration = clearAuthenticatedRouteState();
+    const logout = performLogout(
+      redirect,
+      sessionGeneration,
+      pendingLoginResponse,
+    );
+    pendingLogin = null;
+    pendingLogout = logout;
+    const clearPendingLogout = () => {
+      if (pendingLogout === logout) {
+        pendingLogout = null;
+      }
+      isLoggingOut.value = false;
+    };
+    logout.then(clearPendingLogout, clearPendingLogout);
+    return logout;
+  }
+
+  async function fetchUserInfo(sessionGeneration: number) {
     const userInfo = await getUserInfoApi();
-    userStore.setUserInfo(userInfo);
+    if (isProductSessionGenerationCurrent(sessionGeneration)) {
+      userStore.setUserInfo(userInfo);
+    }
     return userInfo;
   }
 

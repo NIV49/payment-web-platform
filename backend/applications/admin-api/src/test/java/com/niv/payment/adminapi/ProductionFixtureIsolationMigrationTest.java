@@ -35,7 +35,7 @@ class ProductionFixtureIsolationMigrationTest {
     void cleanProductionMigrationKeepsTheProductCatalogButRemovesTheLocalFixture() throws Exception {
         migrateToLatest();
 
-        assertThat(rowCount("iam_permission")).isEqualTo(21);
+        assertThat(rowCount("iam_permission")).isEqualTo(24);
         assertThat(rowCount("iam_tenant")).isZero();
         assertThat(rowCount("iam_department")).isZero();
         assertThat(rowCount("iam_user")).isZero();
@@ -68,7 +68,7 @@ class ProductionFixtureIsolationMigrationTest {
             .isOne();
         assertThat(singleLong("SELECT count(*) FROM iam_permission WHERE id = 9001 AND permission_code = 'payout:view'"))
             .isOne();
-        assertThat(rowCount("iam_permission")).isEqualTo(22);
+        assertThat(rowCount("iam_permission")).isEqualTo(25);
     }
 
     @Test
@@ -85,7 +85,7 @@ class ProductionFixtureIsolationMigrationTest {
         assertThat(rowCount("iam_audit_event")).isOne();
         assertThat(rowCount("iam_permission_change_outbox")).isOne();
         assertThat(rowCount("iam_permission_change_relay_state")).isOne();
-        assertThat(rowCount("iam_permission")).isEqualTo(22);
+        assertThat(rowCount("iam_permission")).isEqualTo(25);
     }
 
     @Test
@@ -288,10 +288,10 @@ class ProductionFixtureIsolationMigrationTest {
              WHERE grant_row.tenant_id=50 AND grant_row.role_id=56
                AND permission.permission_code='role:grant-update'
             """)).isZero();
-        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=55")).isEqualTo(2);
-        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=56")).isEqualTo(2);
-        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=53")).isEqualTo(2);
-        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=54")).isEqualTo(2);
+        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=55")).isEqualTo(3);
+        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=56")).isEqualTo(3);
+        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=53")).isEqualTo(3);
+        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=54")).isEqualTo(3);
         assertThat(singleLong("SELECT count(*) FROM iam_audit_event WHERE tenant_id=50 AND trace_id='migration-v14'"))
             .isEqualTo(2);
         assertThat(singleLong("SELECT count(*) FROM iam_permission_change_outbox WHERE tenant_id=50 AND trace_id='migration-v14'"))
@@ -391,8 +391,8 @@ class ProductionFixtureIsolationMigrationTest {
                       JOIN iam_grant_dimension dimension_row ON dimension_row.id=target.dimension_id
                      WHERE dimension_row.grant_id=grant_row.id AND target.target_ref='91')=1
             """)).isEqualTo(6);
-        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=94")).isOne();
-        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=93")).isOne();
+        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=94")).isEqualTo(2);
+        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=93")).isEqualTo(2);
         assertThat(singleLong("SELECT count(*) FROM iam_audit_event WHERE tenant_id=90 AND trace_id='migration-v15'"))
             .isOne();
         assertThat(singleLong("""
@@ -448,6 +448,10 @@ class ProductionFixtureIsolationMigrationTest {
         executeUpdate("""
             INSERT INTO iam_user(id, idp_issuer, idp_subject, display_name, status)
             VALUES (200, 'production-idp', 'real-user', 'Real User', 'ACTIVE')
+            """);
+        executeUpdate("""
+            INSERT INTO iam_membership(id, tenant_id, user_id, status)
+            VALUES (2000, 2, 200, 'ACTIVE')
             """);
         executeUpdate("""
             INSERT INTO iam_audit_event(

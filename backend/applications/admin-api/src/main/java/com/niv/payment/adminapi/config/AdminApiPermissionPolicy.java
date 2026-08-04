@@ -22,7 +22,8 @@ public final class AdminApiPermissionPolicy {
         Pattern.compile("^/api/v1/iam/roles/[1-9][0-9]*/configuration$");
 
     public boolean isPublic(String method, String path) {
-        return "POST".equals(method) && "/api/auth/login".equals(path);
+        return ("POST".equals(method) && "/api/auth/login".equals(path))
+            || ("GET".equals(method) && "/api/health".equals(path));
     }
 
     public List<String> requiredPermissions(String method, String path) {

@@ -16,6 +16,7 @@ import {
 defineOptions({ name: 'Login' });
 
 const authStore = useAuthStore();
+const rememberMeNamespace = import.meta.env.VITE_APP_NAMESPACE;
 let loginDefaults = resolveLoginDefaults({ dev: false });
 if (import.meta.env.DEV) {
   loginDefaults = resolveLoginDefaults({
@@ -57,6 +58,12 @@ const formSchema = computed((): VbenFormSchema[] => {
   <AuthenticationLogin
     :form-schema="formSchema"
     :loading="authStore.loginLoading"
+    :remember-me-namespace="rememberMeNamespace"
+    :show-code-login="false"
+    :show-forget-password="false"
+    :show-qrcode-login="false"
+    :show-register="false"
+    :show-third-party-login="false"
     @submit="authStore.authLogin"
   />
 </template>
