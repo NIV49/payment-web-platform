@@ -1,0 +1,360 @@
+{
+  "lifecycleStatus": "closed",
+  "capabilitySlice": {
+    "turnId": "019f7fea-28fb-7da3-808e-4e5f9c74533e",
+    "sliceId": "IAM-001-three-backoffice-session-isolation",
+    "path": "reimagine",
+    "sourceSnapshots": [],
+    "targetRepositoryPath": "/Users/mac/Documents/demo/payment-web-platform",
+    "targetRepositoryId": "payment-web-platform",
+    "targetBaseSha": "741927d40838bd515f9ae1bd357ce25c92f55043",
+    "rulebookManifest": {
+      "label": "IAM-001 decision baseline",
+      "paths": [
+        ".agents/payment-modernization-policy.json",
+        ".agents/skills/payment-modernization/SKILL.md",
+        ".agents/skills/payment-modernization/references/artifact-contracts.md",
+        ".agents/skills/payment-modernization/references/judge-gates.md",
+        ".agents/skills/payment-modernization/references/reimagine.md",
+        ".agents/skills/payment-modernization/references/transform.md",
+        "AGENTS.md",
+        "README.md",
+        "docs/adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md",
+        "docs/adr/0002-append-only-outbox-with-separate-relay-state.md",
+        "docs/adr/0003-java-spring-jooq-postgresql-baseline.md",
+        "docs/adr/0004-external-idp-and-application-authorization-boundary.md",
+        "docs/adr/0005-bounded-context-owned-adapters-and-composition-roots.md",
+        "docs/adr/0006-redis-protocol-cache-product-boundary.md",
+        "docs/adr/0007-separate-production-migrations-from-local-fixtures.md",
+        "docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md",
+        "docs/ai-context/README.md",
+        "docs/ai-context/backend/README.md",
+        "docs/ai-context/development-workflow.md",
+        "docs/ai-context/frontend/README.md",
+        "docs/ai-context/known-deviations.md",
+        "docs/ai-context/permission/01-current-state.md",
+        "docs/ai-context/permission/02-reference-ruoyi.md",
+        "docs/ai-context/permission/03-reference-continew.md",
+        "docs/ai-context/permission/04-comparison.md",
+        "docs/ai-context/permission/05-target-permission-model.md",
+        "docs/ai-context/permission/06-database-design.md",
+        "docs/ai-context/permission/07-api-permission-design.md",
+        "docs/ai-context/permission/08-data-scope-design.md",
+        "docs/ai-context/permission/09-migration-plan.md",
+        "docs/ai-context/vben/README.md",
+        "docs/ai-contract/identity-admin-api-contract.md",
+        "docs/governance/codeowners-bootstrap.md",
+        "docs/judge-charter.md",
+        "docs/new-payment-system-target-architecture.md",
+        "docs/permission-refactor-product-requirements.md"
+      ],
+      "rulebookDigest": "sha256:60ba53eca4f0c71e3702f6e27060b35b9d3d6cb84942f5ebeaff6de46d448ac0"
+    },
+    "judgeManifest": {
+      "label": "IAM-001 decision baseline Judges",
+      "paths": [
+        ".agents/payment-modernization-judge-registry.json",
+        ".agents/payment-modernization/artifacts/README.md",
+        ".github/CODEOWNERS",
+        ".github/workflows/documentation.yml",
+        "scripts/check-doc-decisions.py",
+        "scripts/check_modernization_artifacts.py",
+        "scripts/check_modernization_evidence.py",
+        "scripts/check_project_skills.py",
+        "scripts/check_sensitive_artifacts.py",
+        "scripts/ci_repository_guard.sh",
+        "scripts/requirements-documentation.txt",
+        "scripts/tests/test_check_doc_decisions.py",
+        "scripts/tests/test_check_project_skills.py",
+        "scripts/tests/test_check_sensitive_artifacts.py",
+        "scripts/tests/test_documentation_python_runtime_security.py",
+        "scripts/tests/test_documentation_workflow_security.py",
+        "scripts/tests/test_modernization_contracts.py",
+        "scripts/tests/test_payment_modernization_governance.py"
+      ],
+      "judgeDigest": "sha256:6afc19e99c334cbbc310020127a81f0a3553bcf1bf2f65eaaaebd101bafd0da9"
+    },
+    "taskIdentityKey": "sha256:baea2359ceb46385f064dfc311034a39612c678330e5b92b1a7a31c7f635d6a9",
+    "nonGitEvidence": [],
+    "ruleIds": [
+      "IAM-001"
+    ],
+    "actors": [
+      "platform operator",
+      "merchant administrator",
+      "agent administrator"
+    ],
+    "inputs": [
+      "username/password login",
+      "trusted server account domain",
+      "active membership and RoleGrant"
+    ],
+    "outputs": [
+      "three isolated backoffice sessions",
+      "dynamic menus and permission codes"
+    ],
+    "dependencies": [],
+    "ownedPaths": [
+      ".agents/payment-modernization-judge-registry.json",
+      ".agents/payment-modernization-policy.json",
+      ".agents/payment-modernization/rules/IAM-001.json",
+      ".github/workflows/frontend.yml",
+      "README.md",
+      "backend",
+      "docs",
+      "frontend/admin/apps/web-antdv-next",
+      "frontend/admin/packages/@core/base/typings",
+      "frontend/admin/packages/effects/access",
+      "frontend/admin/packages/effects/common-ui",
+      "frontend/admin/scripts/deploy",
+      "scripts"
+    ],
+    "forbiddenChanges": [
+      "payment business capabilities",
+      "frontend/portal",
+      "client-selected tenantId"
+    ],
+    "entryCriteria": [
+      "accepted ADR-0008",
+      "immutable target base"
+    ],
+    "exitCriteria": [
+      "process boundary passes",
+      "all declared semantic mutants are detected"
+    ],
+    "judgeCommands": [
+      "IAM-001-PROCESS-BOUNDARY",
+      "IAM-001-MUTATION-SENSITIVITY"
+    ]
+  },
+  "evaluatedSnapshot": {
+    "targetCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+    "rulebookManifest": {
+      "label": "IAM-001 evaluated Rulebook",
+      "paths": [
+        ".agents/payment-modernization-policy.json",
+        ".agents/payment-modernization/rules/IAM-001.json",
+        ".agents/skills/payment-modernization/SKILL.md",
+        ".agents/skills/payment-modernization/references/artifact-contracts.md",
+        ".agents/skills/payment-modernization/references/judge-gates.md",
+        ".agents/skills/payment-modernization/references/reimagine.md",
+        ".agents/skills/payment-modernization/references/transform.md",
+        "AGENTS.md",
+        "README.md",
+        "docs/adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md",
+        "docs/adr/0002-append-only-outbox-with-separate-relay-state.md",
+        "docs/adr/0003-java-spring-jooq-postgresql-baseline.md",
+        "docs/adr/0004-external-idp-and-application-authorization-boundary.md",
+        "docs/adr/0005-bounded-context-owned-adapters-and-composition-roots.md",
+        "docs/adr/0006-redis-protocol-cache-product-boundary.md",
+        "docs/adr/0007-separate-production-migrations-from-local-fixtures.md",
+        "docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md",
+        "docs/ai-context/README.md",
+        "docs/ai-context/backend/README.md",
+        "docs/ai-context/development-workflow.md",
+        "docs/ai-context/frontend/README.md",
+        "docs/ai-context/known-deviations.md",
+        "docs/ai-context/permission/01-current-state.md",
+        "docs/ai-context/permission/02-reference-ruoyi.md",
+        "docs/ai-context/permission/03-reference-continew.md",
+        "docs/ai-context/permission/04-comparison.md",
+        "docs/ai-context/permission/05-target-permission-model.md",
+        "docs/ai-context/permission/06-database-design.md",
+        "docs/ai-context/permission/07-api-permission-design.md",
+        "docs/ai-context/permission/08-data-scope-design.md",
+        "docs/ai-context/permission/09-migration-plan.md",
+        "docs/ai-context/vben/README.md",
+        "docs/ai-contract/identity-admin-api-contract.md",
+        "docs/governance/codeowners-bootstrap.md",
+        "docs/judge-charter.md",
+        "docs/new-payment-system-target-architecture.md",
+        "docs/permission-refactor-product-requirements.md"
+      ],
+      "rulebookDigest": "sha256:d4ac991e74fe3d8a4c8b2d3d9db96d5d4051b706d0cad56b0a25741297e81f18"
+    },
+    "judgeManifest": {
+      "label": "IAM-001 evaluated Judges",
+      "paths": [
+        ".agents/payment-modernization-judge-registry.json",
+        ".agents/payment-modernization/artifacts/README.md",
+        ".github/CODEOWNERS",
+        ".github/workflows/documentation.yml",
+        "scripts/check-doc-decisions.py",
+        "scripts/check_iam001_three_backoffice_boundary.py",
+        "scripts/check_modernization_artifacts.py",
+        "scripts/check_modernization_evidence.py",
+        "scripts/check_project_skills.py",
+        "scripts/check_sensitive_artifacts.py",
+        "scripts/ci_repository_guard.sh",
+        "scripts/requirements-documentation.txt",
+        "scripts/tests/test_check_doc_decisions.py",
+        "scripts/tests/test_check_project_skills.py",
+        "scripts/tests/test_check_sensitive_artifacts.py",
+        "scripts/tests/test_documentation_python_runtime_security.py",
+        "scripts/tests/test_documentation_workflow_security.py",
+        "scripts/tests/test_iam001_three_backoffice_boundary.py",
+        "scripts/tests/test_modernization_contracts.py",
+        "scripts/tests/test_payment_modernization_governance.py"
+      ],
+      "judgeDigest": "sha256:94e0c01df491a00c0cd78acf263ee81d5cf869a0979d118c79ec3c562921f930"
+    },
+    "evaluatedVersionKey": "sha256:348f84fb3bcf4581059fb5714883061d2104c8433492dc99d1adcdc4756638c4"
+  },
+  "ruleCards": [
+    {
+      "rulePath": ".agents/payment-modernization/rules/IAM-001.json",
+      "rulePayload": {
+        "ruleId": "IAM-001",
+        "status": "approved",
+        "statement": "Each backoffice accepts only its server-fixed account domain and uses a session, cookie, origin, login realm, and cache namespace that cannot be reused by another backoffice.",
+        "scope": [
+          "platform operations backoffice",
+          "merchant backoffice",
+          "agent backoffice",
+          "identity login and session authorization"
+        ],
+        "given": [
+          "three independently deployed backoffice entries",
+          "an account and membership assigned to exactly one account domain"
+        ],
+        "when": [
+          "a principal logs in or calls an authenticated API",
+          "an administrator disables a membership, changes a password, or changes role grants"
+        ],
+        "then": [
+          "the server derives the account domain from the application entry and never from tenantId supplied by the client",
+          "credentials, active membership, tenant type, session realm, cookie, origin, and cache namespace must all match that account domain",
+          "unknown routes and direct requests without effective permission are denied",
+          "old sessions fail after membership disable, password change, revocation, or permission version change"
+        ],
+        "counterexamples": [
+          "a platform cookie authenticates a merchant or agent request",
+          "a login request selects another workspace by supplying tenantId",
+          "a cached platform grant authorizes a merchant session",
+          "a hidden frontend action succeeds when called directly without its permission"
+        ],
+        "evidence": [
+          {
+            "kind": "decision",
+            "source": "docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md",
+            "targetBaseSha": "741927d40838bd515f9ae1bd357ce25c92f55043",
+            "location": "Decision"
+          }
+        ],
+        "confidence": "high",
+        "judgeTests": [
+          "IAM-001-MUTATION-SENSITIVITY",
+          "IAM-001-PROCESS-BOUNDARY"
+        ]
+      },
+      "approvalCommit": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+      "approvedBy": [
+        "iam001-business-security",
+        "iam001-implementation-adversary"
+      ],
+      "approvalReviewRefs": [
+        "iam001-business-security-685f242a",
+        "iam001-implementation-adversary-685f242a"
+      ]
+    }
+  ],
+  "reviewResults": [
+    {
+      "reviewResultId": "iam001-business-security-685f242a",
+      "taskIdentityKey": "sha256:baea2359ceb46385f064dfc311034a39612c678330e5b92b1a7a31c7f635d6a9",
+      "evaluatedVersionKey": "sha256:348f84fb3bcf4581059fb5714883061d2104c8433492dc99d1adcdc4756638c4",
+      "reviewerId": "iam001-business-security",
+      "reviewerRole": "business-security",
+      "reviewIdempotencyKey": "sha256:5efd953fac54eea4b8e01a154b823449434b0d43ca75a7b1a7efe55052e7a7f6",
+      "targetCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+      "rulebookDigest": "sha256:d4ac991e74fe3d8a4c8b2d3d9db96d5d4051b706d0cad56b0a25741297e81f18",
+      "judgeDigest": "sha256:94e0c01df491a00c0cd78acf263ee81d5cf869a0979d118c79ec3c562921f930",
+      "queueDigest": "sha256:f3b03e2466bc2de755e7758dbc8df6644233df735215b87fa9e66d0b0567db4e",
+      "startCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+      "endCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+      "snapshotValid": true,
+      "verdict": "PASS",
+      "findings": [],
+      "commandsRun": [
+        {
+          "checkId": "IAM-001-MUTATION-SENSITIVITY",
+          "command": "python3 -I scripts/check_iam001_three_backoffice_boundary.py --repository-root . --queue-output target/judge/iam001/mutations.json --check mutations",
+          "targetCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+          "exitCode": 0,
+          "resultDigest": "sha256:b0dff1e89760f76606477e927fee7e36a30f8cb711ac90675c346dd660f43076"
+        },
+        {
+          "checkId": "IAM-001-PROCESS-BOUNDARY",
+          "command": "python3 -I scripts/check_iam001_three_backoffice_boundary.py --repository-root . --queue-output target/judge/iam001/process.json --check process",
+          "targetCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+          "exitCode": 0,
+          "resultDigest": "sha256:51820c9adb5c260d3f48efa3062c5adbd339aebc7bce4eb656792a49cdec61bf"
+        }
+      ],
+      "limitations": [
+        "This review approves only the IAM-001 rule and the evaluated three-backoffice identity/session isolation slice; it does not approve production rollout, payment capabilities, external IdP/MFA, or unrelated repository behavior.",
+        "The registered Judges ran in an isolated local clone with containerized PostgreSQL/Valkey dependencies; live ingress, managed service, disaster-recovery, and production observability drills were not executed."
+      ],
+      "keyId": "iam001-business-security-ed25519-v1",
+      "signatureAlgorithm": "Ed25519",
+      "reviewPurpose": "rule-approval",
+      "approvalSubjects": [
+        {
+          "rulePath": ".agents/payment-modernization/rules/IAM-001.json",
+          "ruleId": "IAM-001",
+          "rulePayloadDigest": "sha256:7eacb8c9e71642d74939df67f7e5923270a3aabb08602d0afdb260ee9f6338ac"
+        }
+      ],
+      "signature": "d3DfNxaCewiLCiZ76uoGUvjOnmPlMLWZ/1+BzQVnBzcltWXKrCuUIkM/qlMZa+SsrFL6py8A+fAdZUYCgiCqAQ=="
+    },
+    {
+      "approvalSubjects": [
+        {
+          "ruleId": "IAM-001",
+          "rulePath": ".agents/payment-modernization/rules/IAM-001.json",
+          "rulePayloadDigest": "sha256:7eacb8c9e71642d74939df67f7e5923270a3aabb08602d0afdb260ee9f6338ac"
+        }
+      ],
+      "commandsRun": [
+        {
+          "checkId": "IAM-001-MUTATION-SENSITIVITY",
+          "command": "python3 -I scripts/check_iam001_three_backoffice_boundary.py --repository-root . --queue-output target/judge/iam001/mutations.json --check mutations",
+          "exitCode": 0,
+          "resultDigest": "sha256:b0dff1e89760f76606477e927fee7e36a30f8cb711ac90675c346dd660f43076",
+          "targetCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788"
+        },
+        {
+          "checkId": "IAM-001-PROCESS-BOUNDARY",
+          "command": "python3 -I scripts/check_iam001_three_backoffice_boundary.py --repository-root . --queue-output target/judge/iam001/process.json --check process",
+          "exitCode": 0,
+          "resultDigest": "sha256:51820c9adb5c260d3f48efa3062c5adbd339aebc7bce4eb656792a49cdec61bf",
+          "targetCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788"
+        }
+      ],
+      "endCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+      "evaluatedVersionKey": "sha256:348f84fb3bcf4581059fb5714883061d2104c8433492dc99d1adcdc4756638c4",
+      "findings": [],
+      "judgeDigest": "sha256:94e0c01df491a00c0cd78acf263ee81d5cf869a0979d118c79ec3c562921f930",
+      "keyId": "iam001-implementation-adversary-ed25519-v1",
+      "limitations": [
+        "Review covered immutable Commit B and its repository-contained automated gates in an isolated local clone; it did not validate a deployed production environment.",
+        "No production traffic, runtime observability, or executed production rollback evidence was available for review."
+      ],
+      "queueDigest": "sha256:f3b03e2466bc2de755e7758dbc8df6644233df735215b87fa9e66d0b0567db4e",
+      "reviewIdempotencyKey": "sha256:4fb3e98bcc33e061c4888925bbe27f3a2de1019491fe7d5fdda58620a6fa48bd",
+      "reviewPurpose": "rule-approval",
+      "reviewResultId": "iam001-implementation-adversary-685f242a",
+      "reviewerId": "iam001-implementation-adversary",
+      "reviewerRole": "implementation-adversary",
+      "rulebookDigest": "sha256:d4ac991e74fe3d8a4c8b2d3d9db96d5d4051b706d0cad56b0a25741297e81f18",
+      "signature": "fNNsmINcVUFST9RcKzkv8PRsXi/FmIYOegy+CcKyqiWpKhIzBY2Pzu6zNMJ6vuXpVG8EcOlweHcItSt3SbTwBg==",
+      "signatureAlgorithm": "Ed25519",
+      "snapshotValid": true,
+      "startCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+      "targetCommitSha": "685f242a9e107d0ca2136cb80c146c704bfd4788",
+      "taskIdentityKey": "sha256:baea2359ceb46385f064dfc311034a39612c678330e5b92b1a7a31c7f635d6a9",
+      "verdict": "PASS"
+    }
+  ],
+  "queueItems": []
+}
