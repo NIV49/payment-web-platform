@@ -390,25 +390,83 @@ class Iam001BoundaryCheckTest(unittest.TestCase):
             )
             self.assertEqual("guard\n", production.read_text(encoding="utf-8"))
 
-    def test_task_identity_owned_paths_cover_the_exact_slice_diff(self) -> None:
-        repository = Path(__file__).resolve().parents[2]
-        target = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repository,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
+    def test_task_identity_owned_paths_cover_a_real_git_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "judge@example.invalid"],
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "IAM-001 Judge"],
+                cwd=repository,
+                check=True,
+            )
+            shared_paths = (
+                "frontend/admin/packages/@core/base/typings/src/vue-router.d.ts",
+                "frontend/admin/packages/effects/access/src/accessible.ts",
+            )
+            for shared_path in shared_paths:
+                path = repository / shared_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "baseline"], cwd=repository, check=True
+            )
+            base = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
 
-        self.assertEqual(
-            [],
-            MODULE._unowned_changed_paths(
-                repository,
-                MODULE.TARGET_BASE_SHA,
-                target,
-                MODULE.OWNED_PATHS,
-            ),
-        )
+            for shared_path in shared_paths:
+                (repository / shared_path).write_text("candidate\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "commit", "-qam", "candidate"],
+                cwd=repository,
+                check=True,
+            )
+            target = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            self.assertEqual(
+                [],
+                MODULE._unowned_changed_paths(
+                    repository, base, target, MODULE.OWNED_PATHS
+                ),
+            )
+            unowned = repository / "frontend/portal/app.vue"
+            unowned.parent.mkdir(parents=True)
+            unowned.write_text("unowned\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "unowned"],
+                cwd=repository,
+                check=True,
+            )
+            unowned_target = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual(
+                ["frontend/portal/app.vue"],
+                MODULE._unowned_changed_paths(
+                    repository, base, unowned_target, MODULE.OWNED_PATHS
+                ),
+            )
         for shared_path in (
             "frontend/admin/packages/@core/base/typings/src/vue-router.d.ts",
             "frontend/admin/packages/effects/access/src/accessible.ts",
