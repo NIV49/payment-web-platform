@@ -88,8 +88,11 @@ public class IamRoleGrant extends TableImpl<IamRoleGrantRecord> {
 
     /**
      * The column <code>public.iam_role_grant.grant_key</code>.
+     * system-backoffice-access is reserved exclusively for the canonical
+     * server-managed portal Grant; V20 renames historical tenant Grants
+     * deterministically
      */
-    public final TableField<IamRoleGrantRecord, String> GRANT_KEY = createField(DSL.name("grant_key"), SQLDataType.VARCHAR(64).nullable(false), this, "");
+    public final TableField<IamRoleGrantRecord, String> GRANT_KEY = createField(DSL.name("grant_key"), SQLDataType.VARCHAR(64).nullable(false), this, "system-backoffice-access is reserved exclusively for the canonical server-managed portal Grant; V20 renames historical tenant Grants deterministically");
 
     /**
      * The column <code>public.iam_role_grant.status</code>.

@@ -79,6 +79,9 @@ public class IamRoleGrantRecord extends UpdatableRecordImpl<IamRoleGrantRecord> 
 
     /**
      * Setter for <code>public.iam_role_grant.grant_key</code>.
+     * system-backoffice-access is reserved exclusively for the canonical
+     * server-managed portal Grant; V20 renames historical tenant Grants
+     * deterministically
      */
     public void setGrantKey(String value) {
         set(4, value);
@@ -86,6 +89,9 @@ public class IamRoleGrantRecord extends UpdatableRecordImpl<IamRoleGrantRecord> 
 
     /**
      * Getter for <code>public.iam_role_grant.grant_key</code>.
+     * system-backoffice-access is reserved exclusively for the canonical
+     * server-managed portal Grant; V20 renames historical tenant Grants
+     * deterministically
      */
     public String getGrantKey() {
         return (String) get(4);
