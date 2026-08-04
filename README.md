@@ -87,9 +87,9 @@ Password: disabled
 
 所有开发任务先读 [仓库开发规则](AGENTS.md) 和 [AI 上下文入口](docs/ai-context/README.md)。迁移、重构、Judge 或多 Agent 能力切片还必须遵循 [Judge Charter](docs/judge-charter.md)；项目级 [payment-modernization skill](.agents/skills/payment-modernization/SKILL.md) 提供 Reimagine/Transform 路由、产物契约和门禁流程。
 
-<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
-Judge 与 skill 不覆盖产品决策。全局 User 是否允许关联多个 TenantMembership、工作空间选择和 session realm/Token audience 方案仍为待确认项，只有产品基线或 accepted ADR 可以使其生效。
+Judge 与 skill 不覆盖产品决策。[ADR-0008](docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 已确认三后台独立账号域、可信服务端工作区入口及 Cookie/session realm/cache 隔离；同域多 Membership 仍允许，但客户端不得选择工作区，服务端上下文无法唯一解析时必须失败关闭。
 
 如果你需要一段很长的注释来证明这种变通方法是可行的，那么代码就有问题——请修改代码。
 

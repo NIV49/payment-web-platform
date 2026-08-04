@@ -89,6 +89,8 @@ class RoleGrantAdministrationServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.replace(command(
             new RoleGrantModels.Selection("wrong-scope", PermissionCode.of("user:view"),
                 ScopeDimension.DEPARTMENT, ScopeMode.DEPARTMENT))));
+        assertThrows(IllegalArgumentException.class, () -> service.replace(command(
+            selection(RoleGrantAdministrationService.PROTECTED_PORTAL_GRANT_KEY, "user:view"))));
     }
 
     @Test

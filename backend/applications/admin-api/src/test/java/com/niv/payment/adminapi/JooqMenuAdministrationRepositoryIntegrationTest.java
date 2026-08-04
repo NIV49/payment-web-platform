@@ -273,8 +273,8 @@ class JooqMenuAdministrationRepositoryIntegrationTest {
         long departmentId = tenantId + 10L;
         dsl.insertInto(IAM_TENANT,
                 IAM_TENANT.ID, IAM_TENANT.TENANT_CODE, IAM_TENANT.TENANT_NAME,
-                IAM_TENANT.TENANT_TYPE, IAM_TENANT.STATUS)
-            .values(tenantId, username, username, "PLATFORM", "ACTIVE")
+                IAM_TENANT.TENANT_TYPE, IAM_TENANT.STATUS, IAM_TENANT.ACCOUNT_DOMAIN)
+            .values(tenantId, username, username, "PLATFORM", "ACTIVE", "PLATFORM")
             .execute();
         dsl.insertInto(IAM_DEPARTMENT,
                 IAM_DEPARTMENT.ID, IAM_DEPARTMENT.TENANT_ID, IAM_DEPARTMENT.DEPARTMENT_CODE,
@@ -283,18 +283,19 @@ class JooqMenuAdministrationRepositoryIntegrationTest {
             .execute();
         dsl.insertInto(IAM_USER,
                 IAM_USER.ID, IAM_USER.IDP_ISSUER, IAM_USER.IDP_SUBJECT,
-                IAM_USER.DISPLAY_NAME, IAM_USER.STATUS)
-            .values(userId, "local", username, username, "ACTIVE")
+                IAM_USER.DISPLAY_NAME, IAM_USER.STATUS, IAM_USER.ACCOUNT_DOMAIN)
+            .values(userId, "local", username, username, "ACTIVE", "PLATFORM")
             .execute();
         dsl.insertInto(IAM_MEMBERSHIP,
                 IAM_MEMBERSHIP.ID, IAM_MEMBERSHIP.TENANT_ID, IAM_MEMBERSHIP.USER_ID,
-                IAM_MEMBERSHIP.DEPARTMENT_ID, IAM_MEMBERSHIP.STATUS)
-            .values(membershipId, tenantId, userId, departmentId, "ACTIVE")
+                IAM_MEMBERSHIP.DEPARTMENT_ID, IAM_MEMBERSHIP.STATUS, IAM_MEMBERSHIP.ACCOUNT_DOMAIN)
+            .values(membershipId, tenantId, userId, departmentId, "ACTIVE", "PLATFORM")
             .execute();
         dsl.insertInto(IAM_AUTHENTICATION_CREDENTIAL,
                 IAM_AUTHENTICATION_CREDENTIAL.USER_ID, IAM_AUTHENTICATION_CREDENTIAL.USERNAME,
-                IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, IAM_AUTHENTICATION_CREDENTIAL.STATUS)
-            .values(userId, username, SUPPORTED_DUMMY_HASH, "ACTIVE")
+                IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, IAM_AUTHENTICATION_CREDENTIAL.STATUS,
+                IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN)
+            .values(userId, username, SUPPORTED_DUMMY_HASH, "ACTIVE", "PLATFORM")
             .execute();
     }
 }

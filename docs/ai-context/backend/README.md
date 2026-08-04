@@ -1,7 +1,7 @@
 # 后端工程上下文
 
 > 适用目录：`backend/**`
-> 当前事实基线：2026-07-20 工作区
+> 当前事实基线：2026-08-04 工作区
 > 注意：本文记录已实现事实；目标与取舍以已接受 ADR 和目标架构为准。代码与本文冲突时必须修代码或显式修改决策，不能把偶然实现反写成架构。
 
 ## 1. 技术基线与运行单元
@@ -15,12 +15,15 @@
 - Valkey 7.2.13（Redis 协议兼容，BSD-3-Clause）；
 - PostgreSQL JDBC 42.7.11；测试依赖跟随 Spring Boot BOM，API 集成测试使用 Testcontainers。
 
-根 POM 只聚合两个模块：
+根 POM 聚合 Identity 上下文、三个可部署 API 组合根和进程级边界测试：
 
 ```text
 backend
-├── applications/admin-api       可启动 Spring Boot 管理 API
-└── modules/identity             Identity 业务上下文及所属适配器
+├── applications/admin-api                 PLATFORM 管理 API，默认 8080
+├── applications/merchant-admin-api        MERCHANT 最小后台 API，默认 8082
+├── applications/agent-admin-api           AGENT 最小后台 API，默认 8083
+├── modules/identity                       Identity 业务上下文及所属适配器
+└── tests/iam001-blackbox                  三个独立 JVM 的外部边界验收
 ```
 
 `applications` 必须只表示可启动部署单元。Identity 的用户、登录、角色、菜单和权限规则属于 `modules/identity`，不能再回到 application Controller 或建立 `applications/identity-authorization` 业务模块。
@@ -120,12 +123,12 @@ POST /api/auth/login
   -> BCryptPasswordEncoder.matches
   -> RedisLoginAttemptLimiter.recordSuccess
   -> SaTokenSessionIssuer
-  -> PAYMENT_SESSION HttpOnly Cookie
+  -> account-domain-specific HttpOnly Cookie
 ```
 
-登录成功把 `userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/stepUpVerified` 写入 Sa-Token session。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要：仅接受 `$2a/$2b/$2y`、cost 10..14 和 53 字符编码体；非法或过高 cost 摘要改用安全 dummy 路径并返回统一登录失败。V13 把同一规则固化为数据库 CHECK，因此后续 SQL 的 `password_hash IS NOT NULL` 等价于“格式与成本可由当前登录实现验证”。Session bridge 精确匹配 tenant、membership、user、credential，要求四者均为 `ACTIVE`，并在一次数据库查询中同时比较 permissionVersion 与 sessionVersion。任一版本失效时，包含 `/auth/codes` 在内的下一个已认证请求都返回 401 `SESSION_INVALID`，服务端注销会话并清 Cookie；Admin 写事务还会在锁后复核两个版本。
+登录请求只接受 username/password；账号域由 composition root 注入 `AuthenticationService`，不能由 body/query/header 选择。登录成功把 `accountDomain/userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/stepUpVerified` 写入 Sa-Token session。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要：仅接受 `$2a/$2b/$2y`、cost 10..14 和 53 字符编码体；非法或过高 cost 摘要改用安全 dummy 路径并返回统一登录失败。V13 把同一规则固化为数据库 CHECK。Session bridge 同时精确匹配 account domain、tenant、membership、user、credential，要求四者均为 `ACTIVE`，并比较 permissionVersion 与 sessionVersion。任一域或版本失效时，包含 `/auth/codes` 在内的下一个已认证请求都返回 401 `SESSION_INVALID`，服务端注销会话并清 Cookie。
 
-Sa-Token 配置：8 小时总超时、30 分钟 active timeout、禁止并发共享、只读 Cookie、不读 Header/Body、HttpOnly、SameSite Strict。生产环境应启用 Secure Cookie。
+Sa-Token 配置：PLATFORM/MERCHANT/AGENT 分别使用 `platform-admin`/`merchant-admin`/`agent-admin` login type 和 `PAYMENT_PLATFORM_SESSION`/`PAYMENT_MERCHANT_SESSION`/`PAYMENT_AGENT_SESSION` Cookie；均为 8 小时总超时、30 分钟 active timeout、禁止并发共享、只读 Cookie、不读 Header/Body、HttpOnly、SameSite Strict。生产环境必须启用 Secure Cookie。
 
 登录限流在查账号与 BCrypt 前使用 Redis Lua 原子预留两个 15 分钟桶：client 全局最多 30，client/username 最多 5。两个 key 使用同一 client digest hash tag，在 Redis Cluster 中同 slot；成功登录清理该账号桶并释放当次 client 预留。这可防止轮换用户名和并发绕过单桶，不等于已具备分布式 botnet 防护。
 
@@ -158,7 +161,7 @@ GET /api/menu/all
   -> jOOQ query by tenant/membership/role
   -> Controller 组树 + 解析 meta_json
   -> RouteRecordStringComponent[]
-  -> 前端拒绝本地 Profile name/path 冲突 -> Vben mixed route generation
+  -> 前端拒绝静态 core/fallback/local canonical name/path 冲突 -> Vben mixed route generation
 ```
 
 `/menu/all` 只返回 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，BUTTON 不进入动态路由。直接授权节点只在同 tenant 且 ACTIVE 的显式祖先链完整时返回，缺少的祖先会补齐但不带 sibling；祖先缺失、禁用、不是可路由类型或成环时整支 fail closed。
@@ -246,7 +249,7 @@ Role、Department、Menu 的管理读模型显式返回 `rowVersion`；PUT/PATCH
 
 本地开发数据不再属于 Flyway 生产路径。`admin-api/src/main/resources/db/local/iam-local-bootstrap.sql` 只由 `local` profile 的 `LocalIdentityFixtureBootstrap` 在 Flyway 后执行。
 精确匹配的预置部门允许 `row_version` 自然递增到任意非负值；ID、租户、父级、编码、名称、状态、备注和预留键碰撞仍按原规则失败关闭。
-Local bootstrap 的 fixture 归属只由预留 ID、预留自然键/authCode、预置主体和预置主体自身关系确定。`assigned_by/created_by/updated_by` 只是审计来源，菜单 `parent_id` 只是树关系，二者都不能把管理员后续创建的数据扩大为 fixture。因而管理员创建的额外部门、用户、Membership、普通角色、Grant、菜单，以及普通角色对预置或新增菜单的合法展示关系会在重启后保留；直接修改预置行，或给预置 Membership/Role 增加非预置授权关系仍失败关闭。
+Local bootstrap 的 fixture 归属只由预留 ID、预留自然键/authCode、预置主体和预置主体自身关系确定。`assigned_by/created_by/updated_by` 只是审计来源，菜单 `parent_id` 只是树关系，二者都不能把管理员后续创建的数据扩大为 fixture。因而管理员创建的额外部门、用户、Membership、普通角色、Grant、菜单，以及普通角色对预置或新增菜单的合法展示关系会在重启后保留；直接修改预置行，或给预置 Membership/Role 增加非预置授权关系仍失败关闭。MERCHANT/AGENT 预置系统角色还必须保持 ACTIVE、未墓碑，并各自只有一条符合登录查询条件的 canonical 入口 Grant；有效期、额外维度、Target 或其他活动 portal Grant 任一漂移都会使整个 bootstrap 事务回滚。
 
 ### V9 菜单路由唯一性
 
@@ -296,12 +299,13 @@ V17 为 `iam_role/iam_menu/iam_department` 增加 `deleted_at`，为菜单和部
 
 ## 7. Redis 与缓存现状
 
-- Sa-Token Redis：保存 Sa-Token 会话/登录状态；
-- `iam:login-attempt:{client-sha256}:client`：15 分钟 client 全局桶，最多 30 个已失败/在途尝试；
-- `iam:login-attempt:{client-sha256}:username:<username-sha256>`：同窗口 client/username 桶，最多 5；两个 key 同 hash slot，Lua 原子检查并预留；
-- `iam:grant:{tenantId}:{membershipId}:v{permissionVersion}`：HTTP PEP 使用的版本化 GrantSnapshot；只有不含 temporal boundary 的快照才进入 Redis，TTL 5 分钟，解码后再次核验 tenant/membership/version；
+- Sa-Token Redis：三个 login type 使用各自 Cookie/login/session key 前缀保存会话和登录状态；
+- `iam:{platform|merchant|agent}:login-attempt:{client-sha256}:client`：账号域独立的 15 分钟 client 桶，最多 30 个已失败/在途尝试；
+- `iam:{platform|merchant|agent}:login-attempt:{client-sha256}:username:<username-sha256>`：账号域独立的 client/username 桶，最多 5；同一请求的两个 key 同 hash slot，Lua 原子检查并预留；
+- `iam:{platform|merchant|agent}:grant:{tenantId}:{membershipId}:v{permissionVersion}`：账号域独立的版本化 GrantSnapshot；只有不含 temporal boundary 的快照才进入 Redis，TTL 5 分钟，解码后再次核验 domain/tenant/membership/version；
 - 快照携带当前角色 Grant 的最近 `valid_from/valid_until` 边界；只要该边界存在就完全绕过 Redis，每个请求都回源，禁止应用节点 Clock 延长或提前截断数据库授权时间；
 - PostgreSQL 回源在单条 SQL、同一 MVCC statement snapshot 内同时校验 ACTIVE Membership、permissionVersion、角色/权限状态和时间边界，并使用数据库 `statement_timestamp()` 作为统一判定时间；
+- 登录凭证查询还要求 Membership 通过角色持有当前 composition root 的 `backoffice:{platform|merchant|agent}-access` Grant；该 Grant 必须是服务端维护的 canonical `system-backoffice-access`、`TENANT/TENANT_ALL` 记录。V19 回填历史角色，V20 把 V17 可能合法存在的同 key 普通 Grant 确定性重命名并保留全部授权语义、审计和版本证据；两条角色创建事务为新角色生成 canonical Grant。18 项授权编辑器不返回或替换它，读取发现普通 Permission 再占保留 key 或 portal 存量错误时只读失败。ACTIVE Membership 本身不能进入后台。缓存 payload 以账号域前缀编码并在解码时复核，复制到另一账号域 key 的快照会被拒绝；
 - 单次快照最多接受 4096 条 grant/dimension/target 明细，超限直接拒绝，避免无界授权展开拖垮请求；
 - 权限版本变化后新请求使用新 key；无时间边界的 cache-hit 返回前再次读取 permissionVersion，最终复核前已提交的撤权会丢弃旧命中并按新版本有界重试一次，复核后提交属于已进入处理的请求。若 Session 中 permissionVersion 最终仍旧，统一返回 401 `SESSION_INVALID`、注销会话并清 Cookie，调用方必须重新登录取得新主体版本。
 

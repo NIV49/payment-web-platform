@@ -138,7 +138,9 @@ class CredentialHashSafetyMigrationTest {
     }
 
     private static void migrateToLatest() {
-        flyway(null).migrate();
+        // This test owns V13 credential hash behavior. IAM-001 deliberately
+        // rejects historical users without a Membership when V18 is applied.
+        flyway("17").migrate();
     }
 
     private static void migrateTo(String version) {

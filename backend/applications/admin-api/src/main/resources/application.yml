@@ -25,12 +25,14 @@ spring:
     sql-dialect: POSTGRES
   jackson:
     default-property-inclusion: non_null
+    deserialization:
+      fail-on-unknown-properties: true
 
 # Sa-Token's auto-configuration binds this bean while the application context
 # is created, before the web server accepts traffic. Security settings must not
 # be deferred to an ApplicationRunner.
 sa-token:
-  token-name: PAYMENT_SESSION
+  token-name: PAYMENT_PLATFORM_SESSION
   timeout: 28800
   active-timeout: 1800
   is-concurrent: false
@@ -56,9 +58,12 @@ payment:
     # Keep in sync with deliberate route pages under web-antdv-next/src/views.
     allowed-page-components: /dashboard/analytics/index,/dashboard/workspace/index,/demos/antd/index,/system/dept/list,/system/menu/list,/system/role/list,/system/user/list
   security:
-    allowed-origins: ${PAYMENT_ALLOWED_ORIGINS}
+    allowed-origins: ${PAYMENT_PLATFORM_ALLOWED_ORIGIN:http://127.0.0.1:5999}
     # Applies to every mutating /api request, including chunked requests without Content-Length.
     max-request-body-bytes: ${PAYMENT_MAX_REQUEST_BODY_BYTES:262144}
+  identity:
+    account-domain: PLATFORM
+    login-type: platform-admin
 
 logging:
   level:

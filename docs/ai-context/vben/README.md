@@ -96,7 +96,7 @@ flowchart LR
 - `apps/web-antdv-next/src/main.ts`：先初始化命名空间偏好，再异步加载 bootstrap，最后移除全局 Loading。
 - `apps/web-antdv-next/src/bootstrap.ts`：注册组件适配、表单、i18n、Pinia、权限指令、Router 和 Motion。
 - `apps/web-antdv-next/src/preferences.ts`：保留 `accessMode: 'backend'`，使权限指令继续按 code 判断；它不是产品路由模式的事实来源。
-- `apps/web-antdv-next/src/router/product-access.ts`：固定产品 `mixed` 路由模式，并保留本地 `Profile` 的 name/path。
+- `apps/web-antdv-next/src/router/product-access.ts`：固定产品 `mixed` 路由模式，并递归保护静态 core、fallback 与本地 `Profile` 的 canonical name/path。
 - `apps/web-antdv-next/src/router/routes/index.ts`：只注册 `modules/profile.ts`；其他模块源码仅作为参考保留。
 - `apps/web-antdv-next/src/app.vue`：Antdv Next 的 `ConfigProvider`、locale 和主题 token 入口。
 
@@ -137,7 +137,7 @@ router guard
 
 父子路由应分别使用 `system.title`、`system.user.title`、`system.role.title`、`system.menu.title`、`system.dept.title`。
 
-静态路由示例 `src/router/routes/modules/system.ts` 已使用 `$t('system.title')`，但它没有进入产品本地路由 allowlist；System 等业务路由仍来自 `/menu/all`，不能指望静态文件覆盖错误的数据库值。本地 allowlist 目前只有隐藏的 `Profile`，后端若返回同名路由或 canonical `/profile` 路径，前端会在合并前失败，避免后端元数据静默覆盖本地账户页。
+静态路由示例 `src/router/routes/modules/system.ts` 已使用 `$t('system.title')`，但它没有进入产品本地路由 allowlist；System 等业务路由仍来自 `/menu/all`，不能指望静态文件覆盖错误的数据库值。本地业务 allowlist 目前只有隐藏的 `Profile`；后端若与 Root、Authentication、Login、FallbackNotFound、Profile 任一 canonical name/path 冲突，所有部署都会在合并前失败。退出或换用户按启动时冻结的核心 route name 清除旧动态路由，避免 Root 重挂后把旧路由误当静态白名单。
 
 ### 4.2 语言包加载
 

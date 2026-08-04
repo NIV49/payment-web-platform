@@ -61,11 +61,13 @@
 - 用户、角色、关系、密码、MFA 变化后旧权限必须及时失效；
 - 资金权限必须独立、可审计，不能归入普通订单管理。
 
-### 2.2 未决项
+### 2.2 已决项与未决项
 
-<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
-> 不确定：一个全局用户是否允许加入多个租户，以及登录时如何选择工作空间；产品文档要求技术评审确认。
+> 已确认：[ADR-0008](../../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 将 PLATFORM、MERCHANT、AGENT 定义为独立应用账号域；同一个应用 User 不跨域，同域多 Membership 仍允许。工作区只能由可信服务端入口/上下文解析，客户端不得通过 `tenantId` 切换；无法唯一解析时失败关闭。
+
+> 已实现：V18 固化 Tenant/User/Credential/Membership 的账号域不变量，V19/V20 建立 canonical portal Grant 并兼容历史普通 Grant 的保留 key；三个后端组合根和三个前端产物分别固定 Origin、Cookie、login type、Redis/cache namespace 与 component/route allowlist。三端 login/logout Origin 负例及独立 semantic mutants、真实 Router 重置回归已纳入 Judge。MERCHANT/AGENT 第一阶段仅提供认证、当前用户、菜单、权限码和健康检查，不承载支付业务。正式 Judge closed 仍取决于外部受信 reviewer 证据。
 
 > 不确定：权限撤销的最终 SLA；架构候选为普通权限 60 秒内、资金权限立即生效。
 

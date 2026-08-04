@@ -154,7 +154,7 @@ SELECT
     (SELECT count(*) FROM iam_tenant WHERE id = 1 OR tenant_code = 'platform') = 1
     AND EXISTS (SELECT 1 FROM iam_tenant WHERE id=1 AND tenant_code='platform'
         AND tenant_name='Platform Administration' AND tenant_type='PLATFORM'
-        AND status='ACTIVE' AND row_version=0)
+        AND account_domain='PLATFORM' AND status='ACTIVE' AND row_version=0)
     AND (SELECT count(*) FROM iam_department WHERE id=10 OR (tenant_id=1 AND department_code='head-office')) = 1
     AND EXISTS (SELECT 1 FROM iam_department WHERE id=10 AND tenant_id=1
         AND department_code='head-office' AND status='ACTIVE'
@@ -162,15 +162,18 @@ SELECT
     AND (SELECT count(*) FROM iam_user WHERE id=100 OR (idp_issuer='local' AND idp_subject='admin')) = 1
     AND EXISTS (SELECT 1 FROM iam_user WHERE id=100 AND idp_issuer='local' AND idp_subject='admin'
         AND display_name='Platform Administrator' AND email_cipher IS NULL AND phone_cipher IS NULL
-        AND status='ACTIVE' AND remark IS NOT DISTINCT FROM 'Local bootstrap administrator' AND row_version=0)
+        AND account_domain='PLATFORM' AND status='ACTIVE'
+        AND remark IS NOT DISTINCT FROM 'Local bootstrap administrator' AND row_version=0)
     AND (SELECT count(*) FROM iam_membership WHERE id=1000 OR user_id=100) = 1
     AND EXISTS (SELECT 1 FROM iam_membership WHERE id=1000 AND tenant_id=1 AND user_id=100
         AND department_id IS NOT DISTINCT FROM 10 AND status='ACTIVE'
+        AND account_domain='PLATFORM'
         AND permission_version=migration_stage
         AND session_version=0 AND row_version=0)
     AND (SELECT count(*) FROM iam_authentication_credential WHERE user_id=100 OR username='admin') = 1
     AND EXISTS (SELECT 1 FROM iam_authentication_credential WHERE user_id=100 AND username='admin'
-        AND status='ACTIVE' AND ((password_hash IS NULL AND last_login_at IS NULL AND row_version=0)
+        AND account_domain='PLATFORM' AND status='ACTIVE'
+        AND ((password_hash IS NULL AND last_login_at IS NULL AND row_version=0)
           OR (password_hash ~ '^[$]2[aby][$][0-9]{2}[$][./A-Za-z0-9]{53}$'
               AND ((last_login_at IS NULL AND row_version=1) OR (last_login_at IS NOT NULL AND row_version>=2)))))
     AND (SELECT count(*) FROM iam_role WHERE id=2000 OR (tenant_id=1
@@ -241,6 +244,129 @@ SELECT (SELECT count(*) FROM iam_audit_event
 $$
 @@
 
+CREATE OR REPLACE FUNCTION pg_temp.iam_local_v19_history_is_exact()
+RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
+SELECT (SELECT count(*) FROM iam_audit_event
+         WHERE tenant_id=1 AND operator_membership_id IS NULL
+           AND target_type='ROLE_GRANTS' AND target_ref='2000'
+           AND action_code='MIGRATE_PROTECTED_BACKOFFICE_ACCESS'
+           AND decision='NOT_APPLICABLE' AND reason_code='MIGRATION'
+           AND permission_code IS NULL AND matched_grant_id IS NULL
+           AND before_value IS NULL
+           AND after_value='{"migration":"V19","grantKey":"system-backoffice-access"}'::jsonb
+           AND trace_id='migration-v19') = 1
+   AND (SELECT count(*) FROM iam_audit_event
+         WHERE tenant_id=1 AND trace_id='migration-v19') = 1
+   AND (SELECT count(*) FROM iam_permission_change_outbox
+         WHERE tenant_id=1 AND aggregate_type='MEMBERSHIP' AND aggregate_ref='1000'
+           AND event_type='PERMISSION_VERSION_CHANGED'
+           AND payload='{"membershipId":"1000","permissionVersion":3,"reason":"V19_PROTECTED_BACKOFFICE_ACCESS"}'::jsonb
+           AND aggregate_version=3 AND schema_version=1
+           AND partition_key='1:1000' AND trace_id='migration-v19') = 1
+   AND (SELECT count(*) FROM iam_permission_change_relay_state relay
+          JOIN iam_permission_change_outbox outbox ON outbox.id=relay.event_record_id
+         WHERE outbox.tenant_id=1 AND outbox.aggregate_type='MEMBERSHIP'
+           AND outbox.aggregate_ref='1000' AND outbox.event_type='PERMISSION_VERSION_CHANGED'
+           AND outbox.aggregate_version=3 AND outbox.trace_id='migration-v19') = 1
+$$
+@@
+
+CREATE OR REPLACE FUNCTION pg_temp.iam_local_platform_access_grant_is_exact()
+RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
+SELECT (SELECT count(*)
+          FROM iam_role_grant grant_row
+          JOIN iam_permission permission ON permission.id=grant_row.permission_id
+         WHERE grant_row.tenant_id=1 AND grant_row.role_id=2000
+           AND permission.id=3022 AND permission.permission_code='backoffice:platform-access'
+           AND grant_row.grant_key='system-backoffice-access' AND grant_row.status='ACTIVE'
+           AND grant_row.valid_from IS NULL AND grant_row.valid_until IS NULL
+           AND ((grant_row.created_by IS NULL AND grant_row.updated_by IS NULL)
+             OR (grant_row.created_by=1000 AND grant_row.updated_by=1000))) = 1
+   AND (SELECT count(*)
+          FROM iam_grant_dimension dimension_row
+          JOIN iam_role_grant grant_row ON grant_row.id=dimension_row.grant_id
+         WHERE grant_row.tenant_id=1 AND grant_row.role_id=2000
+           AND grant_row.permission_id=3022 AND grant_row.grant_key='system-backoffice-access'
+           AND dimension_row.dimension_code='TENANT'
+           AND dimension_row.scope_mode='TENANT_ALL') = 1
+   AND NOT EXISTS (
+       SELECT 1 FROM iam_grant_target target
+       JOIN iam_grant_dimension dimension_row ON dimension_row.id=target.dimension_id
+       JOIN iam_role_grant grant_row ON grant_row.id=dimension_row.grant_id
+       WHERE grant_row.tenant_id=1 AND grant_row.role_id=2000
+         AND grant_row.permission_id=3022 AND grant_row.grant_key='system-backoffice-access'
+   )
+$$
+@@
+
+CREATE OR REPLACE FUNCTION pg_temp.iam_local_isolated_portal_fixture_is_exact()
+RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
+WITH expected(tenant_id,role_id,role_code,role_name,tenant_type,membership_id,
+              grant_id,permission_id,permission_code) AS (
+    VALUES
+      (2::bigint,2200::bigint,'merchant-admin','Merchant Administrator','DIRECT_MERCHANT',2100::bigint,
+       7023::bigint,3023::bigint,'backoffice:merchant-access'),
+      (3::bigint,3200::bigint,'agent-admin','Agent Administrator','AGENT',3100::bigint,
+       7024::bigint,3024::bigint,'backoffice:agent-access')
+)
+SELECT (SELECT count(*)
+          FROM expected
+          JOIN iam_role role
+            ON role.id=expected.role_id AND role.tenant_id=expected.tenant_id
+           AND role.role_code=expected.role_code AND role.role_name=expected.role_name
+           AND role.applicable_tenant_type=expected.tenant_type
+           AND NOT role.assignable AND role.system_role
+           AND role.status='ACTIVE' AND role.deleted_at IS NULL) = 2
+   AND NOT EXISTS (
+       SELECT 1
+         FROM expected
+        WHERE NOT EXISTS (
+            SELECT 1
+              FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+              JOIN iam_grant_dimension dimension_row ON dimension_row.grant_id=grant_row.id
+             WHERE grant_row.id=expected.grant_id
+               AND grant_row.tenant_id=expected.tenant_id
+               AND grant_row.role_id=expected.role_id
+               AND grant_row.permission_id=expected.permission_id
+               AND grant_row.grant_key='system-backoffice-access'
+               AND grant_row.status='ACTIVE'
+               AND grant_row.valid_from IS NULL AND grant_row.valid_until IS NULL
+               AND grant_row.created_by IS NOT DISTINCT FROM expected.membership_id
+               AND grant_row.updated_by IS NOT DISTINCT FROM expected.membership_id
+               AND permission.permission_code=expected.permission_code
+               AND permission.status='ACTIVE' AND permission.risk_level='NORMAL'
+               AND permission.cross_tenant_mode='SAME_TENANT_ONLY'
+               AND permission.required_dimensions=ARRAY['TENANT']::varchar(32)[]
+               AND NOT permission.requires_step_up AND NOT permission.requires_approval
+               AND dimension_row.dimension_code='TENANT'
+               AND dimension_row.scope_mode='TENANT_ALL'
+               AND (SELECT count(*) FROM iam_grant_dimension
+                     WHERE grant_id=grant_row.id) = 1
+               AND NOT EXISTS (
+                   SELECT 1 FROM iam_grant_target target
+                    WHERE target.dimension_id=dimension_row.id
+               )
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM iam_role_grant extra_grant
+                     JOIN iam_permission extra_permission
+                       ON extra_permission.id=extra_grant.permission_id
+                    WHERE extra_grant.tenant_id=grant_row.tenant_id
+                      AND extra_grant.role_id=grant_row.role_id
+                      AND extra_grant.status='ACTIVE'
+                      AND extra_grant.id<>grant_row.id
+                      AND extra_permission.permission_code IN (
+                          'backoffice:platform-access',
+                          'backoffice:merchant-access',
+                          'backoffice:agent-access'
+                      )
+               )
+        )
+   )
+$$
+@@
+
 CREATE OR REPLACE FUNCTION pg_temp.iam_local_role_menus_are_exact()
 RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
 SELECT (SELECT count(*) FROM iam_role_menu WHERE role_id=2000) = 8
@@ -252,9 +378,10 @@ $$
 CREATE OR REPLACE FUNCTION pg_temp.iam_local_final_fixture_is_exact()
 RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
 SELECT (pg_temp.iam_local_identity_is_exact(0)
-        OR (pg_temp.iam_local_identity_is_exact(2)
+        OR (pg_temp.iam_local_identity_is_exact(3)
             AND pg_temp.iam_local_v14_history_is_exact()
-            AND pg_temp.iam_local_v15_history_is_exact()))
+            AND pg_temp.iam_local_v15_history_is_exact()
+            AND pg_temp.iam_local_v19_history_is_exact()))
    AND pg_temp.iam_local_role_menus_are_exact()
    AND (SELECT count(*) FROM iam_role_grant grant_row
           JOIN iam_local_final_permission expected
@@ -264,15 +391,16 @@ SELECT (pg_temp.iam_local_identity_is_exact(0)
            AND grant_row.valid_from IS NULL AND grant_row.valid_until IS NULL
            AND grant_row.created_by IS NOT DISTINCT FROM 1000
            AND grant_row.updated_by IS NOT DISTINCT FROM 1000) = 19
+   AND pg_temp.iam_local_platform_access_grant_is_exact()
    AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000
-          OR id IN (SELECT id+1000 FROM iam_local_final_permission)) = 19
+          OR id IN (SELECT id+1000 FROM iam_local_final_permission)) = 20
    AND (SELECT count(*) FROM iam_grant_dimension dimension_row
           JOIN iam_local_final_permission expected
             ON dimension_row.id=expected.id+2000 AND dimension_row.grant_id=expected.id+1000
          WHERE dimension_row.dimension_code='TENANT' AND dimension_row.scope_mode='TENANT_ALL') = 19
    AND (SELECT count(*) FROM iam_grant_dimension WHERE grant_id IN
           (SELECT id FROM iam_role_grant WHERE role_id=2000)
-          OR id IN (SELECT id+2000 FROM iam_local_final_permission)) = 19
+          OR id IN (SELECT id+2000 FROM iam_local_final_permission)) = 20
    AND NOT EXISTS (SELECT 1 FROM iam_grant_target target JOIN iam_grant_dimension dimension_row
           ON dimension_row.id=target.dimension_id WHERE dimension_row.grant_id IN
           (SELECT id FROM iam_role_grant WHERE role_id=2000))
@@ -298,9 +426,10 @@ CREATE OR REPLACE FUNCTION pg_temp.iam_local_legacy_fixture_is_exact(
 RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
 SELECT pg_temp.iam_local_identity_is_exact(migration_stage)
    AND (migration_stage=0 OR (
-       migration_stage=2
+       migration_stage=3
        AND pg_temp.iam_local_v14_history_is_exact()
-       AND pg_temp.iam_local_v15_history_is_exact()))
+       AND pg_temp.iam_local_v15_history_is_exact()
+       AND pg_temp.iam_local_v19_history_is_exact()))
    AND pg_temp.iam_local_role_menus_are_exact()
    AND (SELECT count(*) FROM iam_role_grant grant_row JOIN iam_local_legacy_permission expected
           ON grant_row.id=expected.id+1000 AND grant_row.permission_id=expected.id
@@ -309,8 +438,16 @@ SELECT pg_temp.iam_local_identity_is_exact(migration_stage)
          AND grant_row.valid_from IS NULL AND grant_row.valid_until IS NULL
          AND grant_row.created_by IS NOT DISTINCT FROM 1000
          AND grant_row.updated_by IS NOT DISTINCT FROM 1000 AND grant_row.row_version=0) = 14
-   AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000
-          OR id BETWEEN 4001 AND 4014) = CASE WHEN migration_stage=2 THEN 21 ELSE 14 END
+   AND (
+       (migration_stage=0 AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000
+          OR id BETWEEN 4001 AND 4014) = 14)
+       OR (migration_stage=0 AND pg_temp.iam_local_platform_access_grant_is_exact()
+           AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000
+              OR id BETWEEN 4001 AND 4014) = 15)
+       OR (migration_stage=3 AND pg_temp.iam_local_platform_access_grant_is_exact()
+           AND (SELECT count(*) FROM iam_role_grant WHERE role_id=2000
+              OR id BETWEEN 4001 AND 4014) = 22)
+   )
    AND (migration_stage=0 OR (SELECT count(*) FROM iam_role_grant grant_row
           JOIN iam_local_final_permission expected ON expected.id=grant_row.permission_id
          WHERE expected.id BETWEEN 3015 AND 3021
@@ -330,11 +467,25 @@ SELECT pg_temp.iam_local_identity_is_exact(migration_stage)
            AND grant_row.grant_key='migration-v14-' || replace(expected.permission_code, ':', '-')
            AND dimension_row.dimension_code='TENANT'
            AND dimension_row.scope_mode='TENANT_ALL') = 7)
-   AND (SELECT count(*) FROM iam_grant_dimension dimension_row
+   AND (
+       (migration_stage=0 AND (SELECT count(*) FROM iam_grant_dimension dimension_row
           LEFT JOIN iam_role_grant grant_row ON grant_row.id=dimension_row.grant_id
          WHERE dimension_row.id BETWEEN 5001 AND 5014
             OR dimension_row.grant_id BETWEEN 4001 AND 4014
-            OR grant_row.role_id=2000) = CASE WHEN migration_stage=2 THEN 21 ELSE 14 END
+            OR grant_row.role_id=2000) = 14)
+       OR (migration_stage=0 AND pg_temp.iam_local_platform_access_grant_is_exact()
+           AND (SELECT count(*) FROM iam_grant_dimension dimension_row
+              LEFT JOIN iam_role_grant grant_row ON grant_row.id=dimension_row.grant_id
+             WHERE dimension_row.id BETWEEN 5001 AND 5014
+                OR dimension_row.grant_id BETWEEN 4001 AND 4014
+                OR grant_row.role_id=2000) = 15)
+       OR (migration_stage=3 AND pg_temp.iam_local_platform_access_grant_is_exact()
+           AND (SELECT count(*) FROM iam_grant_dimension dimension_row
+              LEFT JOIN iam_role_grant grant_row ON grant_row.id=dimension_row.grant_id
+             WHERE dimension_row.id BETWEEN 5001 AND 5014
+                OR dimension_row.grant_id BETWEEN 4001 AND 4014
+                OR grant_row.role_id=2000) = 22)
+   )
    AND NOT EXISTS (SELECT 1 FROM iam_grant_target target JOIN iam_grant_dimension dimension_row
           ON dimension_row.id=target.dimension_id JOIN iam_role_grant grant_row
           ON grant_row.id=dimension_row.grant_id
@@ -362,8 +513,8 @@ DECLARE
     fixture_footprint_present BOOLEAN;
     legacy_without_buttons BOOLEAN;
     legacy_with_buttons BOOLEAN;
-    v15_legacy_without_buttons BOOLEAN;
-    v15_legacy_with_buttons BOOLEAN;
+    migrated_legacy_without_buttons BOOLEAN;
+    migrated_legacy_with_buttons BOOLEAN;
     migrated BOOLEAN;
 BEGIN
     IF (SELECT count(*) FROM iam_local_final_permission expected JOIN iam_permission permission
@@ -398,15 +549,15 @@ BEGIN
     IF fixture_footprint_present AND NOT pg_temp.iam_local_final_fixture_is_exact() THEN
         legacy_without_buttons := pg_temp.iam_local_legacy_fixture_is_exact(false, 0);
         legacy_with_buttons := pg_temp.iam_local_legacy_fixture_is_exact(true, 0);
-        v15_legacy_without_buttons := pg_temp.iam_local_legacy_fixture_is_exact(false, 2);
-        v15_legacy_with_buttons := pg_temp.iam_local_legacy_fixture_is_exact(true, 2);
+        migrated_legacy_without_buttons := pg_temp.iam_local_legacy_fixture_is_exact(false, 3);
+        migrated_legacy_with_buttons := pg_temp.iam_local_legacy_fixture_is_exact(true, 3);
         IF NOT legacy_without_buttons AND NOT legacy_with_buttons
-           AND NOT v15_legacy_without_buttons AND NOT v15_legacy_with_buttons THEN
+           AND NOT migrated_legacy_without_buttons AND NOT migrated_legacy_with_buttons THEN
             RAISE EXCEPTION 'Local bootstrap refused: local fixture footprint is incomplete or modified';
         END IF;
 
-        migrated := v15_legacy_without_buttons OR v15_legacy_with_buttons;
-        legacy_with_buttons := legacy_with_buttons OR v15_legacy_with_buttons;
+        migrated := migrated_legacy_without_buttons OR migrated_legacy_with_buttons;
+        legacy_with_buttons := legacy_with_buttons OR migrated_legacy_with_buttons;
 
         IF migrated THEN
             DELETE FROM iam_role_grant grant_row
@@ -423,6 +574,18 @@ BEGIN
         INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
         SELECT id+2000,id+1000,'TENANT','TENANT_ALL' FROM iam_local_final_permission
         ON CONFLICT (grant_id,dimension_code) DO NOTHING;
+
+        INSERT INTO iam_role_grant(
+            id,tenant_id,role_id,permission_id,grant_key,status,created_by,updated_by
+        )
+        VALUES(7022,1,2000,3022,'system-backoffice-access','ACTIVE',1000,1000)
+        ON CONFLICT(role_id,permission_id,grant_key) DO NOTHING;
+        INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+        SELECT nextval('iam_id_seq'), grant_row.id, 'TENANT', 'TENANT_ALL'
+          FROM iam_role_grant grant_row
+         WHERE grant_row.tenant_id=1 AND grant_row.role_id=2000
+           AND grant_row.permission_id=3022 AND grant_row.grant_key='system-backoffice-access'
+        ON CONFLICT(grant_id,dimension_code) DO NOTHING;
 
         IF legacy_with_buttons THEN
             UPDATE iam_menu SET status='DISABLED', meta_json=expected.meta_json,
@@ -449,20 +612,20 @@ END;
 $$
 @@
 
-INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status)
-VALUES(1,'platform','Platform Administration','PLATFORM','ACTIVE') ON CONFLICT(id) DO NOTHING
+INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain)
+VALUES(1,'platform','Platform Administration','PLATFORM','ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
 @@
 INSERT INTO iam_department(id,tenant_id,parent_id,department_code,department_name,status,remark,system_managed)
 VALUES(10,1,NULL,'head-office','Head Office','ACTIVE','Local bootstrap department',true) ON CONFLICT(id) DO NOTHING
 @@
-INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status,remark)
-VALUES(100,'local','admin','Platform Administrator','ACTIVE','Local bootstrap administrator') ON CONFLICT(id) DO NOTHING
+INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status,remark,account_domain)
+VALUES(100,'local','admin','Platform Administrator','ACTIVE','Local bootstrap administrator','PLATFORM') ON CONFLICT(id) DO NOTHING
 @@
-INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status)
-VALUES(1000,1,100,10,'ACTIVE') ON CONFLICT(id) DO NOTHING
+INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+VALUES(1000,1,100,10,'ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
 @@
-INSERT INTO iam_authentication_credential(user_id,username,password_hash,status)
-VALUES(100,'admin',NULL,'ACTIVE') ON CONFLICT(user_id) DO NOTHING
+INSERT INTO iam_authentication_credential(user_id,username,password_hash,status,account_domain)
+VALUES(100,'admin',NULL,'ACTIVE','PLATFORM') ON CONFLICT(user_id) DO NOTHING
 @@
 INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,assignable,system_role,status,remark)
 VALUES(2000,1,'platform-admin','Platform Administrator','PLATFORM',false,true,'ACTIVE',
@@ -479,6 +642,20 @@ INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
 SELECT id+2000,id+1000,'TENANT','TENANT_ALL' FROM iam_local_final_permission
 ON CONFLICT(grant_id,dimension_code) DO NOTHING
 @@
+
+INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status,created_by,updated_by)
+VALUES(7022,1,2000,3022,'system-backoffice-access','ACTIVE',1000,1000)
+ON CONFLICT(role_id,permission_id,grant_key) DO NOTHING
+@@
+
+INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+SELECT 8022, grant_row.id, 'TENANT', 'TENANT_ALL'
+  FROM iam_role_grant grant_row
+ WHERE grant_row.tenant_id=1 AND grant_row.role_id=2000
+   AND grant_row.permission_id=3022 AND grant_row.grant_key='system-backoffice-access'
+ON CONFLICT(grant_id,dimension_code) DO NOTHING
+@@
+
 INSERT INTO iam_menu(id,tenant_id,parent_id,menu_type,menu_name,route_name,route_path,
     component_path,redirect_path,sort_order,auth_code,status,meta_json,system_managed)
 SELECT id,1,parent_id,menu_type,menu_name,route_name,route_path,component_path,redirect_path,
@@ -498,6 +675,123 @@ END;
 $$
 @@
 
+-- Merchant and agent roots deliberately receive separate users, credentials,
+-- memberships, roles and route catalogs. They share no platform grants.
+INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain)
+VALUES
+  (2,'local-merchant','Local Merchant','DIRECT_MERCHANT','ACTIVE','MERCHANT'),
+  (3,'local-agent','Local Agent','AGENT','ACTIVE','AGENT')
+ON CONFLICT(id) DO NOTHING
+@@
+
+INSERT INTO iam_department(id,tenant_id,parent_id,department_code,department_name,status,remark,system_managed)
+VALUES
+  (20,2,NULL,'merchant-head-office','Merchant Head Office','ACTIVE','Local merchant bootstrap department',true),
+  (30,3,NULL,'agent-head-office','Agent Head Office','ACTIVE','Local agent bootstrap department',true)
+ON CONFLICT(id) DO NOTHING
+@@
+
+INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status,remark,account_domain)
+VALUES
+  (200,'local','merchant-admin','Merchant Administrator','ACTIVE','Local merchant bootstrap administrator','MERCHANT'),
+  (300,'local','agent-admin','Agent Administrator','ACTIVE','Local agent bootstrap administrator','AGENT')
+ON CONFLICT(id) DO NOTHING
+@@
+
+INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+VALUES
+  (2100,2,200,20,'ACTIVE','MERCHANT'),
+  (3100,3,300,30,'ACTIVE','AGENT')
+ON CONFLICT(id) DO NOTHING
+@@
+
+INSERT INTO iam_authentication_credential(user_id,username,password_hash,status,account_domain)
+VALUES
+  (200,'merchant-admin',NULL,'ACTIVE','MERCHANT'),
+  (300,'agent-admin',NULL,'ACTIVE','AGENT')
+ON CONFLICT(user_id) DO NOTHING
+@@
+
+INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,assignable,system_role,status,remark)
+VALUES
+  (2200,2,'merchant-admin','Merchant Administrator','DIRECT_MERCHANT',false,true,'ACTIVE',
+   'Local merchant bootstrap administration role'),
+  (3200,3,'agent-admin','Agent Administrator','AGENT',false,true,'ACTIVE',
+   'Local agent bootstrap administration role')
+ON CONFLICT(id) DO NOTHING
+@@
+
+INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+VALUES
+  (2,2100,2200,2100),
+  (3,3100,3200,3100)
+ON CONFLICT DO NOTHING
+@@
+
+INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status,created_by,updated_by)
+VALUES
+  (7023,2,2200,3023,'system-backoffice-access','ACTIVE',2100,2100),
+  (7024,3,3200,3024,'system-backoffice-access','ACTIVE',3100,3100)
+ON CONFLICT(role_id,permission_id,grant_key) DO NOTHING
+@@
+
+INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+VALUES
+  (8023,7023,'TENANT','TENANT_ALL'),
+  (8024,7024,'TENANT','TENANT_ALL')
+ON CONFLICT(grant_id,dimension_code) DO NOTHING
+@@
+
+INSERT INTO iam_menu(id,tenant_id,parent_id,menu_type,menu_name,route_name,route_path,
+    component_path,redirect_path,sort_order,auth_code,status,meta_json,system_managed)
+VALUES
+  (6200,2,NULL,'DIRECTORY','Dashboard','MerchantDashboard','/dashboard',NULL,
+   '/dashboard/workspace',10,NULL,'ACTIVE','{"title":"page.dashboard.title","icon":"lucide:layout-dashboard"}'::jsonb,true),
+  (6201,2,6200,'PAGE','Workspace','MerchantWorkspace','/dashboard/workspace',
+   '/dashboard/workspace/index',NULL,20,NULL,'ACTIVE','{"title":"page.dashboard.workspace"}'::jsonb,true),
+  (6300,3,NULL,'DIRECTORY','Dashboard','AgentDashboard','/dashboard',NULL,
+   '/dashboard/workspace',10,NULL,'ACTIVE','{"title":"page.dashboard.title","icon":"lucide:layout-dashboard"}'::jsonb,true),
+  (6301,3,6300,'PAGE','Workspace','AgentWorkspace','/dashboard/workspace',
+   '/dashboard/workspace/index',NULL,20,NULL,'ACTIVE','{"title":"page.dashboard.workspace"}'::jsonb,true)
+ON CONFLICT(id) DO NOTHING
+@@
+
+INSERT INTO iam_role_menu(tenant_id,role_id,menu_id)
+VALUES
+  (2,2200,6200), (2,2200,6201),
+  (3,3200,6300), (3,3200,6301)
+ON CONFLICT DO NOTHING
+@@
+
+DO $$
+BEGIN
+    IF (SELECT count(*) FROM iam_tenant
+         WHERE (id=2 AND tenant_code='local-merchant' AND tenant_type='DIRECT_MERCHANT'
+                AND account_domain='MERCHANT' AND status='ACTIVE')
+            OR (id=3 AND tenant_code='local-agent' AND tenant_type='AGENT'
+                AND account_domain='AGENT' AND status='ACTIVE')) <> 2
+       OR (SELECT count(*) FROM iam_user
+            WHERE (id=200 AND idp_subject='merchant-admin' AND account_domain='MERCHANT' AND status='ACTIVE')
+               OR (id=300 AND idp_subject='agent-admin' AND account_domain='AGENT' AND status='ACTIVE')) <> 2
+       OR (SELECT count(*) FROM iam_membership
+            WHERE (id=2100 AND tenant_id=2 AND user_id=200 AND account_domain='MERCHANT' AND status='ACTIVE')
+               OR (id=3100 AND tenant_id=3 AND user_id=300 AND account_domain='AGENT' AND status='ACTIVE')) <> 2
+       OR (SELECT count(*) FROM iam_authentication_credential
+            WHERE (user_id=200 AND username='merchant-admin' AND account_domain='MERCHANT' AND status='ACTIVE')
+               OR (user_id=300 AND username='agent-admin' AND account_domain='AGENT' AND status='ACTIVE')) <> 2
+       OR (SELECT count(*) FROM iam_membership_role
+            WHERE (tenant_id=2 AND membership_id=2100 AND role_id=2200)
+               OR (tenant_id=3 AND membership_id=3100 AND role_id=3200)) <> 2
+       OR NOT pg_temp.iam_local_isolated_portal_fixture_is_exact()
+       OR (SELECT count(*) FROM iam_role_menu
+            WHERE (tenant_id=2 AND role_id=2200 AND menu_id IN (6200,6201))
+               OR (tenant_id=3 AND role_id=3200 AND menu_id IN (6300,6301))) <> 4 THEN
+        RAISE EXCEPTION 'Local bootstrap failed: merchant or agent identity fixture is incomplete';
+    END IF;
+END;
+$$
+@@
+
 SELECT setval('iam_id_seq', GREATEST(10000,(SELECT last_value FROM iam_id_seq),
     COALESCE((SELECT max(id) FROM iam_user),0),COALESCE((SELECT max(id) FROM iam_tenant),0),
     COALESCE((SELECT max(id) FROM iam_department),0),COALESCE((SELECT max(id) FROM iam_membership),0),
@@ -510,6 +804,12 @@ SELECT setval('iam_id_seq', GREATEST(10000,(SELECT last_value FROM iam_id_seq),
 DROP FUNCTION pg_temp.iam_local_legacy_fixture_is_exact(BOOLEAN, INTEGER)
 @@
 DROP FUNCTION pg_temp.iam_local_final_fixture_is_exact()
+@@
+DROP FUNCTION pg_temp.iam_local_platform_access_grant_is_exact()
+@@
+DROP FUNCTION pg_temp.iam_local_isolated_portal_fixture_is_exact()
+@@
+DROP FUNCTION pg_temp.iam_local_v19_history_is_exact()
 @@
 DROP FUNCTION pg_temp.iam_local_role_menus_are_exact()
 @@

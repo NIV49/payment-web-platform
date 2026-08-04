@@ -1,8 +1,8 @@
 # Identity Admin API Contract
 
 > 状态：已实现的本地原型契约，非生产认证与资金权限方案<br>
-> 适用应用：`frontend/admin/apps/web-antdv-next`、`backend/applications/admin-api`<br>
-> 复核日期：2026-08-01
+> 适用应用：`frontend/admin/apps/web-antdv-next` 的 PLATFORM/MERCHANT/AGENT 独立产物，以及三个对应后端组合根<br>
+> 复核日期：2026-08-04
 > 事实优先级：已接受 ADR / 已批准契约 > 实现；集成测试证明实现现状，但无权把偶然实现升级为架构决策
 
 本文分三层记录：
@@ -11,7 +11,11 @@
 2. **Target Prototype Contract**：本轮原型认可的边界和不变量；
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
-当前结论：登录、Cookie 会话、当前用户、19 个本地 system-admin 管理权限码、动态菜单以及用户/角色/菜单/部门管理页面和 API 已形成可启动原型。RoleGrant 已提供仅覆盖 18 个 NORMAL、TENANT/TENANT_ALL 管理权限的受限管理闭环；`local` profile 支持统一初始密码和系统管理员重置密码。外部 IdP、MFA、生产用户邀请/激活/重置、支付数据范围、资金权限和正式可观测性仍未完成。
+当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。PLATFORM 保留现有 IAM 管理能力，MERCHANT/AGENT 第一阶段仅开放登录、退出、当前用户、动态菜单、权限码和健康检查。外部 IdP、MFA、生产用户邀请/激活/重置、支付数据范围、资金权限和正式可观测性仍未完成。
+
+## IAM-001 已实现边界
+
+[ADR-0008](../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 已关闭 `IAM-GLOBAL-USER-MULTI-TENANT`：PLATFORM、MERCHANT、AGENT 是独立应用账号域，同一个应用 User 不跨域；同域多 Membership 仍允许。V18 为 Tenant/User/Credential/Membership 增加并约束 `account_domain`，迁移遇到跨域或无法归属数据时原子失败。V19 新增三个服务端专用入口 Permission，并为历史及新建角色维护 canonical `system-backoffice-access` Grant；V20 前向收敛 V17 合法存在的同名普通 Grant，保留其授权语义并写入审计、角色/成员版本和 Outbox。三个服务端入口固定账号域和会话边界，严格登录 DTO 只接受 `username` 与 `password`；可信入口无法唯一解析 ACTIVE Membership 时统一认证失败。ACTIVE Membership 还必须经角色取得本端 `backoffice:{platform|merchant|agent}-access` RoleGrant，入口权限不从部门、导航或 Membership 状态推导，也不属于 18 项租户授权编辑面。进程级黑盒通过外部 HTTP、SQL 和 Redis 验证跨端 Cookie/token/cache 复用以及三端 login/logout 的 missing、wrong、cross-root Origin 均失败关闭；12 个 semantic mutant 分别覆盖平台与共享后台 Origin 守卫及其余账号/会话边界。本地技术验证不等于 Rule Card 已获受信 reviewer 正式签署。
 
 ---
 
@@ -20,9 +24,9 @@
 ## 1.1 已实现拓扑
 
 ```text
-web-antdv-next
-  -> /api（withCredentials=true）
-  -> admin-api Spring Boot application
+web-antdv-next (platform | merchant | agent artifact)
+  -> /api（withCredentials=true, same origin）
+  -> admin-api | merchant-admin-api | agent-admin-api
   -> method/path permission registry
   -> DefaultAuthorizationService
   -> versioned GrantSnapshot in Redis / PostgreSQL fallback
@@ -32,12 +36,14 @@ web-antdv-next
 
 当前事实：
 
-- `backend/applications/admin-api` 是可启动 Spring Boot composition root；
-- 默认端口为 `8080`；
+- 三个可启动 composition root 分别是 `admin-api`、`merchant-admin-api`、`agent-admin-api`，本地默认端口为 `8080`、`8082`、`8083`；
+- 三个前端构建模式分别输出到 `dist/platform`、`dist/merchant`、`dist/agent`；单变体构建只清理自己的输出目录，各产物只包含本账号域允许且被 Vite manifest 引用的页面 component 与 JS/CSS；
 - `web-antdv-next` 已迁入用户、角色、菜单、部门页面和对应 API；
-- 产品路由模式已由应用常量固定为 `mixed`，登录后使用 `/menu/all` 生成业务路由，本地只合并隐藏的 `Profile`；缓存偏好不决定路由模式；
+- 产品路由模式已由应用常量固定为 `mixed`，登录后使用 `/menu/all` 生成业务路由，本地只合并隐藏的 `Profile`；所有部署都递归拒绝与 Root、Authentication、Login、FallbackNotFound、Profile 的 canonical name/path 冲突，同一前端实例 single-flight login 并串行 login/logout，退出和换用户会清空旧身份、权限码和动态路由，同时使在途 session/route generation 失效；登录/退出使用不安装全局 session-recovery 拦截器的专用请求客户端，登录 401 只终止本次登录，不得递归等待 logout；缓存偏好不决定路由模式；
 - 本地 bootstrap 管理员的首选首页为 `/dashboard`；`/user/info` 只返回当前安全菜单树中存在的首选路径，否则回退到第一个可访问叶子，无业务菜单时回退到本地 `/profile`；
-- 后端已有 Testcontainers/MockMvc 契约集成测试覆盖 Cookie、19 个 ACTIVE 管理权限码、角色授权、菜单、列表、状态 PATCH 和部分租户隔离场景。
+- PLATFORM 保留系统管理 API；MERCHANT/AGENT 只暴露认证、导航、权限码和健康检查，未知及隐藏 API 默认拒绝；
+- Testcontainers/MockMvc 契约和独立三进程黑盒覆盖账号域登录矩阵、Cookie/cache 复用、状态/版本撤权和并发撤权。
+- 三端登录页只注册用户名/密码入口；验证码、二维码、注册、忘记密码和第三方登录路由及可见控件不进入本切片产物。记住用户名的 localStorage key 同时包含账号域 namespace 与 `location.host`，不能在三个入口间复用。
 
 ## 1.2 Base URL、CORS 与可信 Origin
 
@@ -58,13 +64,13 @@ Accept-Language = 当前前端语言
 后端 CORS：
 
 - 只允许 `payment.security.allowed-origins` 中的精确 Origin；
-- 默认本地值为 `http://localhost:5999,http://127.0.0.1:5999`；
+- 本地精确 Origin 分别为 PLATFORM `http://127.0.0.1:5999`、MERCHANT `http://127.0.0.1:6002`、AGENT `http://127.0.0.1:6001`；`6000` 是 Chromium 禁止访问的 unsafe port，不得用于浏览器入口；
 - 允许 GET、POST、PUT、PATCH、DELETE、OPTIONS；
 - `allowCredentials=true`；
 - 允许请求头仅包含 `Content-Type`、`Accept-Language`、`X-Requested-With`；
 - 不允许通配 Origin。
 
-所有 POST、PUT、PATCH、DELETE 请求，包括登录和退出，都必须带受信任的 `Origin`。GET、HEAD、OPTIONS 不执行 Origin 写保护。
+所有 POST、PUT、PATCH、DELETE 请求，包括登录和退出，都必须带受信任的 `Origin`。GET、HEAD、OPTIONS 不执行 Origin 写保护。missing、任意错误值和另一后台的 cross-root Origin 都返回 403 且登录不签发 Cookie；被拒绝的跨 Origin 退出不得改变已有会话，只有携带本端精确 Origin 的退出才撤销并清 Cookie。
 
 服务端 `forward-headers-strategy` 默认是 `NONE`。调用方传入的 `Forwarded`、`X-Forwarded-For`、`X-Forwarded-Proto` 等头默认不能改变后端看到的客户端地址或协议，避免通过伪造来源地址绕过登录限流。只有部署在可信边界代理之后，并确认代理会先删除外部请求携带的全部 `Forwarded`/`X-Forwarded-*`、再写入自身可信值时，才允许显式设置 `PAYMENT_FORWARD_HEADERS_STRATEGY` 启用处理。
 
@@ -73,7 +79,9 @@ Accept-Language = 当前前端语言
 真实认证凭证只存在于 Sa-Token HttpOnly Cookie：
 
 ```text
-Cookie name       PAYMENT_SESSION
+Account domain    PLATFORM                  MERCHANT                  AGENT
+Cookie name       PAYMENT_PLATFORM_SESSION  PAYMENT_MERCHANT_SESSION  PAYMENT_AGENT_SESSION
+Login type        platform-admin             merchant-admin            agent-admin
 Path              /
 HttpOnly          true
 SameSite          Strict
@@ -90,7 +98,7 @@ Sa-Token 当前配置：
 - 不从 Authorization header 读取；
 - 不从 request body 读取；
 - 不把 token 写入响应 header；
-- Session 保存服务端可信的 userId、membershipId、tenantId、departmentId、permissionVersion、sessionVersion。
+- Session 保存服务端可信的 accountDomain、userId、membershipId、tenantId、departmentId、permissionVersion、sessionVersion。
 
 上述属性由 `application.yml` 交给 Sa-Token Boot auto-configuration，在 ApplicationContext 创建期完成绑定；不存在等 Web Server 已接受请求后再修改全局安全配置的 `ApplicationRunner`。集成测试在 context 中核对最终 `SaTokenConfig` 值并断言该 runner bean 不存在。
 
@@ -124,6 +132,7 @@ Sa-Token 当前配置：
 后端从 Cookie Session 恢复：
 
 ```text
+accountDomain
 userId
 membershipId
 tenantId
@@ -137,7 +146,7 @@ stepUpVerified
 
 - tenantId、membershipId、operatorId 不从浏览器 body/query/header 获取；
 - 所有管理查询都强制使用 Session tenantId；
-- Session bridge 以 session 中的 tenantId + membershipId + userId 单次精确查询当前 permissionVersion 与 sessionVersion，并校验 Tenant、User、Credential、Membership 全部 `ACTIVE`、Credential hash 受 V13 约束满足统一 BCrypt 格式/成本策略；任一版本失效时，包含 `/auth/codes` 在内的下一个已认证请求立即返回 401 `SESSION_INVALID`，服务端注销当前会话并清除 Cookie；Admin 写事务还会在锁后复核两个版本；
+- Session bridge 先要求 session accountDomain 与 composition root 完全一致，再以 accountDomain + tenantId + membershipId + userId 单次精确查询当前 permissionVersion 与 sessionVersion，并校验 Tenant、User、Credential、Membership 全部 `ACTIVE`、Credential hash 受 V13 约束满足统一 BCrypt 格式/成本策略；任一域或版本失效时，包含 `/auth/codes` 在内的下一个已认证请求立即返回 401 `SESSION_INVALID`，服务端注销当前会话并清除 Cookie；Admin 写事务还会在锁后复核两个版本；
 - Membership 更新、状态变化和终止会递增 Membership 的 sessionVersion 与 permissionVersion；
 - 角色更新、状态变化和删除会递增该角色成员的 permissionVersion；
 - 权限码从当前租户、当前 Membership 的有效 RoleGrant 读取。
@@ -237,7 +246,7 @@ offset 使用 long 计算；当 `(page - 1) * pageSize` 超过当前仓储 int o
 ### Request、DTO、meta 和树边界
 
 - 所有 mutating `/api/**` 请求体最多 256 KiB；服务端读取有界字节，即使没有 `Content-Length` 也会在超限时返回 413 `PAYLOAD_TOO_LARGE`；
-- Login DTO 限制 username 最长 100、password 最长 256、tenantId 为最多 19 位的正 Long string；Admin DTO 对名称、ID、备注、状态、集合和路由字段执行显式长度/格式约束；
+- Login DTO 只接受 username 与 password，分别限制最长 100 和 256；严格 JSON 绑定会拒绝 `tenantId`、portal、workspace 及其他未知字段；Admin DTO 对名称、ID、备注、状态、集合和路由字段执行显式长度/格式约束；
 - 菜单 `meta` 每个 map/list 最多 32 项，key 最长 64，string 最长 1024，嵌套最深 4 层，总 value 最多 128；数字必须有限，不支持的 value type 拒绝；
 - 部门树和菜单树每个 tenant 最多 2000 节点、最深 32 层。仓储使用第 2001 行探测超限，Core 在 Controller 递归组树前检查节点数、深度、重复 ID 和环，create/update 对 candidate tree 使用同一上限。遇到存储中的超限/成环树时 fail closed，不构造部分树。
 
@@ -263,17 +272,16 @@ Request：
 ```json
 {
   "username": "admin",
-  "password": "******",
-  "tenantId": "1"
+  "password": "******"
 }
 ```
 
 当前实现：
 
 - username trim 后转小写；
-- `tenantId` 为可选正 Long string；只有一个活动 Membership 时可以省略；
-- 同一用户有多个活动 Membership 时必须显式传 `tenantId`，否则返回与错误凭证相同的 401，避免静默选择工作区；
-- 指定 tenant 不属于该用户时也返回相同 401，不泄露 membership；
+- 账号域由 API composition root 固定，不接受客户端选择；
+- 只在固定账号域内解析 ACTIVE Membership；无法由可信入口唯一解析时返回与错误凭证相同的 401，不泄露账号或 Membership 存在性；
+- `tenantId` 或任何未知字段由严格 JSON 绑定返回 400；
 - BCrypt cost 12 校验；
 - 未找到用户时也执行 dummy hash 比较，降低账号枚举时序差异；
 - 查账号与 BCrypt 前先由 Redis Lua 原子预留 client 全局桶和 client/username 桶，15 分钟窗口分别为 30 和 5；无法通过轮换 username 逃逸 client 全局桶，并发请求也必须先取得预留；
@@ -326,7 +334,7 @@ Response data：
 
 ### GET `/menu/all`
 
-返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。该 Profile 仅只读展示 `/user/info` 已校验的姓名、登录账号、用户 ID 和角色；密码修改、MFA、手机号、邮箱和通知偏好尚无后端契约，页面不得展示演示状态或伪成功操作。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。存储的 redirect 只有在目标仍存在于本次安全菜单树时才保留，否则父节点改为重定向到第一个可访问子节点；没有可访问子节点则不返回 redirect。后端若返回 route name `Profile` 或 canonical path `/profile`，前端在合并前 fail closed。
+返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。该 Profile 仅只读展示 `/user/info` 已校验的姓名、登录账号、用户 ID 和角色；密码修改、MFA、手机号、邮箱和通知偏好尚无后端契约，页面不得展示演示状态或伪成功操作。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。存储的 redirect 只有在目标仍存在于本次安全菜单树时才保留，否则父节点改为重定向到第一个可访问子节点；没有可访问子节点则不返回 redirect。后端路由若与静态核心、fallback 或本地动态路由的 canonical name/path 冲突，所有部署都在合并前 fail closed；新的登录尝试和退出先使旧 session/route generation 失效并清空旧身份、权限码和动态路由，延迟返回的 `/user/info`、`/auth/codes` 或菜单不能再写 store/Router，`/auth/login` 始终解析到原始核心 Login。
 
 当前动态菜单来源是 Role -> role_menu -> Menu；按钮权限仍由 `/auth/codes` 决定。菜单展示关系不等于业务授权。
 
@@ -629,7 +637,7 @@ RoleGrant         -> 后端动作和数据范围
 
 三者已在数据库模型和写入契约中分离。角色新增和编辑抽屉在同一个多层树中展示 ACTIVE 导航节点及其可分配 BUTTON。用户主动勾选导航节点表示对该分支执行批量授权：前端显式选中其全部 ACTIVE 导航后代和可分配 BUTTON 后代，并在请求中分别生成 navigation `menuIds` 与 BUTTON 对应的 RoleGrant intent；取消导航节点只清除该子树。单独勾选 BUTTON 只补齐导航祖先，不自动选择兄弟或跨分支权限；单独取消 BUTTON 也不取消其他权限。BUTTON ID 绝不写入 `iam_role_menu`，服务端也不得根据 navigation menuIds 或前端动作依赖暗推 Grant。新增调用 `POST /api/v1/iam/roles/configuration`，编辑调用 `PUT /api/v1/iam/roles/{roleId}/configuration`，都在一个事务中写角色字段、ACTIVE 可路由 menuIds 和页面可无损表达的 RoleGrant。替换导航时只删除当前 ACTIVE、未删除、可路由菜单的旧关系，已禁用、BUTTON 或墓碑菜单的既有 `iam_role_menu` 必须保留为历史。未知、高风险、有效期、多维度或带 target 的现有 Grant 会使表单只读，禁止静默覆盖。
 
-`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代 `TENANT_ALL` RoleGrant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线。升级完成后，`system_managed` 只表示 local bootstrap 来源：预留菜单仍须保有固定 ID、tenant 和来源标记，但允许正常编辑或写入墓碑且重启不回填；预置部门允许业务字段和 rowVersion 推进。物理缺失、租户/来源所有权漂移、预置 authCode 出现第二个活动绑定，以及身份/系统角色/Grant/role-menu 固定关系漂移仍失败关闭。
+`local` profile 的独立 bootstrap 为预置 `platform-admin` 建立 19 个现代管理 `TENANT_ALL` RoleGrant 和一个 `backoffice:platform-access` 入口 Grant，并在 4 个系统页面下建立 19 个 ACTIVE BUTTON 目录节点；两个旧 `menu:manage`、`department:manage` BUTTON 保留为 DISABLED/隐藏历史节点。BUTTON 不写入 `platform-admin` 的 `role_menu`；该角色仍只有 8 条导航展示关系。bootstrap 仅自动升级精确匹配的旧 8 菜单无按钮或旧 14 按钮基线。升级完成后，`system_managed` 只表示 local bootstrap 来源：预留菜单仍须保有固定 ID、tenant 和来源标记，但允许正常编辑或写入墓碑且重启不回填；预置部门允许业务字段和 rowVersion 推进。物理缺失、租户/来源所有权漂移、预置 authCode 出现第二个活动绑定，以及身份/系统角色/Grant/role-menu 固定关系漂移仍失败关闭。
 
 ### 角色授权第一阶段 API
 
@@ -799,13 +807,17 @@ V13__enforce_login_credential_hash_safety.sql
 V14__granular_administration_permissions.sql
 V15__expand_legacy_administration_permission_compatibility.sql
 V16__enforce_exact_administration_permission_catalog.sql
+V17__add_administration_tombstones.sql
+V18__isolate_backoffice_account_domains.sql
+V19__protect_backoffice_access_grants.sql
+V20__converge_reserved_backoffice_grant_keys.sql
 ```
 
 语义：
 
 - `local` profile 启用自动迁移，但不启用 `baseline-on-migrate`；
 - 已经手工执行 V1、但没有 `flyway_schema_history` 的旧开发卷不属于升级契约；需要的数据先备份，然后从空库重建；
-- 全新空库正常执行 V1 到 V17；
+- 全新空库正常执行 V1 到 V20；
 - V2/V3 的历史固定身份和菜单只为兼容旧迁移链存在；V8 只在预留 footprint 仍是精确 fixture 时删除它，其他租户、用户、审计、Outbox 和扩展权限原样保留；
 - V3 为预置平台管理员补充 Dashboard、Analytics 和 Workspace 动态路由，保证 `/dashboard` 登录首页可用；
 - V4 把系统菜单 title 修正为 i18n key，并清除一级目录旧 `BasicLayout`；
@@ -815,7 +827,10 @@ V16__enforce_exact_administration_permission_catalog.sql
 - V11-V13 分别约束菜单外链、跨租户只读 action 和 BCrypt hash；历史非法数据使迁移失败，不做静默清洗；
 - V14 建立细粒度管理权限，V15 前向保留旧 manage Grant 的滚动兼容，V16 在不回写已执行 V14/V15 的前提下精确核验 21 条管理 Permission 的固定 ID、code/resource/action、风险、维度、step-up、approval、跨租户模式和状态；目录漂移使应用升级失败关闭且不自动修复；
 - V17 为 Role、Menu、Department 增加 `deleted_at`，为 Menu、Department 增加 `system_managed`，并把角色/菜单唯一索引调整为只约束未删除行；它只建立软删除能力和精确 local fixture 标记，不物理清理已有业务数据；
-- `LocalIdentityFixtureBootstrap` 只在 `local` profile、Flyway 完成后事务性执行 `db/local/iam-local-bootstrap.sql` 并写入 BCrypt 密码；最终 fixture 对预置菜单只保留预留 ID、tenant、`system_managed` 所有权和活动 authCode 歧义校验，允许字段编辑与墓碑在重启后保留。身份、系统角色、Grant、role-menu 固定关系、物理缺失、所有权漂移、密码不匹配或预留权限码第二个活动绑定仍拒绝启动；
+- V18 前向增加三账号域约束。升级前必须执行 `psql "$PAYMENT_DB_URL" -v ON_ERROR_STOP=1 -f backend/scripts/iam001-account-domain-preflight.sql`，结果必须为空；任何 `NO_MEMBERSHIP`、`CROSS_ACCOUNT_DOMAIN` 或无法唯一归属的主体都由人工拆分账号后重试，不复制凭证、不猜测审计归属；
+- V19 新增三条服务端专用入口 Permission，按 Tenant 账号域给每个未删除历史角色回填唯一 `system-backoffice-access`、`TENANT/TENANT_ALL` Grant，递增受影响角色与 Membership 权限版本，并写迁移审计和 Outbox。新建角色在同一事务中得到相同 Grant；角色 Grant/configuration 替换只管理既有 18 项权限，不能删除或伪造入口 Grant；
+- V20 不回写 V18/V19：它把历史非 portal Permission 占用的保留 key 确定性改为 `legacy-backoffice-access-{grantId}`，不改变 Permission、状态、维度、Target 或有效期；受影响角色和 Membership 版本递增，并写逐 Grant 审计及权限版本 Outbox。portal 存量畸形，或同角色任意 Permission 已占用目标 key 时整次迁移回滚。升级后每个未墓碑角色恰有一个 canonical portal 保留 key；读取侧使用完整 portal inventory，并在普通 Permission 占保留 key、重复 grant key、重复 Permission 或额外 disabled portal Grant 时返回 `editable=false`，禁止 PUT 静默覆盖。V20 是前向数据迁移，失败恢复依赖迁移前备份或修正异常存量后重试，不提供逆向脚本；
+- `LocalIdentityFixtureBootstrap` 只在 `local` profile、Flyway 完成后事务性执行 `db/local/iam-local-bootstrap.sql` 并写入 BCrypt 密码；最终 fixture 对预置菜单只保留预留 ID、tenant、`system_managed` 所有权和活动 authCode 歧义校验，允许字段编辑与墓碑在重启后保留。身份、系统角色、Grant、role-menu 固定关系、物理缺失、所有权漂移、密码不匹配或预留权限码第二个活动绑定仍拒绝启动；MERCHANT/AGENT 预置角色必须 ACTIVE、未墓碑，其入口 Grant 必须与真实登录查询一样是无有效期、单一 `TENANT/TENANT_ALL`、无 Target 且没有其他活动 portal Grant，否则 bootstrap 原子回滚；
 - 任何环境的迁移都不得依赖 `baseline-on-migrate=true` 自动猜测历史状态。
 
 ## 1.15 当前审计和可观测性
@@ -843,7 +858,7 @@ V16__enforce_exact_administration_permission_catalog.sql
 本轮原型必须继续保持：
 
 1. Vben `code/data/error/message/traceId` envelope；
-2. 真实凭证只在 `PAYMENT_SESSION` HttpOnly、SameSite=Strict Cookie；
+2. 真实凭证只在账号域独立的 `PAYMENT_PLATFORM_SESSION`、`PAYMENT_MERCHANT_SESSION`、`PAYMENT_AGENT_SESSION` HttpOnly、SameSite=Strict Cookie；
 3. JavaScript 只保存 `cookie-session` marker；
 4. 前端永不发送 Authorization marker；
 5. tenant、membership、operator 来自服务端 Session；
@@ -871,9 +886,9 @@ V16__enforce_exact_administration_permission_catalog.sql
 | RBAC management | 用户/角色/菜单/部门与受限 RoleGrant API 已实现 | 仅平台租户、本轮 19 个当前管理权限；V15 另保留 2 个不进入新授权面的旧码；角色授权仅支持 18 个精确目录权限 |
 | Permission load | HTTP PEP + 版本化 Redis GrantSnapshot 已接通 | RoleGrant 写入仍需正式审批、部署与恢复演练 |
 | Cross-tenant model | `SAME_TENANT_ONLY` 默认；只有受控 `READ/VIEW` action 可使用 `RELATED_PARTY_READ`，Core 与 V12 CHECK 双重约束 | 没有 Party/Relationship adapter，运行时仍 fail closed |
-| Dynamic menu | 固定 mixed mode、仅本地 Profile、保留路由冲突即拒绝、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
+| Dynamic menu | 固定 mixed mode、仅本地 Profile、递归拒绝全部核心/fallback/local canonical 冲突、退出/换用户清旧路由、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
-| Flyway | V1→V16 fresh/upgrade 可运行；V8 fixture 隔离、V9-V13 拒绝式约束、V14/V15 细粒度权限兼容升级和 V16 精确目录守卫已落迁移 | 旧 manage 码的 contract 迁移、生产 migration 审批和备份恢复演练未完成；V16 只能阻断 V15 之后的漂移库，不能让已提交并执行的 V15 自身事后回滚 |
+| Flyway | V1→V20 fresh/upgrade 可运行；V20 覆盖真实 V17 保留 key 冲突的保语义收敛及异常存量原子阻断 | 旧 manage 码的 contract 迁移、生产 migration 审批和备份恢复演练未完成；已执行迁移只能前向修复 |
 
 ## 2.3 明确不在本轮实现
 
@@ -905,7 +920,7 @@ V16__enforce_exact_administration_permission_catalog.sql
 - 用户状态改用 `PATCH /system/user/{id}/status`；
 - 角色状态改用 `PATCH /system/role/{id}/status`；
 - `activePath` 进入 `meta`；
-- 产品 access mode 固定为 mixed，业务路由由后端提供，本地只保留 Profile；
+- 产品 access mode 固定为 mixed，业务路由由后端提供，本地只保留 Profile，并保护全部核心/fallback/local route name/path；
 - Cookie marker 不再进入 Authorization。
 
 ## 3.2 下一阶段兼容工作
@@ -994,7 +1009,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 
 # 5. Uncertainty
 
-> Uncertain：登录 API 已支持可选 `tenantId`；多个 ACTIVE Membership 时省略会返回通用 401，但前端尚未提供工作空间选择/发现流程。
+> 已实现边界：登录 API 不接受 `tenantId`，账号域由 composition root 固定；同域多 ACTIVE Membership 无法由可信上下文唯一解析时返回通用 401。未来如增加可信工作区解析器，必须保持客户端不可选择账号域或授权工作区。
 
 > Uncertain：本地 username/password 过渡方案何时切换为外部 IdP，以及是否保留紧急本地管理员。
 
@@ -1010,16 +1025,18 @@ RoleGrant(permissionCode + dimensions + constraints)
 
 # 6. Current acceptance checklist
 
-- `admin-api` 可以作为 Spring Boot 应用启动；
+- `admin-api`、`merchant-admin-api`、`agent-admin-api` 可以作为三个独立 Spring Boot 应用启动；
 - 前端四个系统管理模块已迁入 `web-antdv-next`；
-- 登录设置 `PAYMENT_SESSION` HttpOnly、SameSite=Strict Cookie；
+- 三个前端模式生成独立 PLATFORM/MERCHANT/AGENT 产物，并使用独立 title、storage namespace、component allowlist；
+- 三端登录设置各自的 `PAYMENT_*_SESSION` HttpOnly、SameSite=Strict Cookie 和独立 login type；
+- 登录严格只接受 username/password，拒绝 `tenantId`；跨账号域账号和跨端 Cookie/cache 复用失败关闭；
 - Sa-Token 安全配置在 ApplicationContext 创建期绑定，不使用启服后 `ApplicationRunner`；
 - 登录在查账号/BCrypt 前原子预留 15 分钟 client 30 和 client/username 5 双桶，Redis key 同 hash slot；
 - 登录响应只返回 `cookie-session` marker；
 - 前端所有请求 `withCredentials=true` 且不发送 Authorization marker；
 - `/user/info` 返回 `/dashboard`、空 `desc`、固定非秘密 `cookie-session` marker 和服务端计算的 `systemAdministrator`；
-- mixed 路由只注册本地 `Profile`，后端与其 name/path 冲突时拒绝合并；
-- `/auth/codes` 对有效本地平台管理员返回且仅返回本轮 19 个 ACTIVE 管理权限码；permissionVersion 失效的旧 Cookie 立即返回 401 `SESSION_INVALID` 并清 Cookie；
+- mixed 路由只注册本地 `Profile`，后端与 Root、Authentication、Login、FallbackNotFound、Profile 的 canonical name/path 冲突时拒绝合并，退出/换用户删除旧动态路由；
+- `/auth/codes` 对有效本地平台管理员返回 19 个 ACTIVE 管理权限码及 `backoffice:platform-access`；MERCHANT/AGENT 本地最小角色只返回各自入口权限码；permissionVersion 失效的旧 Cookie 立即返回 401 `SESSION_INVALID` 并清 Cookie；
 - 用户/角色/菜单/部门接口受后端权限拦截；
 - 未登记的 API method/path 默认返回 403；
 - 用户列表查询字段与本文一致；

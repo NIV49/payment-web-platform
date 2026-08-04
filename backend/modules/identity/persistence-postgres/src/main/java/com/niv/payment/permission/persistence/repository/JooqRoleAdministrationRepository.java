@@ -36,14 +36,17 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
 
     private final DSLContext dsl;
     private final JooqIdentityQueryRepository queries;
+    private final JooqRoleGrantAdministrationRepository grants;
     private final JooqAdministrationSupport support;
     private final Supplier<String> traceIdSupplier;
 
     public JooqRoleAdministrationRepository(DSLContext dsl,
                                             JooqIdentityQueryRepository queries,
+                                            JooqRoleGrantAdministrationRepository grants,
                                             Supplier<String> traceIdSupplier) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
         this.queries = Objects.requireNonNull(queries, "queries");
+        this.grants = Objects.requireNonNull(grants, "grants");
         this.traceIdSupplier = Objects.requireNonNull(traceIdSupplier, "traceIdSupplier");
         this.support = new JooqAdministrationSupport(dsl, traceIdSupplier);
     }
@@ -71,6 +74,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
             .set(IAM_ROLE.STATUS, status(command.status()))
             .set(IAM_ROLE.REMARK, JooqAdministrationSupport.blankToNull(command.remark()))
             .execute();
+        grants.insertProtectedPortalGrant(tenantId, roleId, actor.membershipId());
         replaceMenus(tenantId, roleId, menuIds);
         support.audit(tenantId, actor.membershipId(), "ROLE", roleId, "CREATE", "role:create");
         return roleId;

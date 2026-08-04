@@ -102,6 +102,12 @@ public class IamAuthenticationCredential extends TableImpl<IamAuthenticationCred
      */
     public final TableField<IamAuthenticationCredentialRecord, Long> ROW_VERSION = createField(DSL.name("row_version"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
+    /**
+     * The column
+     * <code>public.iam_authentication_credential.account_domain</code>.
+     */
+    public final TableField<IamAuthenticationCredentialRecord, String> ACCOUNT_DOMAIN = createField(DSL.name("account_domain"), SQLDataType.VARCHAR(16).nullable(false), this, "");
+
     private IamAuthenticationCredential(Name alias, Table<IamAuthenticationCredentialRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -184,24 +190,39 @@ public class IamAuthenticationCredential extends TableImpl<IamAuthenticationCred
 
     @Override
     public List<ForeignKey<IamAuthenticationCredentialRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.IAM_AUTHENTICATION_CREDENTIAL__IAM_AUTHENTICATION_CREDENTIAL_USER_ID_FKEY);
+        return Arrays.asList(Keys.IAM_AUTHENTICATION_CREDENTIAL__FK_IAM_AUTHENTICATION_USER_DOMAIN, Keys.IAM_AUTHENTICATION_CREDENTIAL__IAM_AUTHENTICATION_CREDENTIAL_USER_ID_FKEY);
     }
 
-    private transient IamUserPath _iamUser;
+    private transient IamUserPath _fkIamAuthenticationUserDomain;
 
     /**
-     * Get the implicit join path to the <code>public.iam_user</code> table.
+     * Get the implicit join path to the <code>public.iam_user</code> table, via
+     * the <code>fk_iam_authentication_user_domain</code> key.
      */
-    public IamUserPath iamUser() {
-        if (_iamUser == null)
-            _iamUser = new IamUserPath(this, Keys.IAM_AUTHENTICATION_CREDENTIAL__IAM_AUTHENTICATION_CREDENTIAL_USER_ID_FKEY, null);
+    public IamUserPath fkIamAuthenticationUserDomain() {
+        if (_fkIamAuthenticationUserDomain == null)
+            _fkIamAuthenticationUserDomain = new IamUserPath(this, Keys.IAM_AUTHENTICATION_CREDENTIAL__FK_IAM_AUTHENTICATION_USER_DOMAIN, null);
 
-        return _iamUser;
+        return _fkIamAuthenticationUserDomain;
+    }
+
+    private transient IamUserPath _iamAuthenticationCredentialUserIdFkey;
+
+    /**
+     * Get the implicit join path to the <code>public.iam_user</code> table, via
+     * the <code>iam_authentication_credential_user_id_fkey</code> key.
+     */
+    public IamUserPath iamAuthenticationCredentialUserIdFkey() {
+        if (_iamAuthenticationCredentialUserIdFkey == null)
+            _iamAuthenticationCredentialUserIdFkey = new IamUserPath(this, Keys.IAM_AUTHENTICATION_CREDENTIAL__IAM_AUTHENTICATION_CREDENTIAL_USER_ID_FKEY, null);
+
+        return _iamAuthenticationCredentialUserIdFkey;
     }
 
     @Override
     public List<Check<IamAuthenticationCredentialRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("ck_iam_authentication_account_domain"), "(((account_domain)::text = ANY ((ARRAY['PLATFORM'::character varying, 'MERCHANT'::character varying, 'AGENT'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_authentication_bcrypt_hash"), "(((password_hash IS NULL) OR ((password_hash)::text ~ '^[$]2[aby][$](1[0-4])[$][./A-Za-z0-9]{53}$'::text)))", true),
             Internal.createCheck(this, DSL.name("ck_iam_authentication_status"), "(((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'DISABLED'::character varying, 'LOCKED'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_authentication_username"), "(((username)::text = lower((username)::text)))", true)

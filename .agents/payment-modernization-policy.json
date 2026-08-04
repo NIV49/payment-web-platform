@@ -4,6 +4,7 @@
   "canonicalRepositoryPath": "/Users/mac/Documents/demo/payment-web-platform",
   "rulebookPaths": [
     ".agents/payment-modernization-policy.json",
+    ".agents/payment-modernization/rules/IAM-001.json",
     ".agents/skills/payment-modernization/SKILL.md",
     ".agents/skills/payment-modernization/references/artifact-contracts.md",
     ".agents/skills/payment-modernization/references/judge-gates.md",
@@ -18,6 +19,7 @@
     "docs/adr/0005-bounded-context-owned-adapters-and-composition-roots.md",
     "docs/adr/0006-redis-protocol-cache-product-boundary.md",
     "docs/adr/0007-separate-production-migrations-from-local-fixtures.md",
+    "docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md",
     "docs/ai-context/README.md",
     "docs/ai-context/backend/README.md",
     "docs/ai-context/development-workflow.md",
@@ -39,13 +41,16 @@
     "docs/new-payment-system-target-architecture.md",
     "docs/permission-refactor-product-requirements.md"
   ],
-  "ruleCardPaths": [],
+  "ruleCardPaths": [
+    ".agents/payment-modernization/rules/IAM-001.json"
+  ],
   "judgePaths": [
     ".agents/payment-modernization-judge-registry.json",
     ".agents/payment-modernization/artifacts/README.md",
     ".github/CODEOWNERS",
     ".github/workflows/documentation.yml",
     "scripts/check-doc-decisions.py",
+    "scripts/check_iam001_three_backoffice_boundary.py",
     "scripts/check_modernization_artifacts.py",
     "scripts/check_modernization_evidence.py",
     "scripts/check_project_skills.py",
@@ -57,6 +62,7 @@
     "scripts/tests/test_check_sensitive_artifacts.py",
     "scripts/tests/test_documentation_python_runtime_security.py",
     "scripts/tests/test_documentation_workflow_security.py",
+    "scripts/tests/test_iam001_three_backoffice_boundary.py",
     "scripts/tests/test_modernization_contracts.py",
     "scripts/tests/test_payment_modernization_governance.py"
   ],

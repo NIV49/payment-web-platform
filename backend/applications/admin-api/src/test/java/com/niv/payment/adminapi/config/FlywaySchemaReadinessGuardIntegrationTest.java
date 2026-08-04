@@ -1,5 +1,6 @@
 package com.niv.payment.adminapi.config;
 
+import com.niv.payment.permission.backoffice.BackofficeSchemaReadinessGuard;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,7 +51,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
             .migrate();
 
         contextRunner(false).run(context -> {
-            assertSchemaNotReady(context, FlywaySchemaReadinessGuard.FailureReason.PENDING_MIGRATION);
+            assertSchemaNotReady(context, BackofficeSchemaReadinessGuard.FailureReason.PENDING_MIGRATION);
             assertThat(appliedVersions()).containsExactly("1", "2", "3", "4", "5", "6", "7");
         });
     }
@@ -61,7 +62,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
 
         contextRunner(false).run(context -> {
             assertThat(context).hasNotFailed();
-            assertThat(context).hasSingleBean(FlywaySchemaReadinessGuard.class);
+            assertThat(context).hasSingleBean(BackofficeSchemaReadinessGuard.class);
             assertThat(context).doesNotHaveBean(Flyway.class);
         });
     }
@@ -73,7 +74,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
             .run(context -> {
                 assertThat(context).hasNotFailed();
                 String[] initializerNames = context.getBeanNamesForType(FlywayMigrationInitializer.class);
-                String[] guardNames = context.getBeanNamesForType(FlywaySchemaReadinessGuard.class);
+                String[] guardNames = context.getBeanNamesForType(BackofficeSchemaReadinessGuard.class);
                 assertThat(initializerNames).isNotEmpty();
                 assertThat(guardNames).hasSize(1);
                 assertThat(Arrays.asList(context.getBeanFactory()
@@ -97,7 +98,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
             """);
 
         contextRunner(false).run(context -> assertSchemaNotReady(
-            context, FlywaySchemaReadinessGuard.FailureReason.CHECKSUM_MISMATCH));
+            context, BackofficeSchemaReadinessGuard.FailureReason.CHECKSUM_MISMATCH));
     }
 
     @Test
@@ -114,7 +115,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
             """);
 
         contextRunner(false).run(context -> assertSchemaNotReady(
-            context, FlywaySchemaReadinessGuard.FailureReason.FAILED_MIGRATION));
+            context, BackofficeSchemaReadinessGuard.FailureReason.FAILED_MIGRATION));
     }
 
     @Test
@@ -123,7 +124,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
         insertSchemaHistory("7.5", "missing migration", true);
 
         contextRunner(false).run(context -> assertSchemaNotReady(
-            context, FlywaySchemaReadinessGuard.FailureReason.MISSING_MIGRATION));
+            context, BackofficeSchemaReadinessGuard.FailureReason.MISSING_MIGRATION));
     }
 
     @Test
@@ -132,7 +133,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
         insertSchemaHistory("9999", "future migration", true);
 
         contextRunner(false).run(context -> assertSchemaNotReady(
-            context, FlywaySchemaReadinessGuard.FailureReason.FUTURE_MIGRATION));
+            context, BackofficeSchemaReadinessGuard.FailureReason.FUTURE_MIGRATION));
     }
 
     @Test
@@ -141,7 +142,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
         insertSchemaHistory("9999", "failed future migration", false);
 
         contextRunner(false).run(context -> assertSchemaNotReady(
-            context, FlywaySchemaReadinessGuard.FailureReason.FUTURE_FAILED_MIGRATION));
+            context, BackofficeSchemaReadinessGuard.FailureReason.FUTURE_FAILED_MIGRATION));
     }
 
     @Test
@@ -151,7 +152,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
         contextRunner(false)
             .withPropertyValues("spring.flyway.locations=" + missingLocation)
             .run(context -> {
-                assertSchemaNotReady(context, FlywaySchemaReadinessGuard.FailureReason.VALIDATION_UNAVAILABLE);
+                assertSchemaNotReady(context, BackofficeSchemaReadinessGuard.FailureReason.VALIDATION_UNAVAILABLE);
                 assertThat(causeChain(context.getStartupFailure()))
                     .doesNotContain(missingLocation)
                     .doesNotContain("FlywayException");
@@ -182,11 +183,11 @@ class FlywaySchemaReadinessGuardIntegrationTest {
     }
 
     private static void assertSchemaNotReady(AssertableApplicationContext context,
-                                             FlywaySchemaReadinessGuard.FailureReason expectedReason) {
+                                             BackofficeSchemaReadinessGuard.FailureReason expectedReason) {
         assertThat(context).hasFailed();
         Throwable startupFailure = context.getStartupFailure();
         assertThat(startupFailure)
-            .hasRootCauseMessage(FlywaySchemaReadinessGuard.notReadyMessage(expectedReason));
+            .hasRootCauseMessage(BackofficeSchemaReadinessGuard.notReadyMessage(expectedReason));
         assertThat(causeChain(startupFailure))
             .doesNotContain(POSTGRES.getJdbcUrl())
             .doesNotContain(POSTGRES.getUsername())

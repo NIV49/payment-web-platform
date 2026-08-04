@@ -1,5 +1,6 @@
 package com.niv.payment.permission.cache;
 
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.service.AuthenticationService;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -42,9 +43,12 @@ public final class RedisLoginAttemptLimiter implements AuthenticationService.Log
     private final int maximumClientFailures;
     private final int maximumClientUsernameFailures;
     private final Duration window;
+    private final String namespace;
 
-    public RedisLoginAttemptLimiter(StringRedisTemplate redis, int maximumClientFailures,
+    public RedisLoginAttemptLimiter(AccountDomain accountDomain, StringRedisTemplate redis,
+                                    int maximumClientFailures,
                                     int maximumClientUsernameFailures, Duration window) {
+        this.namespace = Objects.requireNonNull(accountDomain, "accountDomain").cacheNamespace();
         this.redis = Objects.requireNonNull(redis, "redis");
         if (maximumClientFailures < 1 || maximumClientUsernameFailures < 1) {
             throw new IllegalArgumentException("Login attempt limits must be positive");
@@ -74,14 +78,14 @@ public final class RedisLoginAttemptLimiter implements AuthenticationService.Log
         redis.execute(RECORD_SUCCESS, keys(clientKey, normalizedUsername));
     }
 
-    private static List<String> keys(String clientKey, String normalizedUsername) {
+    private List<String> keys(String clientKey, String normalizedUsername) {
         Objects.requireNonNull(clientKey, "clientKey");
         Objects.requireNonNull(normalizedUsername, "normalizedUsername");
         String clientDigest = digest(clientKey);
         String clusterSlot = "{" + clientDigest + "}";
         return List.of(
-            "iam:login-attempt:" + clusterSlot + ":client",
-            "iam:login-attempt:" + clusterSlot + ":username:" + digest(normalizedUsername));
+            "iam:" + namespace + ":login-attempt:" + clusterSlot + ":client",
+            "iam:" + namespace + ":login-attempt:" + clusterSlot + ":username:" + digest(normalizedUsername));
     }
 
     private static String digest(String value) {

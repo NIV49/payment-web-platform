@@ -149,14 +149,14 @@ Never merge failure release, channel refund, successful-payment reversal, and in
 
 ## Current Phase Constraint
 
-<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
 The current phase implements the permission foundation only. It must cover the platform-operations, merchant, and agent back offices while keeping each tenant's authorization, organization, and data boundaries isolated.
 
 - Deny cross-portal access unless the subject has both an active TenantMembership in that portal's authorization-workspace tenant and explicit portal grants.
 - Keep the authorization-workspace tenant separate from the resource-owner tenant. `RELATED_PARTY_READ` from an agent workspace does not require a Membership in the merchant's tenant; it requires an explicit Grant, trusted relationship evidence, and verified resource ownership as defined by [ADR-0001](../../../docs/adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md).
-- Keep global User membership cardinality, workspace selection, and the session realm/Token audience strategy pending under `IAM-GLOBAL-USER-MULTI-TENANT`; read [`docs/ai-context/known-deviations.md`](../../../docs/ai-context/known-deviations.md) before designing them.
-- Do not promote a candidate identity or session-isolation strategy into an approved Judge rule before the product baseline or an accepted ADR resolves that decision.
+- Apply [ADR-0008](../../../docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md): PLATFORM, MERCHANT, and AGENT use separate application accounts and sessions; trusted server context fixes the portal/workspace boundary, and client `tenantId` or equivalent selectors cannot change it. Same-domain multiple Memberships remain legal but ambiguous login fails closed until a trusted resolver exists.
+- Keep Rule approval separate from decision acceptance: ADR-0008 supplies target facts, while effective approved/closed Judge state still requires the externally anchored independent review evidence defined by this skill.
 - Departments represent organization and data scope only.
 - Roles assign menus, permission codes, and complete grants.
 - Empty or incomplete scope denies access.

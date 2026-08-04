@@ -13,9 +13,9 @@
 
 必须先确认：
 
-<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
-- [待确认，IAM-GLOBAL-USER-MULTI-TENANT] 一个全局 User 是否允许关联多个 TenantMembership，以及登录后的工作空间选择方式。[ADR-0001](../../adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md) 定义受控的跨资源归属租户访问，[ADR-0004](../../adr/0004-external-idp-and-application-authorization-boundary.md) 定义 IdP subject 到全局 User 和 active Membership 的认证边界；两者均未决定 Membership 基数。结论须由产品、安全与架构共同确认，并写入产品基线或 accepted ADR 后方可实施；
+- [已确认，IAM-GLOBAL-USER-MULTI-TENANT] [ADR-0008](../../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 要求三后台应用 User 与会话跨域隔离；同域多 Membership 保留，可信服务端入口无法唯一解析工作区时失败关闭。迁移必须先报告跨域或无法归属的 User，由人工拆分账号后重试，不能复制凭据或改写审计归属来猜测；
 - 平台、代理商、直连/间连商户预置角色；
 - 第一批权限码；
 - FUND 权限和职责分离矩阵；
@@ -51,6 +51,12 @@
 验证：多角色动作/范围不拼接、RELATED_PARTY_READ 不能包装写 action、非法 BCrypt hash 不能充当备用管理员、最后管理员保护、自提权拒绝。
 
 当前管理权限目录采用 V14 细粒度扩展、V15 N-1 兼容、V16 精确目录守卫的前向链；V17 在其后只增不改地加入 Role/Menu/Department 墓碑和 live-only 唯一索引。已执行迁移不可回写：V16 发现固定管理权限元数据漂移时停在 V15 且不修数据；V17 不物理清理业务行。N-1 兼容期内 RoleGrant/角色 configuration 全量替换必须由默认关闭的部署闸门禁止；只有旧客户端依赖清零并完成发布验证后才可打开。
+
+V18 只增不改地加入 PLATFORM/MERCHANT/AGENT 账号域约束。执行前运行 `psql "$PAYMENT_DB_URL" -v ON_ERROR_STOP=1 -f backend/scripts/iam001-account-domain-preflight.sql`；结果必须为空。报告中的跨域或无 Membership 主体必须由人工拆分账号并保留审计映射，禁止迁移脚本复制凭证或猜测归属。
+
+V19 新增三个服务端专用入口 Permission，并按 Tenant `account_domain` 给每个未删除历史角色回填唯一 `system-backoffice-access`、`TENANT/TENANT_ALL` Grant；迁移同步递增角色和成员权限版本，并写审计与 Outbox。两条新建角色事务也必须创建该 Grant；18 项租户授权编辑器不返回或替换它，缺失、错误域或畸形 Grant 一律只读失败。ACTIVE Membership 不能代替 `backoffice:{platform|merchant|agent}-access` RoleGrant。
+
+V20 是 V18/V19 之后的前向兼容修复。V17 允许普通 Permission 使用 `system-backoffice-access` key，V19 的三列唯一键不能阻止它与 portal Permission 并存；V20 将这些历史普通 Grant 确定性改名为 `legacy-backoffice-access-{grantId}`，保留状态、有效期、维度与目标，推进受影响角色/成员版本并写审计和 Outbox。任何 portal 数量、账号域、维度/目标形态异常或目标 key 冲突都会原子阻断；读取侧对迁移后再次出现的保留 key 冲突保持只读失败。
 
 ## 5. 阶段 3：业务范围 Provider
 

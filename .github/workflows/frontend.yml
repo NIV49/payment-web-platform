@@ -70,3 +70,6 @@ jobs:
 
       - name: Build product application
         run: pnpm run build:antdv-next
+
+      - name: Verify independent backoffice artifacts
+        run: node scripts/deploy/verify-three-artifacts.mjs apps/web-antdv-next/dist

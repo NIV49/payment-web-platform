@@ -132,6 +132,20 @@ public class IamTenantRecord extends UpdatableRecordImpl<IamTenantRecord> {
         return (Long) get(7);
     }
 
+    /**
+     * Setter for <code>public.iam_tenant.account_domain</code>.
+     */
+    public void setAccountDomain(String value) {
+        set(8, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_tenant.account_domain</code>.
+     */
+    public String getAccountDomain() {
+        return (String) get(8);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -155,7 +169,7 @@ public class IamTenantRecord extends UpdatableRecordImpl<IamTenantRecord> {
     /**
      * Create a detached, initialised IamTenantRecord
      */
-    public IamTenantRecord(Long id, String tenantCode, String tenantName, String tenantType, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion) {
+    public IamTenantRecord(Long id, String tenantCode, String tenantName, String tenantType, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String accountDomain) {
         super(IamTenant.IAM_TENANT);
 
         setId(id);
@@ -166,6 +180,7 @@ public class IamTenantRecord extends UpdatableRecordImpl<IamTenantRecord> {
         setCreatedAt(createdAt);
         setUpdatedAt(updatedAt);
         setRowVersion(rowVersion);
+        setAccountDomain(accountDomain);
         resetTouchedOnNotNull();
     }
 }

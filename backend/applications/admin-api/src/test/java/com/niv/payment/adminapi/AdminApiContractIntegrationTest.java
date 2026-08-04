@@ -68,7 +68,7 @@ class AdminApiContractIntegrationTest {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("spring.data.redis.host", VALKEY::getHost);
         registry.add("spring.data.redis.port", () -> VALKEY.getMappedPort(6379));
-        registry.add("PAYMENT_BOOTSTRAP_PASSWORD", () -> ADMIN_LOGIN_INPUT);
+        registry.add("payment.bootstrap-password", () -> ADMIN_LOGIN_INPUT);
         registry.add("payment.security.allowed-origins", () -> ORIGIN);
         registry.add("sa-token.cookie.secure", () -> false);
     }
@@ -83,7 +83,7 @@ class AdminApiContractIntegrationTest {
     @Autowired SaTokenConfig saTokenConfig;
 
     @BeforeEach
-    void seedRestrictedUserAndCrossTenantMembership() {
+    void seedRestrictedUserAndSameDomainMembership() {
         jdbc.update("""
             UPDATE iam_membership SET status='ACTIVE',row_version=0,session_version=session_version+1
              WHERE tenant_id=1 AND id=1000
@@ -94,35 +94,58 @@ class AdminApiContractIntegrationTest {
             VALUES(1,1000,2000,1000)
             """);
         jdbc.update("""
-            INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status)
-            VALUES(801,'local','restricted','Restricted User','ACTIVE') ON CONFLICT(id) DO NOTHING
+            INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status,account_domain)
+            VALUES(801,'local','restricted','Restricted User','ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
             """);
         jdbc.update("""
-            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status)
-            VALUES(802,1,801,10,'ACTIVE') ON CONFLICT(id) DO NOTHING
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+            VALUES(802,1,801,10,'ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
             """);
         jdbc.update("""
             UPDATE iam_membership SET status='ACTIVE',row_version=0,session_version=session_version+1
              WHERE tenant_id=1 AND id=802
             """);
         jdbc.update("""
-            INSERT INTO iam_authentication_credential(user_id,username,password_hash,status)
-            VALUES(801,'restricted',?,'ACTIVE')
-            ON CONFLICT(user_id) DO UPDATE SET password_hash=excluded.password_hash,status='ACTIVE'
+            INSERT INTO iam_authentication_credential(user_id,username,password_hash,status,account_domain)
+            VALUES(801,'restricted',?,'ACTIVE','PLATFORM')
+            ON CONFLICT(user_id) DO UPDATE SET password_hash=excluded.password_hash,status='ACTIVE',
+                account_domain='PLATFORM'
             """, passwords.encode(RESTRICTED_LOGIN_INPUT));
         jdbc.update("""
-            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status)
-            VALUES(2,'merchant-two','Merchant Two','DIRECT_MERCHANT','ACTIVE') ON CONFLICT(id) DO NOTHING
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain)
+            VALUES(4,'platform-four','Platform Four','PLATFORM','ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
             """);
         jdbc.update("""
             INSERT INTO iam_department(id,tenant_id,parent_id,department_code,department_name,status)
-            VALUES(20,2,NULL,'root','Root','ACTIVE') ON CONFLICT(id) DO NOTHING
+            VALUES(40,4,NULL,'root','Root','ACTIVE') ON CONFLICT(id) DO NOTHING
             """);
         jdbc.update("""
-            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status)
-            VALUES(803,2,801,20,'ACTIVE') ON CONFLICT(id) DO NOTHING
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+            VALUES(803,4,801,40,'ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
             """);
-        jdbc.update("UPDATE iam_membership SET status='DISABLED' WHERE tenant_id=2 AND id=803");
+        jdbc.update("UPDATE iam_membership SET status='DISABLED' WHERE tenant_id=4 AND id=803");
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES(8800,1,'restricted-portal-access','Restricted Portal Access','PLATFORM',
+                   true,false,'ACTIVE')
+            ON CONFLICT(id) DO NOTHING
+            """);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES(8801,1,8800,3022,'system-backoffice-access','ACTIVE')
+            ON CONFLICT(role_id,permission_id,grant_key) DO NOTHING
+            """);
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES(8802,8801,'TENANT','TENANT_ALL')
+            ON CONFLICT(grant_id,dimension_code) DO NOTHING
+            """);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,802,8800,1000) ON CONFLICT DO NOTHING
+            """);
+
     }
 
     @Test
@@ -135,6 +158,13 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void healthIsAvailableWithoutAPlatformSession() throws Exception {
+        mvc.perform(get("/api/health"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("UP"));
+    }
+
+    @Test
     void loginUsesOpaqueMarkerAndHardenedCookie() throws Exception {
         String cookie = login("admin", ADMIN_LOGIN_INPUT);
         assertThat(cookie).isNotBlank();
@@ -143,7 +173,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void securityCriticalSaTokenConfigurationIsBoundWithoutPostStartupRunner() {
         assertThat(applicationContext.containsBean("saTokenSecurityInitializer")).isFalse();
-        assertThat(saTokenConfig.getTokenName()).isEqualTo("PAYMENT_SESSION");
+        assertThat(saTokenConfig.getTokenName()).isEqualTo("PAYMENT_PLATFORM_SESSION");
         assertThat(saTokenConfig.getTimeout()).isEqualTo(28_800L);
         assertThat(saTokenConfig.getActiveTimeout()).isEqualTo(1_800L);
         assertThat(saTokenConfig.getIsConcurrent()).isFalse();
@@ -212,25 +242,20 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
-    void multipleActiveMembershipsRequireExplicitTenantSelection() throws Exception {
-        jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=2 AND id=803");
+    void platformLoginIgnoresOtherDomainsAndRejectsClientTenantSelection() throws Exception {
+        mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"username\":\"merchant-admin\",\"password\":\""
+                    + ADMIN_LOGIN_INPUT + "\"}"))
+            .andExpect(status().isUnauthorized());
 
         mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
                 .content("{\"username\":\"restricted\",\"password\":\"" + RESTRICTED_LOGIN_INPUT + "\"}"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error").value("INVALID_CREDENTIALS"));
+            .andExpect(status().isOk());
 
         mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
                 .content("{\"username\":\"restricted\",\"password\":\"" + RESTRICTED_LOGIN_INPUT
                     + "\",\"tenantId\":\"1\"}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.accessToken").value("cookie-session"));
-
-        mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
-                .content("{\"username\":\"restricted\",\"password\":\"" + RESTRICTED_LOGIN_INPUT
-                    + "\",\"tenantId\":\"999\"}"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error").value("INVALID_CREDENTIALS"));
+            .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -241,7 +266,8 @@ class AdminApiContractIntegrationTest {
             .andExpect(jsonPath("$.data.homePath").value("/dashboard"))
             .andExpect(jsonPath("$.data.systemAdministrator").value(true));
         mvc.perform(get("/api/auth/codes").cookie(cookie)).andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.length()").value(19))
+            .andExpect(jsonPath("$.data.length()").value(20))
+            .andExpect(jsonPath("$.data[?(@ == 'backoffice:platform-access')]").exists())
             .andExpect(jsonPath("$.data[?(@ == 'user:assign-role')]").exists())
             .andExpect(jsonPath("$.data[?(@ == 'role:grant-update')]").exists())
             .andExpect(jsonPath("$.data[?(@ == 'menu:manage')]").doesNotExist());
@@ -311,6 +337,13 @@ class AdminApiContractIntegrationTest {
         List<Long> menuIdsBefore = jdbc.queryForList(
             "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
             Long.class, Long.parseLong(roleId));
+        String username = "portal-role-user-" + roleId;
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"name\":\"Portal Role User\","
+                    + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
+            .andExpect(status().isOk());
+        assertThat(login(username, ADMIN_LOGIN_INPUT)).isNotBlank();
 
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
                 .header("Origin", ORIGIN).contentType("application/json")
@@ -330,8 +363,14 @@ class AdminApiContractIntegrationTest {
             "SELECT row_version FROM iam_role WHERE tenant_id=1 AND id=?",
             Long.class, Long.parseLong(roleId))).isZero();
         assertThat(jdbc.queryForObject(
-            "SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=?",
-            Long.class, Long.parseLong(roleId))).isZero();
+            """
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.grant_key='system-backoffice-access'
+               AND grant_row.status='ACTIVE'
+               AND permission.permission_code='backoffice:platform-access'
+            """, Long.class, Long.parseLong(roleId))).isOne();
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_audit_event
              WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
@@ -370,6 +409,14 @@ class AdminApiContractIntegrationTest {
             SELECT count(*) FROM iam_audit_event
              WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
             """, Long.class, roleId)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.grant_key='system-backoffice-access'
+               AND grant_row.status='ACTIVE'
+               AND permission.permission_code='backoffice:platform-access'
+            """, Long.class, Long.parseLong(roleId))).isOne();
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_permission_change_outbox
              WHERE tenant_id=1 AND aggregate_type='ROLE_GRANTS' AND aggregate_ref=?
@@ -523,8 +570,9 @@ class AdminApiContractIntegrationTest {
             Cookie restricted = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
             mvc.perform(get("/api/auth/codes").cookie(restricted))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(1))
-                .andExpect(jsonPath("$.data[0]").value("user:create"));
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[?(@ == 'user:create')]").exists())
+                .andExpect(jsonPath("$.data[?(@ == 'backoffice:platform-access')]").exists());
 
             mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(admin)
                     .header("Origin", ORIGIN).contentType("application/json")
@@ -543,7 +591,7 @@ class AdminApiContractIntegrationTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error").value("SESSION_INVALID"))
                 .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
-                    org.hamcrest.Matchers.containsString("PAYMENT_SESSION="),
+                    org.hamcrest.Matchers.containsString("PAYMENT_PLATFORM_SESSION="),
                     org.hamcrest.Matchers.containsString("Max-Age=0"))));
             mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(restricted))
                 .andExpect(status().isUnauthorized())
@@ -552,7 +600,8 @@ class AdminApiContractIntegrationTest {
             Cookie refreshed = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
             mvc.perform(get("/api/auth/codes").cookie(refreshed))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(0));
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0]").value("backoffice:platform-access"));
             assertThat(jdbc.queryForObject("""
                 SELECT count(*) FROM iam_audit_event
                  WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
@@ -657,6 +706,131 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void nonPortalPermissionUsingTheReservedGrantKeyFailsClosed() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Reserved Key Conflict Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3001,'system-backoffice-access','DISABLED')
+            """, grantId, Long.parseLong(roleId));
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"reserved key conflict\",\"grants\":[]}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+    }
+
+    @Test
+    void duplicateGrantKeysAndPermissionsFailClosed() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String duplicateKeyRole = createRole(cookie, "Duplicate Grant Key Role");
+        insertTenantGrant(duplicateKeyRole, 3001L, "duplicate-key");
+        insertTenantGrant(duplicateKeyRole, 3002L, "duplicate-key");
+        mvc.perform(get("/api/v1/iam/roles/" + duplicateKeyRole + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+
+        String duplicatePermissionRole = createRole(cookie, "Duplicate Permission Role");
+        insertTenantGrant(duplicatePermissionRole, 3001L, "user-view-first");
+        insertTenantGrant(duplicatePermissionRole, 3001L, "user-view-second");
+        mvc.perform(get("/api/v1/iam/roles/" + duplicatePermissionRole + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+    }
+
+    @Test
+    void disabledAdditionalPortalGrantFailsClosed() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleId = createRole(cookie, "Disabled Extra Portal Role");
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3022,'disabled-extra-portal','DISABLED')
+            """, grantId, Long.parseLong(roleId));
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+    }
+
+    @Test
+    void legacyGrantReturnedByGetCanBePutBackUnchanged() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleId = createRole(cookie, "Legacy Grant Round Trip Role");
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        insertTenantGrant(roleId, 3001L, "legacy-backoffice-access-" + grantId, grantId);
+
+        String response = mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(true))
+            .andExpect(jsonPath("$.data.grants[0].grantKey")
+                .value("legacy-backoffice-access-" + grantId))
+            .andReturn().getResponse().getContentAsString();
+        Number roleVersion = JsonPath.read(response, "$.data.roleVersion");
+        Object grants = JsonPath.read(response, "$.data.grants");
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"expectedVersion\":" + roleVersion.longValue()
+                    + ",\"reason\":\"HTTP round trip\",\"grants\":" + grants + "}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.grants[0].grantKey")
+                .value("legacy-backoffice-access-" + grantId));
+    }
+
+    @Test
+    void wrongDomainOrMalformedProtectedPortalGrantFailsClosed() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Malformed Portal Grant Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        long protectedGrantId = jdbc.queryForObject("""
+            SELECT id FROM iam_role_grant
+             WHERE tenant_id=1 AND role_id=? AND grant_key='system-backoffice-access'
+            """, Long.class, Long.parseLong(roleId));
+
+        jdbc.update("UPDATE iam_role_grant SET permission_id=3023 WHERE id=?", protectedGrantId);
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"wrong domain\",\"grants\":[]}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+
+        jdbc.update("UPDATE iam_role_grant SET permission_id=3022 WHERE id=?", protectedGrantId);
+        jdbc.update("""
+            UPDATE iam_grant_dimension SET dimension_code='OWNER',scope_mode='SELF'
+             WHERE grant_id=?
+            """, protectedGrantId);
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+    }
+
+    @Test
     void legacyCompatibilityShadowDoesNotBlockGranularGrantReplacement() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
@@ -694,7 +868,7 @@ class AdminApiContractIntegrationTest {
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_role_grant
              WHERE tenant_id=1 AND role_id=? AND status='ACTIVE'
-            """, Long.class, Long.parseLong(roleId))).isZero();
+            """, Long.class, Long.parseLong(roleId))).isOne();
     }
 
     @Test
@@ -737,8 +911,19 @@ class AdminApiContractIntegrationTest {
 
         assertThat(jdbc.queryForObject("SELECT row_version FROM iam_role WHERE id=?", Long.class,
             Long.parseLong(roleId))).isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=?",
-            Long.class, Long.parseLong(roleId))).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.grant_key='system-backoffice-access'
+               AND permission.permission_code='backoffice:platform-access'
+            """, Long.class, Long.parseLong(roleId))).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND permission.permission_code='user:view'
+            """, Long.class, Long.parseLong(roleId))).isZero();
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_audit_event
              WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
@@ -881,7 +1066,7 @@ class AdminApiContractIntegrationTest {
                 .contentType("application/json")
                 .content("""
                     {"username":"trace-audit-user","name":"Trace Audit User","deptId":"10",
-                     "roleIds":[],"status":1,"userVersion":0}
+                     "roleIds":[],"status":1}
                     """))
             .andExpect(status().isOk())
             .andReturn().getResponse().getHeader("X-Trace-Id");
@@ -900,7 +1085,7 @@ class AdminApiContractIntegrationTest {
         long version = jdbc.queryForObject("""
             SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=1000
             """, Long.class);
-        String key = "iam:grant:1:1000:v" + version;
+        String key = "iam:platform:grant:1:1000:v" + version;
         redis.delete(key);
 
         mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(cookie))
@@ -927,7 +1112,7 @@ class AdminApiContractIntegrationTest {
                 .andExpect(jsonPath("$.code").value(40102))
                 .andExpect(jsonPath("$.error").value("SESSION_INVALID"))
                 .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
-                    org.hamcrest.Matchers.containsString("PAYMENT_SESSION="),
+                    org.hamcrest.Matchers.containsString("PAYMENT_PLATFORM_SESSION="),
                     org.hamcrest.Matchers.containsString("Max-Age=0"))));
         } finally {
             jdbc.update("""
@@ -1121,7 +1306,7 @@ class AdminApiContractIntegrationTest {
                 .contentType("application/json")
                 .content("""
                     {"username":"system-role-escalation","name":"Escalation Attempt","deptId":"10",
-                     "roleIds":["2000"],"status":1,"userVersion":0}
+                     "roleIds":["2000"],"status":1}
                     """))
             .andExpect(status().isUnprocessableEntity())
             .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
@@ -1286,7 +1471,7 @@ class AdminApiContractIntegrationTest {
             assertThat(jdbc.queryForList("""
                 SELECT role_id FROM iam_membership_role
                  WHERE tenant_id=1 AND membership_id=802 ORDER BY role_id
-                """, Long.class)).containsExactlyInAnyOrder(operatorRoleId, disabledRoleId);
+                """, Long.class)).containsExactlyInAnyOrder(8800L, operatorRoleId, disabledRoleId);
         } finally {
             jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802");
             jdbc.update("""
@@ -1358,7 +1543,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void userRoleIdsAreRequiredButEmptyAssignmentsAreAccepted() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String base = "{\"username\":\"no-roles\",\"name\":\"No Roles\",\"deptId\":\"10\",\"status\":1,\"userVersion\":0";
+        String base = "{\"username\":\"no-roles\",\"name\":\"No Roles\",\"deptId\":\"10\",\"status\":1";
         mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
                 .contentType("application/json").content(base + "}"))
             .andExpect(status().isBadRequest());
@@ -1373,7 +1558,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void userStatusUsesOptimisticVersionAndDoesNotDisableGlobalCredential() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=2 AND id=803");
+        jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=4 AND id=803");
         mvc.perform(patch("/api/system/user/801/status").cookie(cookie).header("Origin", ORIGIN)
                 .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.userVersion").value(1));
@@ -1383,7 +1568,7 @@ class AdminApiContractIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT status FROM iam_user WHERE id=801", String.class)).isEqualTo("ACTIVE");
         assertThat(jdbc.queryForObject("SELECT status FROM iam_authentication_credential WHERE user_id=801", String.class))
             .isEqualTo("ACTIVE");
-        assertThat(jdbc.queryForObject("SELECT status FROM iam_membership WHERE tenant_id=2 AND id=803", String.class))
+        assertThat(jdbc.queryForObject("SELECT status FROM iam_membership WHERE tenant_id=4 AND id=803", String.class))
             .isEqualTo("ACTIVE");
     }
 
@@ -1464,6 +1649,14 @@ class AdminApiContractIntegrationTest {
                AND grant_row.status='ACTIVE' AND permission.permission_code='user:view'
             """, Long.class, roleId)).isOne();
         assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.grant_key='system-backoffice-access'
+               AND grant_row.status='ACTIVE'
+               AND permission.permission_code='backoffice:platform-access'
+            """, Long.class, roleId)).isOne();
+        assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_audit_event
              WHERE tenant_id=1 AND target_type='ROLE_CONFIGURATION' AND target_ref=?
                AND action_code='CREATE'
@@ -1473,6 +1666,42 @@ class AdminApiContractIntegrationTest {
              WHERE tenant_id=1 AND aggregate_type='ROLE_CONFIGURATION' AND aggregate_ref=?
                AND event_type='ROLE_CONFIGURATION_CREATED'
             """, Long.class, Long.toString(roleId))).isOne();
+    }
+
+    @Test
+    void roleConfigurationCreateAndReplaceRejectTheServerManagedGrantKey() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String reservedGrant = """
+            [{"grantKey":"system-backoffice-access","permissionCode":"user:view",
+              "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]
+            """;
+
+        mvc.perform(post("/api/v1/iam/roles/configuration")
+                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .content("""
+                    {"name":"Reserved Key Create","status":1,"menuIds":[],"grants":%s}
+                    """.formatted(reservedGrant)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_role WHERE tenant_id=1 AND role_name='Reserved Key Create'",
+            Long.class)).isZero();
+
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"Reserved Key Replace\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/configuration")
+                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .content("""
+                    {"expectedVersion":0,"name":"Reserved Key Replace","status":1,
+                     "menuIds":[],"reason":"must stay server managed","grants":%s}
+                    """.formatted(reservedGrant)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        assertThat(jdbc.queryForObject(
+            "SELECT row_version FROM iam_role WHERE tenant_id=1 AND id=?", Long.class, roleId)).isZero();
     }
 
     @Test
@@ -1554,7 +1783,7 @@ class AdminApiContractIntegrationTest {
             """, Long.class, userId)).isEqualTo(permissionVersionBefore + 1L);
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=? AND status='ACTIVE'
-            """, Long.class, roleId)).isOne();
+            """, Long.class, roleId)).isEqualTo(2L);
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_audit_event
              WHERE tenant_id=1 AND target_type='ROLE_CONFIGURATION' AND target_ref=?
@@ -1677,7 +1906,15 @@ class AdminApiContractIntegrationTest {
             """, Long.class, roleId)).isOne();
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=?
-            """, Long.class, roleId)).isOne();
+            """, Long.class, roleId)).isEqualTo(2);
+        assertThat(jdbc.queryForList("""
+            SELECT permission.permission_code
+              FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+             ORDER BY permission.permission_code
+            """, String.class, roleId))
+            .containsExactly("backoffice:platform-access", "user:view");
         assertThat(jdbc.queryForObject("""
             SELECT count(*) FROM iam_audit_event
              WHERE tenant_id=1 AND target_type='ROLE' AND target_ref=? AND action_code='DELETE'
@@ -1844,7 +2081,7 @@ class AdminApiContractIntegrationTest {
         String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Recoverable Disabled User\","
-                    + "\"deptId\":\"10\",\"roleIds\":[],\"status\":0}"))
+                    + "\"deptId\":\"10\",\"roleIds\":[\"8800\"],\"status\":0}"))
             .andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString();
         long userId = Long.parseLong(JsonPath.read(body, "$.data.id"));
@@ -1873,8 +2110,8 @@ class AdminApiContractIntegrationTest {
         Cookie createdUserCookie = cookie(login(username, ADMIN_LOGIN_INPUT));
         long otherMembershipId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         jdbc.update("""
-            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status)
-            VALUES(?,2,?,20,'ACTIVE')
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+            VALUES(?,4,?,40,'ACTIVE','PLATFORM')
             """, otherMembershipId, userId);
         List<Long> sessionVersionsBefore = jdbc.queryForList("""
             SELECT session_version FROM iam_membership
@@ -1931,7 +2168,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void tenantMembershipUpdateNeverMutatesGlobalIdentityOrAnotherTenant() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=2 AND id=803");
+        jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=4 AND id=803");
         var userBefore = jdbc.queryForMap("""
             SELECT display_name,status,remark,row_version FROM iam_user WHERE id=801
             """);
@@ -1951,7 +2188,7 @@ class AdminApiContractIntegrationTest {
             SELECT status FROM iam_membership WHERE tenant_id=1 AND user_id=801
             """, String.class)).isEqualTo("DISABLED");
         assertThat(jdbc.queryForObject("""
-            SELECT status FROM iam_membership WHERE tenant_id=2 AND user_id=801
+            SELECT status FROM iam_membership WHERE tenant_id=4 AND user_id=801
             """, String.class)).isEqualTo("ACTIVE");
         assertThat(jdbc.queryForMap("""
             SELECT display_name,status,remark,row_version FROM iam_user WHERE id=801
@@ -2141,11 +2378,36 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.accessToken").value("cookie-session"))
             .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
-                org.hamcrest.Matchers.containsString("PAYMENT_SESSION="),
+                org.hamcrest.Matchers.containsString("PAYMENT_PLATFORM_SESSION="),
                 org.hamcrest.Matchers.containsString("HttpOnly"),
                 org.hamcrest.Matchers.containsString("SameSite=Strict"))))
             .andReturn().getResponse().getHeader("Set-Cookie");
-        return header.substring("PAYMENT_SESSION=".length(), header.indexOf(';'));
+        return header.substring("PAYMENT_PLATFORM_SESSION=".length(), header.indexOf(';'));
+    }
+
+    private String createRole(Cookie cookie, String name) throws Exception {
+        String body = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+                .contentType("application/json")
+                .content("{\"name\":\"" + name + "\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return JsonPath.read(body, "$.data.id");
+    }
+
+    private void insertTenantGrant(String roleId, long permissionId, String grantKey) {
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        insertTenantGrant(roleId, permissionId, grantKey, grantId);
+    }
+
+    private void insertTenantGrant(String roleId, long permissionId, String grantKey, long grantId) {
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,?,?,'ACTIVE')
+            """, grantId, Long.parseLong(roleId), permissionId, grantKey);
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
     }
 
     private AdministrationActor administrationActor() {
@@ -2164,7 +2426,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(jsonPath("$.code").value(40102))
             .andExpect(jsonPath("$.error").value("SESSION_INVALID"))
             .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
-                org.hamcrest.Matchers.containsString("PAYMENT_SESSION="),
+                org.hamcrest.Matchers.containsString("PAYMENT_PLATFORM_SESSION="),
                 org.hamcrest.Matchers.containsString("Max-Age=0"))));
     }
 
@@ -2174,16 +2436,16 @@ class AdminApiContractIntegrationTest {
         long membershipId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         String username = "unreachable-admin-" + userId;
         jdbc.update("""
-            INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status)
-            VALUES(?,'integration-test',?,?,?)
+            INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status,account_domain)
+            VALUES(?,'integration-test',?,?,?,'PLATFORM')
             """, userId, username, "Unreachable Administrator " + userId, userStatus);
         jdbc.update("""
-            INSERT INTO iam_authentication_credential(user_id,username,password_hash,status)
-            VALUES(?,?,?,?)
+            INSERT INTO iam_authentication_credential(user_id,username,password_hash,status,account_domain)
+            VALUES(?,?,?,?,'PLATFORM')
             """, userId, username, passwordHash, credentialStatus);
         jdbc.update("""
-            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status)
-            VALUES(?,1,?,10,'ACTIVE')
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+            VALUES(?,1,?,10,'ACTIVE','PLATFORM')
             """, membershipId, userId);
         jdbc.update("""
             INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
@@ -2193,7 +2455,7 @@ class AdminApiContractIntegrationTest {
     }
 
     private static Cookie cookie(String value) {
-        return new Cookie("PAYMENT_SESSION", value);
+        return new Cookie("PAYMENT_PLATFORM_SESSION", value);
     }
 
     private record TestIdentity(long userId, long membershipId) {

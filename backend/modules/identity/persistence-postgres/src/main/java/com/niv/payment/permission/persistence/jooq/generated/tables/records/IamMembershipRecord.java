@@ -160,6 +160,20 @@ public class IamMembershipRecord extends UpdatableRecordImpl<IamMembershipRecord
         return (Long) get(9);
     }
 
+    /**
+     * Setter for <code>public.iam_membership.account_domain</code>.
+     */
+    public void setAccountDomain(String value) {
+        set(10, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_membership.account_domain</code>.
+     */
+    public String getAccountDomain() {
+        return (String) get(10);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -183,7 +197,7 @@ public class IamMembershipRecord extends UpdatableRecordImpl<IamMembershipRecord
     /**
      * Create a detached, initialised IamMembershipRecord
      */
-    public IamMembershipRecord(Long id, Long tenantId, Long userId, Long departmentId, String status, Long permissionVersion, Long sessionVersion, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion) {
+    public IamMembershipRecord(Long id, Long tenantId, Long userId, Long departmentId, String status, Long permissionVersion, Long sessionVersion, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String accountDomain) {
         super(IamMembership.IAM_MEMBERSHIP);
 
         setId(id);
@@ -196,6 +210,7 @@ public class IamMembershipRecord extends UpdatableRecordImpl<IamMembershipRecord
         setCreatedAt(createdAt);
         setUpdatedAt(updatedAt);
         setRowVersion(rowVersion);
+        setAccountDomain(accountDomain);
         resetTouchedOnNotNull();
     }
 }

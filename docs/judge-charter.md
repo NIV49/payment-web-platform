@@ -5,9 +5,9 @@
 > 第一阶段范围：权限底座
 > 长期范围：支付平台全部领域
 
-<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=pending ref=none -->
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
-本文件确认的是 Judge 的治理流程，不会使未定版业务规则自动生效。规则只有在产品基线或 accepted ADR 中获批后，才能进入 approved Rulebook 和自动 PASS；全局 User 的 TenantMembership 基数、工作空间选择以及三后台是否采用独立 session realm/Token audience 仍是待决项。
+本文件确认的是 Judge 的治理流程，不会使未定版业务规则自动生效。规则只有在产品基线或 accepted ADR 中获批后，才能进入 approved Rulebook 和自动 PASS；三后台账号域与会话边界已由 [ADR-0008](adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 定版，但 Rule Card 的正式 approved/closed 状态仍须满足外部信任锚和独立签名门禁。
 
 ## 1. 目的
 
@@ -72,7 +72,7 @@ Agent 声称“完成”不构成完成。只有指定版本通过 Judge，任�
 - 运维端、商户端、代理商端的租户内授权、组织和数据边界默认隔离；
 - 三端登录入口、接口和缓存必须阻止缺少当前后台授权工作区 ACTIVE TenantMembership 或显式后台授权的跨后台访问；
 - 授权工作区 Tenant 与资源归属 Tenant 必须分开：代理商在自身工作区执行 `RELATED_PARTY_READ` 不要求加入商户 Tenant，而要求显式 Grant、可信代理关系和真实资源归属证据，见 [ADR-0001](adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md)；
-- 全局 User 是否允许关联多个 TenantMembership、登录后的工作空间选择，以及 session realm/Token audience 是否分离，保持 `IAM-GLOBAL-USER-MULTI-TENANT` 待决，Judge 不得把候选方案当作已批准规则；
+- PLATFORM、MERCHANT、AGENT 使用独立应用 User、可信服务端工作区入口、Cookie、session realm/login type 和缓存命名空间；同域多 Membership 不被禁止，但客户端不得用 `tenantId` 或等价输入选择工作区，服务端无法唯一解析时失败关闭，见 [ADR-0008](adr/0008-isolate-three-backoffice-account-domains-and-sessions.md)；
 - 用户、部门、角色、菜单、权限码和数据范围闭环；
 - 部门只负责组织归属和数据范围，不直接分配菜单或权限；
 - 菜单、权限码和完整授权始终通过角色分配；

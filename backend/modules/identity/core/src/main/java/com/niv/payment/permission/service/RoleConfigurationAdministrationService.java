@@ -42,6 +42,9 @@ public final class RoleConfigurationAdministrationService {
         Set<String> keys = new HashSet<>();
         Set<String> permissions = new HashSet<>();
         for (RoleGrantModels.Selection grant : grants) {
+            if (RoleGrantAdministrationService.PROTECTED_PORTAL_GRANT_KEY.equals(grant.grantKey())) {
+                throw new IllegalArgumentException("Grant key is reserved for server-managed access");
+            }
             if (!RoleGrantAdministrationService.GRANTABLE_CODES.contains(grant.permission().value())) {
                 throw new IllegalArgumentException("Permission is not grantable from this administration surface");
             }

@@ -1,4 +1,4 @@
-package com.niv.payment.adminapi.config;
+package com.niv.payment.permission.backoffice;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
@@ -24,15 +24,15 @@ import java.util.Set;
  * @see <a href="https://documentation.red-gate.com/fd/flyway-ignore-migration-patterns-setting-277579002.html">
  * Flyway ignore migration patterns</a>
  */
-final class FlywaySchemaReadinessGuard {
+public final class BackofficeSchemaReadinessGuard {
     private static final String NOT_READY_MESSAGE_PREFIX =
         "Database schema is not ready for this application binary; reason=";
 
     private static final Set<MigrationState> ACCEPTED_KNOWN_STATES =
         EnumSet.of(MigrationState.SUCCESS, MigrationState.OUT_OF_ORDER);
-    FlywaySchemaReadinessGuard(DataSource dataSource,
-                               FlywayProperties properties,
-                               ClassLoader classLoader) {
+    public BackofficeSchemaReadinessGuard(DataSource dataSource,
+                                          FlywayProperties properties,
+                                          ClassLoader classLoader) {
         try {
             verify(createValidator(dataSource, properties, classLoader));
         } catch (FlywayException validationFailure) {
@@ -56,7 +56,7 @@ final class FlywaySchemaReadinessGuard {
         }
 
         FailureReason migrationFailure = versionedMigrations.stream()
-            .map(FlywaySchemaReadinessGuard::failureReason)
+            .map(BackofficeSchemaReadinessGuard::failureReason)
             .filter(reason -> reason != null)
             .findFirst()
             .orElse(null);
@@ -130,7 +130,7 @@ final class FlywaySchemaReadinessGuard {
         return configuration.load();
     }
 
-    static String notReadyMessage(FailureReason reason) {
+    public static String notReadyMessage(FailureReason reason) {
         return NOT_READY_MESSAGE_PREFIX + reason.name();
     }
 
@@ -139,7 +139,7 @@ final class FlywaySchemaReadinessGuard {
         return new IllegalStateException(notReadyMessage(reason));
     }
 
-    enum FailureReason {
+    public enum FailureReason {
         VALIDATION_UNAVAILABLE,
         PENDING_MIGRATION,
         NO_VERSIONED_MIGRATIONS,

@@ -172,4 +172,6 @@ Core `DimensionScope` 与 V10 `ck_iam_grant_dimension_mode_compatibility` 同时
 
 > 不确定：长期公开 ID 是否采用 UUIDv7、雪花或其他生成器；当前 IAM 仍使用经 V5 修复的共享 sequence。
 
-用户多工作区在 Schema 和登录 API 中已开放：单一活动 Membership 可省略 tenantId，多个活动 Membership 必须显式选择 tenantId。
+<!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
+
+用户在同一账号域可以拥有多个 Membership，但登录 API 不接受 `tenantId` 或等价工作区选择字段。授权工作区只能由服务端可信入口或上下文解析；无法唯一解析一个 ACTIVE Membership 时，认证以不泄露 Membership 是否存在的通用 401 失败。

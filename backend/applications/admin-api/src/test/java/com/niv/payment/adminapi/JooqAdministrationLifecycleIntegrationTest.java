@@ -437,8 +437,8 @@ class JooqAdministrationLifecycleIntegrationTest {
     private static void seedTenant(long tenantId, String code, long departmentId) {
         dsl.insertInto(IAM_TENANT,
                 IAM_TENANT.ID, IAM_TENANT.TENANT_CODE, IAM_TENANT.TENANT_NAME,
-                IAM_TENANT.TENANT_TYPE, IAM_TENANT.STATUS)
-            .values(tenantId, code, code, "PLATFORM", "ACTIVE")
+                IAM_TENANT.TENANT_TYPE, IAM_TENANT.STATUS, IAM_TENANT.ACCOUNT_DOMAIN)
+            .values(tenantId, code, code, "PLATFORM", "ACTIVE", "PLATFORM")
             .execute();
         dsl.insertInto(IAM_DEPARTMENT,
                 IAM_DEPARTMENT.ID, IAM_DEPARTMENT.TENANT_ID, IAM_DEPARTMENT.DEPARTMENT_CODE,
@@ -450,13 +450,14 @@ class JooqAdministrationLifecycleIntegrationTest {
     private static void seedUser(long userId, String username, String displayName) {
         dsl.insertInto(IAM_USER,
                 IAM_USER.ID, IAM_USER.IDP_ISSUER, IAM_USER.IDP_SUBJECT,
-                IAM_USER.DISPLAY_NAME, IAM_USER.STATUS)
-            .values(userId, "local", username, displayName, "ACTIVE")
+                IAM_USER.DISPLAY_NAME, IAM_USER.STATUS, IAM_USER.ACCOUNT_DOMAIN)
+            .values(userId, "local", username, displayName, "ACTIVE", "PLATFORM")
             .execute();
         dsl.insertInto(IAM_AUTHENTICATION_CREDENTIAL,
                 IAM_AUTHENTICATION_CREDENTIAL.USER_ID, IAM_AUTHENTICATION_CREDENTIAL.USERNAME,
-                IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, IAM_AUTHENTICATION_CREDENTIAL.STATUS)
-            .values(userId, username, SUPPORTED_DUMMY_HASH, "ACTIVE")
+                IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, IAM_AUTHENTICATION_CREDENTIAL.STATUS,
+                IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN)
+            .values(userId, username, SUPPORTED_DUMMY_HASH, "ACTIVE", "PLATFORM")
             .execute();
     }
 
@@ -464,8 +465,8 @@ class JooqAdministrationLifecycleIntegrationTest {
                                        long departmentId, String status) {
         dsl.insertInto(IAM_MEMBERSHIP,
                 IAM_MEMBERSHIP.ID, IAM_MEMBERSHIP.TENANT_ID, IAM_MEMBERSHIP.USER_ID,
-                IAM_MEMBERSHIP.DEPARTMENT_ID, IAM_MEMBERSHIP.STATUS)
-            .values(membershipId, tenantId, userId, departmentId, status)
+                IAM_MEMBERSHIP.DEPARTMENT_ID, IAM_MEMBERSHIP.STATUS, IAM_MEMBERSHIP.ACCOUNT_DOMAIN)
+            .values(membershipId, tenantId, userId, departmentId, status, "PLATFORM")
             .execute();
     }
 

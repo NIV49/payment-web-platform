@@ -70,8 +70,8 @@ class IamSequenceUpgradeMigrationTest {
                 assertThat(tenants.getInt(1)).isZero();
             }
             statement.executeUpdate("""
-                INSERT INTO iam_tenant(id, tenant_code, tenant_name, tenant_type, status)
-                VALUES(nextval('iam_id_seq'), 'migration-test', 'Migration Test', 'PLATFORM', 'ACTIVE')
+                INSERT INTO iam_tenant(id, tenant_code, tenant_name, tenant_type, status, account_domain)
+                VALUES(nextval('iam_id_seq'), 'migration-test', 'Migration Test', 'PLATFORM', 'ACTIVE', 'PLATFORM')
                 """);
             statement.executeUpdate("""
                 INSERT INTO iam_permission_change_outbox(

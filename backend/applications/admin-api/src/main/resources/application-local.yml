@@ -21,7 +21,7 @@ payment:
   # Public local fixture only. The initializer bean does not exist outside this profile.
   bootstrap-password: ${PAYMENT_BOOTSTRAP_PASSWORD}
   security:
-    allowed-origins: ${PAYMENT_ALLOWED_ORIGINS:http://localhost:5999,http://127.0.0.1:5999}
+    allowed-origins: ${PAYMENT_PLATFORM_ALLOWED_ORIGIN:http://127.0.0.1:5999}
 
 sa-token:
   cookie:

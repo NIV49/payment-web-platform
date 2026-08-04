@@ -1,6 +1,7 @@
 package com.niv.payment.adminapi;
 
 import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.domain.CrossTenantMode;
 import com.niv.payment.permission.domain.PermissionCode;
 import com.niv.payment.permission.domain.RiskLevel;
@@ -127,17 +128,20 @@ class JooqPermissionAdaptersIntegrationTest {
         var grants = new JooqPermissionGrantRepository(dsl);
 
         assertEquals(17L, permissionVersions.findPermissionVersion(TENANT_ID, MEMBERSHIP_ID));
-        var versions = sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID)
+        var versions = sessionVersions.findActiveVersions(
+                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID)
             .orElseThrow();
         assertEquals(17L, versions.permissionVersion());
         assertEquals(23L, versions.sessionVersion());
-        assertFalse(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID + 1)
+        assertFalse(sessionVersions.findActiveVersions(
+                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID + 1)
             .isPresent());
 
         try {
             dsl.update(IAM_TENANT).set(IAM_TENANT.STATUS, "DISABLED")
                 .where(IAM_TENANT.ID.eq(TENANT_ID)).execute();
-            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(
+                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_TENANT).set(IAM_TENANT.STATUS, "ACTIVE")
@@ -147,7 +151,8 @@ class JooqPermissionAdaptersIntegrationTest {
         try {
             dsl.update(IAM_USER).set(IAM_USER.STATUS, "DISABLED")
                 .where(IAM_USER.ID.eq(USER_ID)).execute();
-            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(
+                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_USER).set(IAM_USER.STATUS, "ACTIVE")
@@ -157,7 +162,8 @@ class JooqPermissionAdaptersIntegrationTest {
         try {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL).set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, "LOCKED")
                 .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID)).execute();
-            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(
+                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL).set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, "ACTIVE")
@@ -172,7 +178,8 @@ class JooqPermissionAdaptersIntegrationTest {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
                 .setNull(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
                 .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID)).execute();
-            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(
+                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
@@ -183,7 +190,8 @@ class JooqPermissionAdaptersIntegrationTest {
         try {
             dsl.update(IAM_MEMBERSHIP).set(IAM_MEMBERSHIP.STATUS, "DISABLED")
                 .where(IAM_MEMBERSHIP.ID.eq(MEMBERSHIP_ID)).execute();
-            assertTrue(sessionVersions.findActiveVersions(TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
+            assertTrue(sessionVersions.findActiveVersions(
+                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
             assertAuthorizationSubjectInvalid(permissionVersions, grants);
         } finally {
             dsl.update(IAM_MEMBERSHIP).set(IAM_MEMBERSHIP.STATUS, "ACTIVE")
@@ -579,6 +587,8 @@ class JooqPermissionAdaptersIntegrationTest {
 
             var repository = new JooqRoleAdministrationRepository(
                 administration, new JooqIdentityQueryRepository(administration),
+                new JooqRoleGrantAdministrationRepository(
+                    administration, () -> "write-before-revocation-test"),
                 () -> "write-before-revocation-test");
             repository.createRole(TENANT_ID,
                 new AdministrationActor(
@@ -632,7 +642,9 @@ class JooqPermissionAdaptersIntegrationTest {
             MEMBERSHIP_ID, USER_ID, observedVersion, observedSessionVersion);
         String roleName = "Must Not Survive Inactive Operator";
         var repository = new JooqRoleAdministrationRepository(
-            dsl, new JooqIdentityQueryRepository(dsl), () -> "inactive-operator-test");
+            dsl, new JooqIdentityQueryRepository(dsl),
+            new JooqRoleGrantAdministrationRepository(dsl, () -> "inactive-operator-test"),
+            () -> "inactive-operator-test");
 
         try {
             dsl.update(IAM_MEMBERSHIP).set(IAM_MEMBERSHIP.STATUS, "DISABLED")
@@ -789,23 +801,25 @@ class JooqPermissionAdaptersIntegrationTest {
     private static void seedIdentityAndGrants() {
         dsl.insertInto(IAM_TENANT,
                 IAM_TENANT.ID, IAM_TENANT.TENANT_CODE, IAM_TENANT.TENANT_NAME,
-                IAM_TENANT.TENANT_TYPE, IAM_TENANT.STATUS)
-            .values(TENANT_ID, "jooq-test", "jOOQ Test Tenant", "PLATFORM", "ACTIVE")
+                IAM_TENANT.TENANT_TYPE, IAM_TENANT.STATUS, IAM_TENANT.ACCOUNT_DOMAIN)
+            .values(TENANT_ID, "jooq-test", "jOOQ Test Tenant", "PLATFORM", "ACTIVE", "PLATFORM")
             .execute();
         dsl.insertInto(IAM_USER,
                 IAM_USER.ID, IAM_USER.IDP_ISSUER, IAM_USER.IDP_SUBJECT,
-                IAM_USER.DISPLAY_NAME, IAM_USER.STATUS)
-            .values(USER_ID, "integration-test", "jooq-user", "jOOQ User", "ACTIVE")
+                IAM_USER.DISPLAY_NAME, IAM_USER.STATUS, IAM_USER.ACCOUNT_DOMAIN)
+            .values(USER_ID, "integration-test", "jooq-user", "jOOQ User", "ACTIVE", "PLATFORM")
             .execute();
         dsl.insertInto(IAM_AUTHENTICATION_CREDENTIAL,
                 IAM_AUTHENTICATION_CREDENTIAL.USER_ID, IAM_AUTHENTICATION_CREDENTIAL.USERNAME,
-                IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, IAM_AUTHENTICATION_CREDENTIAL.STATUS)
-            .values(USER_ID, "jooq-user", TEST_PASSWORD_HASH, "ACTIVE")
+                IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, IAM_AUTHENTICATION_CREDENTIAL.STATUS,
+                IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN)
+            .values(USER_ID, "jooq-user", TEST_PASSWORD_HASH, "ACTIVE", "PLATFORM")
             .execute();
         dsl.insertInto(IAM_MEMBERSHIP,
                 IAM_MEMBERSHIP.ID, IAM_MEMBERSHIP.TENANT_ID, IAM_MEMBERSHIP.USER_ID,
-                IAM_MEMBERSHIP.STATUS, IAM_MEMBERSHIP.PERMISSION_VERSION, IAM_MEMBERSHIP.SESSION_VERSION)
-            .values(MEMBERSHIP_ID, TENANT_ID, USER_ID, "ACTIVE", 17L, 23L)
+                IAM_MEMBERSHIP.STATUS, IAM_MEMBERSHIP.PERMISSION_VERSION, IAM_MEMBERSHIP.SESSION_VERSION,
+                IAM_MEMBERSHIP.ACCOUNT_DOMAIN)
+            .values(MEMBERSHIP_ID, TENANT_ID, USER_ID, "ACTIVE", 17L, 23L, "PLATFORM")
             .execute();
         dsl.insertInto(IAM_ROLE,
                 IAM_ROLE.ID, IAM_ROLE.TENANT_ID, IAM_ROLE.ROLE_CODE, IAM_ROLE.ROLE_NAME,
@@ -889,7 +903,9 @@ class JooqPermissionAdaptersIntegrationTest {
                 .fetchSingle();
 
             var repository = new JooqRoleAdministrationRepository(
-                worker, new JooqIdentityQueryRepository(worker), () -> "stale-authorization-test");
+                worker, new JooqIdentityQueryRepository(worker),
+                new JooqRoleGrantAdministrationRepository(worker, () -> "stale-authorization-test"),
+                () -> "stale-authorization-test");
             operation = executor.submit(() -> {
                 try {
                     repository.createRole(TENANT_ID,

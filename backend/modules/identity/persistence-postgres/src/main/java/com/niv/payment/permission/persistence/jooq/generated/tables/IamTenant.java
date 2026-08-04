@@ -108,6 +108,11 @@ public class IamTenant extends TableImpl<IamTenantRecord> {
      */
     public final TableField<IamTenantRecord, Long> ROW_VERSION = createField(DSL.name("row_version"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
 
+    /**
+     * The column <code>public.iam_tenant.account_domain</code>.
+     */
+    public final TableField<IamTenantRecord, String> ACCOUNT_DOMAIN = createField(DSL.name("account_domain"), SQLDataType.VARCHAR(16).nullable(false), this, "");
+
     private IamTenant(Name alias, Table<IamTenantRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -182,7 +187,21 @@ public class IamTenant extends TableImpl<IamTenantRecord> {
 
     @Override
     public List<UniqueKey<IamTenantRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.UK_IAM_TENANT_CODE);
+        return Arrays.asList(Keys.UK_IAM_TENANT_CODE, Keys.UK_IAM_TENANT_ID_ACCOUNT_DOMAIN);
+    }
+
+    private transient IamMembershipPath _fkIamMembershipTenantDomain;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_membership</code> table, via the
+     * <code>fk_iam_membership_tenant_domain</code> key
+     */
+    public IamMembershipPath fkIamMembershipTenantDomain() {
+        if (_fkIamMembershipTenantDomain == null)
+            _fkIamMembershipTenantDomain = new IamMembershipPath(this, null, Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_TENANT_DOMAIN.getInverseKey());
+
+        return _fkIamMembershipTenantDomain;
     }
 
     private transient IamAuditEventPath _iamAuditEvent;
@@ -224,17 +243,18 @@ public class IamTenant extends TableImpl<IamTenantRecord> {
         return _iamMembershipRole;
     }
 
-    private transient IamMembershipPath _iamMembership;
+    private transient IamMembershipPath _iamMembershipTenantIdFkey;
 
     /**
      * Get the implicit to-many join path to the
-     * <code>public.iam_membership</code> table
+     * <code>public.iam_membership</code> table, via the
+     * <code>iam_membership_tenant_id_fkey</code> key
      */
-    public IamMembershipPath iamMembership() {
-        if (_iamMembership == null)
-            _iamMembership = new IamMembershipPath(this, null, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_TENANT_ID_FKEY.getInverseKey());
+    public IamMembershipPath iamMembershipTenantIdFkey() {
+        if (_iamMembershipTenantIdFkey == null)
+            _iamMembershipTenantIdFkey = new IamMembershipPath(this, null, Keys.IAM_MEMBERSHIP__IAM_MEMBERSHIP_TENANT_ID_FKEY.getInverseKey());
 
-        return _iamMembership;
+        return _iamMembershipTenantIdFkey;
     }
 
     private transient IamMenuPath _iamMenu;
@@ -307,14 +327,16 @@ public class IamTenant extends TableImpl<IamTenantRecord> {
      * <code>public.iam_user</code> table
      */
     public IamUserPath iamUser() {
-        return iamMembership().iamUser();
+        return iamMembershipTenantIdFkey().iamMembershipUserIdFkey();
     }
 
     @Override
     public List<Check<IamTenantRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("ck_iam_tenant_account_domain"), "(((account_domain)::text = ANY ((ARRAY['PLATFORM'::character varying, 'MERCHANT'::character varying, 'AGENT'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_tenant_status"), "(((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'DISABLED'::character varying, 'TERMINATED'::character varying])::text[])))", true),
-            Internal.createCheck(this, DSL.name("ck_iam_tenant_type"), "(((tenant_type)::text = ANY ((ARRAY['PLATFORM'::character varying, 'AGENT'::character varying, 'DIRECT_MERCHANT'::character varying, 'INDIRECT_MERCHANT'::character varying])::text[])))", true)
+            Internal.createCheck(this, DSL.name("ck_iam_tenant_type"), "(((tenant_type)::text = ANY ((ARRAY['PLATFORM'::character varying, 'AGENT'::character varying, 'DIRECT_MERCHANT'::character varying, 'INDIRECT_MERCHANT'::character varying])::text[])))", true),
+            Internal.createCheck(this, DSL.name("ck_iam_tenant_type_account_domain"), "(((((tenant_type)::text = 'PLATFORM'::text) AND ((account_domain)::text = 'PLATFORM'::text)) OR (((tenant_type)::text = 'AGENT'::text) AND ((account_domain)::text = 'AGENT'::text)) OR (((tenant_type)::text = ANY ((ARRAY['DIRECT_MERCHANT'::character varying, 'INDIRECT_MERCHANT'::character varying])::text[])) AND ((account_domain)::text = 'MERCHANT'::text))))", true)
         );
     }
 

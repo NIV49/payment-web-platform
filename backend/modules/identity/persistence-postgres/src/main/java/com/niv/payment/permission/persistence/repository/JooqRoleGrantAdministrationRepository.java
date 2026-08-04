@@ -1,6 +1,7 @@
 package com.niv.payment.permission.persistence.repository;
 
 import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.domain.PermissionCode;
 import com.niv.payment.permission.domain.ScopeDimension;
 import com.niv.payment.permission.domain.ScopeMode;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +40,7 @@ import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_P
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_PERMISSION_CHANGE_OUTBOX;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_ROLE;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_ROLE_GRANT;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_TENANT;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.ACTIVE;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.DISABLED;
 import static com.niv.payment.permission.persistence.repository.JooqAdministrationSupport.notFound;
@@ -46,6 +49,15 @@ import static com.niv.payment.permission.persistence.repository.JooqAdministrati
 public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort, RoleGrantWritePort {
     private static final Set<String> LEGACY_COMPATIBILITY_CODES =
         Set.of("menu:manage", "department:manage");
+    private static final Set<String> PROTECTED_PORTAL_PERMISSION_CODES = Set.of(
+        AccountDomain.PLATFORM.accessPermissionCode(),
+        AccountDomain.MERCHANT.accessPermissionCode(),
+        AccountDomain.AGENT.accessPermissionCode());
+    private static final Set<String> REPLACEABLE_PERMISSION_CODES =
+        java.util.stream.Stream.concat(
+                RoleGrantAdministrationService.GRANTABLE_CODES.stream(),
+                LEGACY_COMPATIBILITY_CODES.stream())
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
     private static final Set<String> REQUIRED_TRANSACTIONAL_PERMISSIONS = Set.of(
         "role:view", RoleGrantAdministrationService.GRANT_UPDATE_PERMISSION);
 
@@ -187,8 +199,10 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
     }
 
     RoleGrantModels.RoleGrants loadRoleGrants(long tenantId, long roleId) {
-        var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.ASSIGNABLE)
+        var role = dsl.select(IAM_ROLE.ROW_VERSION, IAM_ROLE.SYSTEM_ROLE, IAM_ROLE.ASSIGNABLE,
+                IAM_TENANT.ACCOUNT_DOMAIN)
             .from(IAM_ROLE)
+            .join(IAM_TENANT).on(IAM_TENANT.ID.eq(IAM_ROLE.TENANT_ID))
             .where(IAM_ROLE.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE.ID.eq(roleId))
                 .and(IAM_ROLE.DELETED_AT.isNull()))
@@ -197,6 +211,7 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             throw notFound("Role");
         }
         var rows = dsl.select(IAM_ROLE_GRANT.ID, IAM_ROLE_GRANT.GRANT_KEY,
+                IAM_ROLE_GRANT.STATUS,
                 IAM_ROLE_GRANT.VALID_FROM, IAM_ROLE_GRANT.VALID_UNTIL,
                 IAM_PERMISSION.PERMISSION_CODE, IAM_PERMISSION.RISK_LEVEL,
                 IAM_PERMISSION.CROSS_TENANT_MODE, IAM_PERMISSION.REQUIRED_DIMENSIONS,
@@ -208,8 +223,11 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             .leftJoin(IAM_GRANT_DIMENSION).on(IAM_GRANT_DIMENSION.GRANT_ID.eq(IAM_ROLE_GRANT.ID))
             .where(IAM_ROLE_GRANT.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE_GRANT.ROLE_ID.eq(roleId))
-                .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE))
-                .and(IAM_PERMISSION.PERMISSION_CODE.notIn(LEGACY_COMPATIBILITY_CODES)))
+                .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE)
+                    .and(IAM_PERMISSION.PERMISSION_CODE.notIn(LEGACY_COMPATIBILITY_CODES))
+                    .or(IAM_PERMISSION.PERMISSION_CODE.in(PROTECTED_PORTAL_PERMISSION_CODES))
+                    .or(IAM_ROLE_GRANT.GRANT_KEY.eq(
+                        RoleGrantAdministrationService.PROTECTED_PORTAL_GRANT_KEY))))
             .orderBy(IAM_ROLE_GRANT.GRANT_KEY, IAM_GRANT_DIMENSION.DIMENSION_CODE)
             .fetch();
         Map<Long, List<Record>> byGrant = new LinkedHashMap<>();
@@ -227,11 +245,18 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         List<RoleGrantModels.Selection> selections = new ArrayList<>();
         boolean editable = !Boolean.TRUE.equals(role.get(IAM_ROLE.SYSTEM_ROLE))
             && Boolean.TRUE.equals(role.get(IAM_ROLE.ASSIGNABLE));
+        String expectedPortalCode = expectedPortalPermissionCode(role.get(IAM_TENANT.ACCOUNT_DOMAIN));
+        int protectedPortalGrantCount = 0;
+        boolean protectedPortalGrantValid = false;
+        Set<String> observedGrantKeys = new HashSet<>();
+        Set<String> observedPermissionCodes = new HashSet<>();
         for (List<Record> grantRows : byGrant.values()) {
             Record first = grantRows.getFirst();
             String code = first.get(IAM_PERMISSION.PERMISSION_CODE);
+            editable &= observedGrantKeys.add(first.get(IAM_ROLE_GRANT.GRANT_KEY));
+            editable &= observedPermissionCodes.add(code);
             boolean hasTargets = targetedGrantIds.contains(first.get(IAM_ROLE_GRANT.ID));
-            boolean supported = RoleGrantAdministrationService.GRANTABLE_CODES.contains(code)
+            boolean safeTenantGrant = ACTIVE.equals(first.get(IAM_ROLE_GRANT.STATUS))
                 && ACTIVE.equals(first.get(IAM_PERMISSION.STATUS))
                 && "NORMAL".equals(first.get(IAM_PERMISSION.RISK_LEVEL))
                 && "SAME_TENANT_ONLY".equals(first.get(IAM_PERMISSION.CROSS_TENANT_MODE))
@@ -244,6 +269,21 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
                 && "TENANT".equals(first.get(IAM_GRANT_DIMENSION.DIMENSION_CODE))
                 && "TENANT_ALL".equals(first.get(IAM_GRANT_DIMENSION.SCOPE_MODE))
                 && !hasTargets;
+            if (PROTECTED_PORTAL_PERMISSION_CODES.contains(code)) {
+                protectedPortalGrantCount++;
+                protectedPortalGrantValid |= expectedPortalCode.equals(code)
+                    && RoleGrantAdministrationService.PROTECTED_PORTAL_GRANT_KEY.equals(
+                        first.get(IAM_ROLE_GRANT.GRANT_KEY))
+                    && safeTenantGrant;
+                continue;
+            }
+            if (RoleGrantAdministrationService.PROTECTED_PORTAL_GRANT_KEY.equals(
+                    first.get(IAM_ROLE_GRANT.GRANT_KEY))) {
+                editable = false;
+                continue;
+            }
+            boolean supported = RoleGrantAdministrationService.GRANTABLE_CODES.contains(code)
+                && safeTenantGrant;
             editable &= supported;
             if (first.get(IAM_GRANT_DIMENSION.DIMENSION_CODE) != null) {
                 try {
@@ -256,6 +296,7 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
                 }
             }
         }
+        editable &= protectedPortalGrantCount == 1 && protectedPortalGrantValid;
         selections.sort(Comparator.comparing(item -> item.permission().value()));
         return new RoleGrantModels.RoleGrants(roleId, role.get(IAM_ROLE.ROW_VERSION), editable, selections);
     }
@@ -360,7 +401,11 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
             .set(IAM_ROLE_GRANT.ROW_VERSION, IAM_ROLE_GRANT.ROW_VERSION.plus(1L))
             .where(IAM_ROLE_GRANT.TENANT_ID.eq(tenantId)
                 .and(IAM_ROLE_GRANT.ROLE_ID.eq(roleId))
-                .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE)))
+                .and(IAM_ROLE_GRANT.STATUS.eq(ACTIVE))
+                .and(IAM_ROLE_GRANT.PERMISSION_ID.in(
+                    dsl.select(IAM_PERMISSION.ID)
+                        .from(IAM_PERMISSION)
+                        .where(IAM_PERMISSION.PERMISSION_CODE.in(REPLACEABLE_PERMISSION_CODES)))))
             .execute();
 
         for (RoleGrantModels.Selection selection : requested) {
@@ -404,6 +449,58 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
                 .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, ScopeDimension.TENANT.name())
                 .set(IAM_GRANT_DIMENSION.SCOPE_MODE, ScopeMode.TENANT_ALL.name())
                 .execute();
+        }
+    }
+
+    void insertProtectedPortalGrant(long tenantId, long roleId, long actorMembershipId) {
+        String accountDomain = dsl.select(IAM_TENANT.ACCOUNT_DOMAIN)
+            .from(IAM_TENANT)
+            .where(IAM_TENANT.ID.eq(tenantId))
+            .fetchOne(IAM_TENANT.ACCOUNT_DOMAIN);
+        String permissionCode = expectedPortalPermissionCode(accountDomain);
+        Long permissionId = dsl.select(IAM_PERMISSION.ID)
+            .from(IAM_PERMISSION)
+            .where(IAM_PERMISSION.PERMISSION_CODE.eq(permissionCode)
+                .and(IAM_PERMISSION.STATUS.eq(ACTIVE))
+                .and(IAM_PERMISSION.RISK_LEVEL.eq("NORMAL"))
+                .and(IAM_PERMISSION.CROSS_TENANT_MODE.eq("SAME_TENANT_ONLY"))
+                .and(IAM_PERMISSION.REQUIRED_DIMENSIONS.eq(new String[]{"TENANT"}))
+                .and(IAM_PERMISSION.REQUIRES_STEP_UP.isFalse())
+                .and(IAM_PERMISSION.REQUIRES_APPROVAL.isFalse()))
+            .fetchOne(IAM_PERMISSION.ID);
+        if (permissionId == null) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "Protected backoffice access permission is unavailable");
+        }
+        long grantId = support.nextId();
+        dsl.insertInto(IAM_ROLE_GRANT)
+            .set(IAM_ROLE_GRANT.ID, grantId)
+            .set(IAM_ROLE_GRANT.TENANT_ID, tenantId)
+            .set(IAM_ROLE_GRANT.ROLE_ID, roleId)
+            .set(IAM_ROLE_GRANT.PERMISSION_ID, permissionId)
+            .set(IAM_ROLE_GRANT.GRANT_KEY, RoleGrantAdministrationService.PROTECTED_PORTAL_GRANT_KEY)
+            .set(IAM_ROLE_GRANT.STATUS, ACTIVE)
+            .set(IAM_ROLE_GRANT.CREATED_BY, actorMembershipId)
+            .set(IAM_ROLE_GRANT.UPDATED_BY, actorMembershipId)
+            .execute();
+        dsl.insertInto(IAM_GRANT_DIMENSION)
+            .set(IAM_GRANT_DIMENSION.ID, support.nextId())
+            .set(IAM_GRANT_DIMENSION.GRANT_ID, grantId)
+            .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, ScopeDimension.TENANT.name())
+            .set(IAM_GRANT_DIMENSION.SCOPE_MODE, ScopeMode.TENANT_ALL.name())
+            .execute();
+    }
+
+    private static String expectedPortalPermissionCode(String accountDomain) {
+        if (accountDomain == null) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "Tenant account domain is unavailable");
+        }
+        try {
+            return AccountDomain.valueOf(accountDomain).accessPermissionCode();
+        } catch (IllegalArgumentException invalidDomain) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "Tenant account domain is invalid");
         }
     }
 
