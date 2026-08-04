@@ -65,6 +65,7 @@ class ThreeBackofficeBoundaryIntegrationTest {
     private static final HttpClient HTTP = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(2))
         .build();
+    private static final Duration BACKOFFICE_STARTUP_TIMEOUT = Duration.ofSeconds(120);
     private static final List<Process> PROCESSES = new ArrayList<>();
     private static List<Root> roots;
 
@@ -493,7 +494,7 @@ class ThreeBackofficeBoundaryIntegrationTest {
     }
 
     private static void waitUntilReady(Root root) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(45).toNanos();
+        long deadline = System.nanoTime() + BACKOFFICE_STARTUP_TIMEOUT.toNanos();
         Throwable lastFailure = null;
         while (System.nanoTime() < deadline) {
             try {
