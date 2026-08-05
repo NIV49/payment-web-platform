@@ -23,6 +23,9 @@ public final class AdminApiPermissionPolicy {
 
     public boolean isPublic(String method, String path) {
         return ("POST".equals(method) && "/api/auth/login".equals(path))
+            || ("GET".equals(method) && ("/api/auth/oidc/start".equals(path)
+                || "/api/auth/oidc/callback".equals(path)))
+            || ("POST".equals(method) && "/api/auth/oidc/handoff".equals(path))
             || ("GET".equals(method) && "/api/health".equals(path));
     }
 

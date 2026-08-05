@@ -11,7 +11,7 @@
 2. **Target Prototype Contract**：本轮原型认可的边界和不变量；
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
-当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 的 Host、身份版本、provisioning、生命周期 Outbox 和用户名 expand 数据基础，但运行时 OIDC、CSRF、back-channel logout、身份版本校验、MFA 和生命周期 relay 尚未完成。PLATFORM 保留现有 IAM 管理能力，MERCHANT/AGENT 当前仅开放登录、退出、当前用户、动态菜单、权限码和健康检查。
+当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 的 Host、身份版本、provisioning、生命周期 Outbox 和用户名 expand 数据基础；PLATFORM 已实现默认关闭的 OIDC BFF 协议骨架和生产认证模式门禁，MERCHANT/AGENT 尚未接入。CSRF、back-channel logout、身份版本逐请求校验、真实 Keycloak 联调、MFA 和生命周期 relay 仍未完成，因此整体仍是生产 NO-GO。
 
 ## IAM-001 已实现边界
 
@@ -276,7 +276,7 @@ offset 使用 long 计算；当 `(page - 1) * pageSize` 超过当前仓储 int o
 
 ## 1.7 已实现认证和导航接口
 
-### POST `/auth/login`
+### POST `/auth/login`（仅 local profile）
 
 Request：
 
@@ -906,10 +906,56 @@ V23__attach_account_domain_username_constraint.sql
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、递归拒绝全部核心/fallback/local canonical 冲突、退出/换用户清旧路由、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
 | Flyway | V1→V23 fresh/upgrade 可运行；V21-V23 覆盖身份基础、跨域原子约束、事件不可变和用户名 expand | 旧 username 约束 contract、生产 migration Job/审批和备份恢复演练未完成；V22 非事务失败需检查 invalid index |
+| PLATFORM OIDC BFF | Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff 和 RP-Initiated Logout URL 已实现，默认关闭 | 尚未完成真实 Keycloak、CSRF、back-channel logout、身份版本撤销、前端和三 Realm 联调，不得开放生产流量 |
 
-## 2.3 当前尚未实现
+## 2.3 PLATFORM OIDC BFF 契约
 
-- 外部 IdP/OIDC；
+生产 profile 必须满足 `payment.identity.local-login-enabled=false` 且 `payment.oidc.enabled=true`；`local` profile 必须恰好相反。两种认证模式同时开启、同时关闭，或在非 `local` profile 开启密码入口时，应用启动失败。`POST /api/auth/login` 只由 `local` profile 注册。
+
+### GET `/auth/oidc/start`
+
+- 不接受 `tenantId`、realm、portal、returnHost 或 redirect URI 参数；
+- 服务端只使用请求的 canonical Host 查询 ACTIVE `iam_tenant_entry_host`，并复核 Tenant 状态和组合根账号域；
+- 成功返回 `302 Location` 到本服务固定 Keycloak Realm/client 的 authorization endpoint；
+- authorization request 固定包含 `response_type=code`、`scope=openid`、S256 PKCE、随机 state/nonce、目标 ACR 和 essential `acr/auth_time` claims；
+- state 对应的 Host、tenant、nonce 和 code verifier 只存服务端账号域 Redis namespace，默认 TTL 5 分钟。
+
+### GET `/auth/oidc/callback`
+
+- 固定参数为 `code`、`state` 或 IdP `error`；不读取也不校验 Origin，因为这是 OIDC protocol callback；
+- state 在 token exchange 前原子单次消费，失败和 IdP error 同样不能重放；
+- confidential client 在服务端 token endpoint 兑换 code，并发送原 PKCE verifier；
+- ID Token 必须通过固定 JWKS 的 RS256 签名及时间校验，并精确匹配 issuer、client audience/azp、nonce、required ACR、subject、auth_time 和 sid；
+- 成功只生成默认 60 秒、单次消费、绑定目标 Host 的 opaque handoff，并以 `303` 重定向到 `https://{entryHost}/auth/oidc/callback?handoff=...`；不签发应用 Cookie。
+
+### POST `/auth/oidc/handoff`
+
+请求严格为：
+
+```json
+{ "handoff": "opaque-value" }
+```
+
+该浏览器端点要求目标入口的可信 Origin，并再次以请求 Host 复核 handoff；错误 Host 的尝试也会消费 handoff。成功后才以 `issuer + subject + tenant entry` 精确查找已邀请、ACTIVE、`PROVISIONED` 且持有本端 canonical portal Grant 的 User/Membership，签发本端 HttpOnly Cookie，并只返回 `cookie-session` marker。邮箱和 username 不参与身份映射。
+
+### POST `/auth/logout`
+
+要求有效本端 Cookie Session 和可信 Origin。应用先清除本地 Session，再返回标准 RP-Initiated Logout URL：
+
+```json
+{
+  "code": 0,
+  "data": { "logoutUrl": "https://idp.example/realms/PLATFORM/protocol/openid-connect/logout?..." }
+}
+```
+
+ID Token 只保存在服务端 Session，用于标准 `id_token_hint`，不进入 localStorage/sessionStorage。前端必须导航至返回 URL 才完成 Realm logout。S4 接入独立 CSRF token 前，此端点不得作为生产完成证据。
+
+OIDC 认证失败统一返回 HTTP 401、code `40103`、error `OIDC_LOGIN_REJECTED`，并与其他 API 一样返回 `traceId`；不披露 User、Membership、Host 注册状态或具体 token claim。
+
+## 2.4 当前尚未实现
+
+- MERCHANT/AGENT OIDC 组合根、真实 Keycloak 三 Realm 联调和配置即代码；
 - MFA、step-up、MFA 重置审批；
 - 生产级的新建用户密码激活、邀请、首次改密、忘记密码和管理员重置；
 - 超出本文精确目录、数据维度或审批规则的通用 RoleGrant 管理；

@@ -31,11 +31,16 @@ import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.RoleGrantAdministrationService;
 import com.niv.payment.permission.service.RoleConfigurationAdministrationService;
+import com.niv.payment.identity.oidc.OidcBffConfiguration;
+import com.niv.payment.identity.oidc.OidcClientCredential;
+import com.niv.payment.identity.oidc.OidcRequestTrace;
 import org.jooq.DSLContext;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import tools.jackson.databind.ObjectMapper;
@@ -43,7 +48,34 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.Duration;
 
 @Configuration
+@org.springframework.context.annotation.Import(OidcBffConfiguration.class)
 public class IdentityConfiguration {
+    @Bean
+    AuthenticationModeGuard authenticationModeGuard(
+        Environment environment,
+        @Value("${payment.identity.local-login-enabled:false}") boolean localLoginEnabled,
+        @Value("${payment.oidc.enabled:false}") boolean oidcEnabled) {
+        return new AuthenticationModeGuard(
+            environment.acceptsProfiles(Profiles.of("local")), localLoginEnabled, oidcEnabled);
+    }
+
+    @Bean
+    AccountDomain accountDomain() {
+        return AccountDomain.PLATFORM;
+    }
+
+    @Bean
+    OidcRequestTrace oidcRequestTrace() {
+        return RequestTrace::current;
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "payment.oidc", name = "enabled", havingValue = "true")
+    OidcClientCredential oidcClientCredential(Environment environment) {
+        return new OidcClientCredential(environment.getRequiredProperty(
+            "PAYMENT_PLATFORM_OIDC_CLIENT_" + "SECRET"));
+    }
+
     @Bean
     JooqCredentialRepository credentialRepository(DSLContext dsl) {
         return new JooqCredentialRepository(dsl);
@@ -157,11 +189,16 @@ public class IdentityConfiguration {
     AuthenticationService authenticationService(JooqCredentialRepository repository,
                                                 BCryptPasswordEncoder encoder,
                                                 StringRedisTemplate redis,
-                                                StpLogic stpLogic) {
+                                                SaTokenSessionIssuer sessionIssuer) {
         return new AuthenticationService(AccountDomain.PLATFORM, repository, encoder::matches,
             new RedisLoginAttemptLimiter(AccountDomain.PLATFORM, redis, 30, 5, Duration.ofMinutes(15)),
-            new SaTokenSessionIssuer(stpLogic, AccountDomain.PLATFORM),
+            sessionIssuer,
             encoder.encode("dummy-password-not-used"));
+    }
+
+    @Bean
+    SaTokenSessionIssuer sessionIssuer(StpLogic stpLogic) {
+        return new SaTokenSessionIssuer(stpLogic, AccountDomain.PLATFORM);
     }
 
     @Bean

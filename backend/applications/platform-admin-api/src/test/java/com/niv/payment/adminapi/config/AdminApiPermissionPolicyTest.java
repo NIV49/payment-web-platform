@@ -14,6 +14,9 @@ class AdminApiPermissionPolicyTest {
     @Test
     void exposesOnlyThePostLoginEndpointWithoutASession() {
         assertThat(policy.isPublic("POST", "/api/auth/login")).isTrue();
+        assertThat(policy.isPublic("GET", "/api/auth/oidc/start")).isTrue();
+        assertThat(policy.isPublic("GET", "/api/auth/oidc/callback")).isTrue();
+        assertThat(policy.isPublic("POST", "/api/auth/oidc/handoff")).isTrue();
         assertThat(policy.isPublic("GET", "/api/health")).isTrue();
         assertThat(policy.isPublic("GET", "/api/auth/login")).isFalse();
     }

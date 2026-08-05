@@ -1,6 +1,11 @@
 package com.niv.payment.adminapi;
 
+import com.niv.payment.identity.oidc.JooqOidcIdentityRepository;
+import com.niv.payment.identity.oidc.JooqTrustedEntryResolver;
+import com.niv.payment.permission.domain.AccountDomain;
 import org.flywaydb.core.Flyway;
+import org.jooq.SQLDialect;
+import org.jooq.impl.DSL;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -196,6 +201,59 @@ class ProductionIdentityFoundationMigrationTest {
             SELECT count(*) FROM information_schema.tables
              WHERE table_schema='public' AND table_name='iam_tenant_entry_host'
             """)).isZero();
+    }
+
+    @Test
+    void oidcLookupUsesTrustedHostAndExactIssuerSubjectWithoutRequiringAPasswordHash() throws Exception {
+        flyway(null).migrate();
+        execute("""
+            INSERT INTO iam_tenant(
+                id,tenant_code,tenant_name,tenant_type,status,account_domain
+            ) VALUES(23001,'platform-oidc','Platform OIDC','PLATFORM','ACTIVE','PLATFORM');
+            INSERT INTO iam_user(
+                id,idp_issuer,idp_subject,display_name,status,account_domain,
+                idp_provisioning_status
+            ) VALUES(
+                23002,'https://idp.example.test/realms/PLATFORM','platform-subject-23002',
+                'Platform OIDC User','ACTIVE','PLATFORM','PROVISIONED'
+            );
+            INSERT INTO iam_authentication_credential(
+                user_id,username,password_hash,status,account_domain
+            ) VALUES(23002,'platform-oidc-user',NULL,'ACTIVE','PLATFORM');
+            INSERT INTO iam_membership(
+                id,tenant_id,user_id,department_id,status,account_domain
+            ) VALUES(23003,23001,23002,NULL,'ACTIVE','PLATFORM');
+            INSERT INTO iam_role(
+                id,tenant_id,role_code,role_name,applicable_tenant_type,
+                assignable,system_role,status
+            ) VALUES(23004,23001,'oidc-admin','OIDC Administrator','PLATFORM',false,true,'ACTIVE');
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(23001,23003,23004,23003);
+            INSERT INTO iam_role_grant(
+                id,tenant_id,role_id,permission_id,grant_key,status,created_by,updated_by
+            ) SELECT 23005,23001,23004,id,'system-backoffice-access','ACTIVE',23003,23003
+                FROM iam_permission WHERE permission_code='backoffice:platform-access';
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES(23006,23005,'TENANT','TENANT_ALL');
+            INSERT INTO iam_tenant_entry_host(entry_host,account_domain,tenant_id,status)
+            VALUES('ops.example.test','PLATFORM',23001,'ACTIVE');
+            """);
+
+        try (Connection connection = connection()) {
+            var dsl = DSL.using(connection, SQLDialect.POSTGRES);
+            var entries = new JooqTrustedEntryResolver(dsl);
+            var identities = new JooqOidcIdentityRepository(dsl);
+
+            var entry = entries.findActive("ops.example.test").orElseThrow();
+            assertThat(entry.accountDomain()).isEqualTo(AccountDomain.PLATFORM);
+            assertThat(entry.tenantId()).isEqualTo(23001L);
+            var account = identities.findActive(AccountDomain.PLATFORM, 23001L,
+                "https://idp.example.test/realms/PLATFORM", "platform-subject-23002").orElseThrow();
+            assertThat(account.userId()).isEqualTo(23002L);
+            assertThat(account.membershipId()).isEqualTo(23003L);
+            assertThat(identities.findActive(AccountDomain.PLATFORM, 23001L,
+                "https://idp.example.test/realms/PLATFORM", "wrong-subject")).isEmpty();
+        }
     }
 
     private static String currentSuccessfulVersion() throws Exception {

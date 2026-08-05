@@ -66,6 +66,22 @@ payment:
   identity:
     account-domain: PLATFORM
     login-type: platform-admin
+    local-login-enabled: false
+  oidc:
+    enabled: ${PAYMENT_PLATFORM_OIDC_ENABLED:false}
+    issuer: ${PAYMENT_PLATFORM_OIDC_ISSUER:}
+    authorization-uri: ${PAYMENT_PLATFORM_OIDC_AUTHORIZATION_URI:}
+    token-uri: ${PAYMENT_PLATFORM_OIDC_TOKEN_URI:}
+    jwk-set-uri: ${PAYMENT_PLATFORM_OIDC_JWK_SET_URI:}
+    end-session-uri: ${PAYMENT_PLATFORM_OIDC_END_SESSION_URI:}
+    client-id: ${PAYMENT_PLATFORM_OIDC_CLIENT_ID:}
+    redirect-uri: ${PAYMENT_PLATFORM_OIDC_REDIRECT_URI:}
+    post-logout-redirect-uri: ${PAYMENT_PLATFORM_OIDC_POST_LOGOUT_REDIRECT_URI:}
+    required-acr: ${PAYMENT_PLATFORM_OIDC_REQUIRED_ACR:2}
+    public-scheme: ${PAYMENT_PLATFORM_PUBLIC_SCHEME:https}
+    frontend-callback-path: /auth/oidc/callback
+    transaction-ttl: PT5M
+    handoff-ttl: PT1M
 
 logging:
   level:

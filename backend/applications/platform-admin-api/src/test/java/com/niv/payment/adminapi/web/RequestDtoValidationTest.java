@@ -29,9 +29,9 @@ class RequestDtoValidationTest {
 
     @Test
     void loginFieldsHaveExplicitUpperBounds() {
-        assertThat(validator.validate(new AuthUserMenuController.LoginRequest(
+        assertThat(validator.validate(new LocalAuthController.LoginRequest(
             "u".repeat(101), "valid"))).isNotEmpty();
-        assertThat(validator.validate(new AuthUserMenuController.LoginRequest(
+        assertThat(validator.validate(new LocalAuthController.LoginRequest(
             "valid", "p".repeat(257)))).isNotEmpty();
     }
 

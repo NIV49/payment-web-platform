@@ -1,7 +1,6 @@
 package com.niv.payment.adminapi.web;
 
 import com.niv.payment.permission.domain.AuthorizationSubject;
-import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.backoffice.VbenMenuContract;
 import com.niv.payment.permission.backoffice.VbenMenuTreeMapper;
 import com.niv.payment.permission.port.DepartmentAdministrationPort;
@@ -9,7 +8,6 @@ import com.niv.payment.permission.port.IdentityQueryPort;
 import com.niv.payment.permission.port.MenuAdministrationPort;
 import com.niv.payment.permission.port.RoleAdministrationPort;
 import com.niv.payment.permission.port.UserAdministrationPort;
-import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.IdentityModels;
 import org.junit.jupiter.api.Test;
@@ -23,9 +21,6 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AuthUserMenuControllerTest {
-    private static final String SUPPORTED_DUMMY_HASH =
-        "$2a$12$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
-
     @Test
     void allMenusDropsOnlyUnsafeBranchesAndKeepsSafeSiblingsWithTheirAncestors() {
         List<IdentityModels.Menu> storedMenus = List.of(
@@ -40,7 +35,7 @@ class AuthUserMenuControllerTest {
                 "{\"title\":\"system.child.title\"}")
         );
         AuthUserMenuController controller = new AuthUserMenuController(
-            authentication(), identities(storedMenus), menuMapper());
+            identities(storedMenus), menuMapper());
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(AuthorizationSubject.class.getName(),
             new AuthorizationSubject(100, 1_000, 1, 10L, 0, 0, false));
@@ -63,7 +58,7 @@ class AuthUserMenuControllerTest {
                 "{\"title\":\"page.dashboard.workspace\"}")
         );
         AuthUserMenuController controller = new AuthUserMenuController(
-            authentication(), identities(storedMenus), menuMapper());
+            identities(storedMenus), menuMapper());
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(AuthorizationSubject.class.getName(),
             new AuthorizationSubject(100, 1_000, 1, 10L, 0, 0, false));
@@ -78,7 +73,7 @@ class AuthUserMenuControllerTest {
         IdentityModels.CurrentUser currentUser = new IdentityModels.CurrentUser(
             100, "admin", "Platform Administrator", "", List.of("platform-admin"), "/dashboard", true);
         AuthUserMenuController controller = new AuthUserMenuController(
-            authentication(), identities(List.of(), Optional.of(currentUser)),
+            identities(List.of(), Optional.of(currentUser)),
             menuMapper());
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(AuthorizationSubject.class.getName(),
@@ -102,7 +97,7 @@ class AuthUserMenuControllerTest {
                 "{\"title\":\"system.user.title\"}")
         );
         AuthUserMenuController controller = new AuthUserMenuController(
-            authentication(), identities(storedMenus, Optional.of(currentUser)),
+            identities(storedMenus, Optional.of(currentUser)),
             menuMapper());
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute(AuthorizationSubject.class.getName(),
@@ -126,19 +121,6 @@ class AuthUserMenuControllerTest {
 
     private static VbenMenuTreeMapper menuMapper() {
         return new VbenMenuTreeMapper(new ObjectMapper(), new VbenMenuContract("/test/index"));
-    }
-
-    private static AuthenticationService authentication() {
-        return new AuthenticationService(
-            AccountDomain.PLATFORM,
-            (username, domain) -> Optional.empty(),
-            (raw, encoded) -> false,
-            new AuthenticationService.LoginAttemptLimiter() {
-                @Override public void acquire(String clientKey, String normalizedUsername) { }
-                @Override public void recordSuccess(String clientKey, String normalizedUsername) { }
-            },
-            account -> new AuthenticationService.LoginSession("unused"),
-            SUPPORTED_DUMMY_HASH);
     }
 
     private static IdentityAdministrationService identities(List<IdentityModels.Menu> menus) {

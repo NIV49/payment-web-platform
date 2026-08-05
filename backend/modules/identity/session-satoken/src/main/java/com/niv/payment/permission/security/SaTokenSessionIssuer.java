@@ -34,6 +34,32 @@ public final class SaTokenSessionIssuer implements AuthenticationService.Session
         return new AuthenticationService.LoginSession(stpLogic.getTokenValue());
     }
 
+    public AuthenticationService.LoginSession loginFederated(FederatedSessionPrincipal principal) {
+        if (principal.accountDomain() != accountDomain) {
+            throw new IllegalArgumentException("Federated account domain does not match the session realm");
+        }
+        stpLogic.login(principal.membershipId());
+        SaSession session = stpLogic.getSession();
+        session.set(SessionAttributeNames.ACCOUNT_DOMAIN, accountDomain.name());
+        session.set(SessionAttributeNames.USER_ID, principal.userId());
+        session.set(SessionAttributeNames.MEMBERSHIP_ID, principal.membershipId());
+        session.set(SessionAttributeNames.TENANT_ID, principal.tenantId());
+        session.set(SessionAttributeNames.DEPARTMENT_ID, principal.departmentId());
+        session.set(SessionAttributeNames.PERMISSION_VERSION, principal.permissionVersion());
+        session.set(SessionAttributeNames.SESSION_VERSION, principal.sessionVersion());
+        session.set(SessionAttributeNames.IDENTITY_VERSION, principal.identityVersion());
+        session.set(SessionAttributeNames.ENTRY_HOST, principal.entryHost());
+        session.set(SessionAttributeNames.ISSUER, principal.issuer());
+        session.set(SessionAttributeNames.SUBJECT, principal.subject());
+        session.set(SessionAttributeNames.OIDC_SESSION_ID, principal.oidcSessionId());
+        session.set(SessionAttributeNames.AUTH_TIME, principal.authTime().getEpochSecond());
+        session.set(SessionAttributeNames.ACR, principal.acr());
+        session.set(SessionAttributeNames.OIDC_ID_ASSERTION, principal.idToken());
+        session.set(SessionAttributeNames.STEP_UP_AT, null);
+        session.set(SessionAttributeNames.STEP_UP_VERIFIED, false);
+        return new AuthenticationService.LoginSession(stpLogic.getTokenValue());
+    }
+
     @Override
     public void logout() {
         stpLogic.logout();
