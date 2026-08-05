@@ -132,7 +132,7 @@ POST /api/auth/login
   -> account-domain-specific HttpOnly Cookie
 ```
 
-登录请求只接受 username/password；账号域由 composition root 注入 `AuthenticationService`，不能由 body/query/header 选择。登录成功把 `accountDomain/userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/identityVersion/stepUpVerified/requestProof` 写入 Sa-Token session。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要。Session bridge 精确匹配 account domain、tenant、membership、user、credential，要求四者均为 `ACTIVE`，逐请求比较 permissionVersion、sessionVersion 和 identityVersion；本地会话继续要求可登录的 BCrypt 摘要，外部会话允许空摘要但必须精确匹配当前 `issuer + subject`，且 HTTP PEP 复核 `entryHost`。任一域、映射或版本失效时，下一个已认证请求返回 401 `SESSION_INVALID` 并清 Cookie。
+本地登录请求只接受 username/password；账号域由 composition root 注入 `AuthenticationService`，不能由 body/query/header 选择。登录成功把 `accountDomain/userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/identityVersion/requestProof` 写入 Sa-Token session；外部登录另写入 Host、issuer、subject、OIDC Session 和初始为空的 `stepUpAt`。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要。Session bridge 精确匹配 account domain、tenant、membership、user、credential，要求四者均为 `ACTIVE`，逐请求比较 permissionVersion、sessionVersion 和 identityVersion；本地会话继续要求可登录的 BCrypt 摘要，外部会话允许空摘要但必须精确匹配当前 `issuer + subject`，且 HTTP PEP 复核 `entryHost`。`stepUpVerified` 不从永久 boolean 读取，而是每次按 UTC 时钟校验 `stepUpAt` 是否在最近 10 分钟。任一域、映射或版本失效时，下一个已认证请求返回 401 `SESSION_INVALID` 并清 Cookie。
 
 Sa-Token 配置：PLATFORM/MERCHANT/AGENT 分别使用 `platform-admin`/`merchant-admin`/`agent-admin` login type 和 `PAYMENT_PLATFORM_SESSION`/`PAYMENT_MERCHANT_SESSION`/`PAYMENT_AGENT_SESSION` Cookie；均为 8 小时总超时、30 分钟 active timeout、禁止并发共享、只读 Cookie、不读 Header/Body、HttpOnly、SameSite Strict。生产环境必须启用 Secure Cookie。
 
@@ -390,7 +390,7 @@ cd backend
 - `meta_json` 已有容器、深度、key/string 和总 value 硬上限，外链字段也按菜单类型隔离；新增字段仍必须先定义跨端语义和测试，不得把任意 JSON 当成无约束扩展口。
 - `SystemAdministrationController` 同时承担多资源 DTO/映射，继续扩展会形成浅而宽的入口层。
 - Role、Department、Menu 与 User 管理写入已统一执行 optimistic version 契约；Local fixture 仍不是生产 provisioning；命中 V8 预留 footprint 冲突的历史库需要人工前向迁移，无关业务数据不受 V8 影响。
-- 角色 `menuIds` 只是导航/展示，BUTTON authCode 只是目录展示绑定；统一角色配置 UI/API 仍分别写 `role_menu` 与 RoleGrant，不从任一方推导另一方。RoleGrant 写在生产默认受 legacy cutover 闸门禁用，N-1 清退、正式审批和演练完成前不得打开；PLATFORM OIDC 仍缺真实 Keycloak 和生命周期 relay，MERCHANT/AGENT 尚未接入；MFA/step-up、可信审批证据、关系数据权限、审计拒绝/登录失败和生产级可观测性仍是明确阻断项。
+- 角色 `menuIds` 只是导航/展示，BUTTON authCode 只是目录展示绑定；统一角色配置 UI/API 仍分别写 `role_menu` 与 RoleGrant，不从任一方推导另一方。RoleGrant 写在生产默认受 legacy cutover 闸门禁用，N-1 清退、正式审批和演练完成前不得打开；三端 OIDC 与 step-up 协议已接入，但仍缺真实 Keycloak、生命周期 relay、MFA 恢复、可信审批证据、关系数据权限、审计拒绝/登录失败和生产级可观测性。
 - 资金权限核心已有模型和测试，但不得在完成 [迁移计划](../permission/09-migration-plan.md) 的门禁前直接接入真实资金写路径。
 
 ## 11. 改动检查清单

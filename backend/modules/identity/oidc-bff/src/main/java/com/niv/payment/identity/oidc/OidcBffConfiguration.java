@@ -99,6 +99,25 @@ public class OidcBffConfiguration {
     }
 
     @Bean
+    OidcStepUpSession oidcStepUpSession(AccountDomain accountDomain, StpLogic stpLogic) {
+        return new OidcStepUpSession(accountDomain, stpLogic);
+    }
+
+    @Bean
+    OidcStepUpFlowService oidcStepUpFlowService(
+        AccountDomain accountDomain,
+        JooqTrustedEntryResolver entries,
+        SpringOidcClient client,
+        RedisOidcStateStore state,
+        OidcStepUpSession sessions,
+        @Value("${payment.oidc.public-scheme:https}") String publicScheme,
+        @Value("${payment.oidc.frontend-callback-path:/auth/oidc/callback}") String callbackPath) {
+        return new OidcStepUpFlowService(accountDomain, entries, client, client, state, state,
+            sessions, Clock.systemUTC(), new SecureOpaqueValueGenerator(new SecureRandom()),
+            publicScheme, callbackPath);
+    }
+
+    @Bean
     OidcSessionLogoutService oidcSessionLogoutService(
         StpLogic stpLogic, SpringOidcClient client, OidcClientSettings settings) {
         return new OidcSessionLogoutService(stpLogic, client, settings);

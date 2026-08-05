@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   logoutApi: vi.fn(),
   notificationSuccess: vi.fn(),
   oidcHandoffApi: vi.fn(),
+  oidcStepUpHandoffApi: vi.fn(),
+  oidcStepUpStartApi: vi.fn(),
   router: undefined as unknown as ReturnType<typeof createRouter>,
 }));
 
@@ -41,6 +43,8 @@ vi.mock('@payment/backoffice-runtime/api', () => ({
   loginApi: mocks.loginApi,
   logoutApi: mocks.logoutApi,
   oidcHandoffApi: mocks.oidcHandoffApi,
+  oidcStepUpHandoffApi: mocks.oidcStepUpHandoffApi,
+  oidcStepUpStartApi: mocks.oidcStepUpStartApi,
 }));
 
 vi.mock('@payment/backoffice-runtime/locales', () => ({
@@ -98,9 +102,17 @@ describe('authentication session generation', () => {
     mocks.logoutApi.mockReset();
     mocks.notificationSuccess.mockReset();
     mocks.oidcHandoffApi.mockReset();
+    mocks.oidcStepUpHandoffApi.mockReset();
+    mocks.oidcStepUpStartApi.mockReset();
     mocks.loginApi.mockResolvedValue(cookieLoginResult());
     mocks.logoutApi.mockResolvedValue(undefined);
     mocks.oidcHandoffApi.mockResolvedValue(cookieLoginResult());
+    mocks.oidcStepUpHandoffApi.mockResolvedValue({
+      stepUpAt: '2026-08-05T04:00:00Z',
+    });
+    mocks.oidcStepUpStartApi.mockResolvedValue({
+      redirectUrl: 'https://idp.example.test/step-up',
+    });
   });
 
   it('uses one login request while authentication is in flight', async () => {
@@ -221,5 +233,15 @@ describe('authentication session generation', () => {
     expect(result.userInfo?.username).toBe('federated');
     expect(useAccessStore().accessToken).toBe(COOKIE_SESSION_MARKER);
     expect(useAccessStore().accessCodes).toEqual(['merchant:view']);
+  });
+
+  it('redeems an independent oidc step-up transaction', async () => {
+    const authStore = useAuthStore();
+
+    await expect(
+      authStore.redeemOidcStepUp('step-up-handoff'),
+    ).resolves.toEqual({ stepUpAt: '2026-08-05T04:00:00Z' });
+
+    expect(mocks.oidcStepUpHandoffApi).toHaveBeenCalledWith('step-up-handoff');
   });
 });

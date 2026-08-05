@@ -24,6 +24,8 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
         Map.entry("/api/auth/oidc/start", Set.of("GET")),
         Map.entry("/api/auth/oidc/callback", Set.of("GET")),
         Map.entry("/api/auth/oidc/handoff", Set.of("POST")),
+        Map.entry("/api/auth/oidc/step-up/start", Set.of("POST")),
+        Map.entry("/api/auth/oidc/step-up/handoff", Set.of("POST")),
         Map.entry(BACKCHANNEL_LOGOUT_PATH, Set.of("POST")),
         Map.entry("/api/user/info", Set.of("GET")),
         Map.entry("/api/auth/codes", Set.of("GET")),

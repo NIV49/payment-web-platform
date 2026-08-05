@@ -13,7 +13,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 public final class RedisOidcStateStore implements OidcFlowService.LoginTransactionStore,
-    OidcFlowService.HandoffStore {
+    OidcFlowService.HandoffStore, OidcStepUpFlowService.TransactionStore,
+    OidcStepUpFlowService.HandoffStore {
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
     private final String namespace;
@@ -47,6 +48,26 @@ public final class RedisOidcStateStore implements OidcFlowService.LoginTransacti
     @Override
     public Optional<OidcFlowService.LoginHandoff> takeHandoff(String code) {
         return take(key("handoff", code), OidcFlowService.LoginHandoff.class);
+    }
+
+    @Override
+    public void putStepUpTransaction(String state, OidcStepUpFlowService.StepUpTransaction transaction) {
+        put(key("step-up-transaction", state), transaction, transactionTtl);
+    }
+
+    @Override
+    public Optional<OidcStepUpFlowService.StepUpTransaction> takeStepUpTransaction(String state) {
+        return take(key("step-up-transaction", state), OidcStepUpFlowService.StepUpTransaction.class);
+    }
+
+    @Override
+    public void putStepUpHandoff(String code, OidcStepUpFlowService.StepUpHandoff handoff) {
+        put(key("step-up-handoff", code), handoff, handoffTtl);
+    }
+
+    @Override
+    public Optional<OidcStepUpFlowService.StepUpHandoff> takeStepUpHandoff(String code) {
+        return take(key("step-up-handoff", code), OidcStepUpFlowService.StepUpHandoff.class);
     }
 
     private void put(String key, Object value, Duration ttl) {

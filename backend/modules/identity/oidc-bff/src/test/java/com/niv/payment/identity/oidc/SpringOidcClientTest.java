@@ -47,6 +47,18 @@ class SpringOidcClientTest {
     }
 
     @Test
+    void stepUpAuthorizationForcesFreshAuthentication() {
+        SpringOidcClient client = new SpringOidcClient(SETTINGS, request -> tokenResponse(),
+            token -> validJwt("nonce-1", List.of("platform-admin-api"), "2"),
+            Clock.fixed(NOW, ZoneOffset.UTC));
+
+        OidcFlowService.AuthorizationRequest request = client.beginStepUp("stepup.state", "nonce-1");
+
+        assertThat(request.authorizationUri().getRawQuery())
+            .contains("prompt=login", "max_age=0", "acr_values=2", "code_challenge_method=S256");
+    }
+
+    @Test
     void exchangeRequiresExactIssuerAudienceNonceAcrAndSessionClaims() {
         SpringOidcClient valid = client(validJwt("nonce-1", List.of("platform-admin-api"), "2"));
 

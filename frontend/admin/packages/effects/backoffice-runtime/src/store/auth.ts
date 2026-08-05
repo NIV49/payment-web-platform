@@ -16,9 +16,12 @@ import {
   loginApi,
   logoutApi,
   oidcHandoffApi,
+  oidcStepUpHandoffApi,
+  oidcStepUpStartApi,
 } from '@payment/backoffice-runtime/api';
 import {
   OIDC_START_PATH,
+  resolveOidcRedirectUrl,
   resolveRealmLogoutUrl,
 } from '@payment/backoffice-runtime/api/core/oidc-navigation';
 import { COOKIE_SESSION_MARKER } from '@payment/backoffice-runtime/api/session';
@@ -203,6 +206,17 @@ export const useAuthStore = defineStore('auth', () => {
     window.location.assign(OIDC_START_PATH);
   }
 
+  async function startOidcStepUp() {
+    const result = await oidcStepUpStartApi();
+    window.location.assign(
+      resolveOidcRedirectUrl(result.redirectUrl, window.location.origin),
+    );
+  }
+
+  async function redeemOidcStepUp(handoff: string) {
+    return oidcStepUpHandoffApi(handoff);
+  }
+
   const isLoggingOut = ref(false);
 
   async function performLogout(
@@ -290,6 +304,8 @@ export const useAuthStore = defineStore('auth', () => {
     loginLoading,
     logout,
     redeemOidcHandoff,
+    redeemOidcStepUp,
     startOidcLogin,
+    startOidcStepUp,
   };
 });

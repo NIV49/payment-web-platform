@@ -6,6 +6,9 @@ import com.niv.payment.permission.port.MembershipSessionVersionRepository;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -13,12 +16,22 @@ public final class SaTokenSessionBridge {
     private final SaTokenFacade saToken;
     private final MembershipSessionVersionRepository sessionVersionRepository;
     private final AccountDomain accountDomain;
+    private final Clock clock;
+    private final Duration stepUpMaximumAge;
 
     public SaTokenSessionBridge(AccountDomain accountDomain, SaTokenFacade saToken,
                                 MembershipSessionVersionRepository sessionVersionRepository) {
+        this(accountDomain, saToken, sessionVersionRepository, Clock.systemUTC(), Duration.ofMinutes(10));
+    }
+
+    public SaTokenSessionBridge(AccountDomain accountDomain, SaTokenFacade saToken,
+                                MembershipSessionVersionRepository sessionVersionRepository,
+                                Clock clock, Duration stepUpMaximumAge) {
         this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
         this.saToken = Objects.requireNonNull(saToken, "saToken");
         this.sessionVersionRepository = Objects.requireNonNull(sessionVersionRepository, "sessionVersionRepository");
+        this.clock = Objects.requireNonNull(clock, "clock");
+        this.stepUpMaximumAge = requirePositive(stepUpMaximumAge, "stepUpMaximumAge");
     }
 
     public AuthorizationSubject currentSubject() {
@@ -60,7 +73,7 @@ public final class SaTokenSessionBridge {
             optionalLong(SessionAttributeNames.DEPARTMENT_ID),
             permissionVersion,
             sessionVersion,
-            requiredBoolean(SessionAttributeNames.STEP_UP_VERIFIED));
+            hasRecentStepUp());
     }
 
     public String requestProof() {
@@ -131,12 +144,14 @@ public final class SaTokenSessionBridge {
         return number.longValue();
     }
 
-    private boolean requiredBoolean(String name) {
-        Object value = saToken.sessionAttribute(name);
-        if (!(value instanceof Boolean booleanValue)) {
-            throw new InvalidSessionException("Missing trusted boolean session attribute: " + name);
+    private boolean hasRecentStepUp() {
+        Object value = saToken.sessionAttribute(SessionAttributeNames.STEP_UP_AT);
+        if (!(value instanceof Number number)) {
+            return false;
         }
-        return booleanValue;
+        Instant now = clock.instant();
+        Instant stepUpAt = Instant.ofEpochSecond(number.longValue());
+        return !stepUpAt.isAfter(now) && !stepUpAt.isBefore(now.minus(stepUpMaximumAge));
     }
 
     private String requiredString(String name) {
@@ -145,5 +160,12 @@ public final class SaTokenSessionBridge {
             throw new InvalidSessionException("Missing trusted string session attribute: " + name);
         }
         return text;
+    }
+
+    private static Duration requirePositive(Duration value, String name) {
+        if (value == null || value.isZero() || value.isNegative()) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return value;
     }
 }

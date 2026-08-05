@@ -20,13 +20,16 @@ import java.net.URI;
 @RequestMapping("/api/auth")
 final class OidcBffController {
     private final OidcFlowService flow;
+    private final OidcStepUpFlowService stepUp;
     private final OidcSessionLogoutService logout;
     private final OidcBackChannelLogoutService backChannelLogout;
     private final OidcRequestTrace trace;
 
-    OidcBffController(OidcFlowService flow, OidcSessionLogoutService logout,
+    OidcBffController(OidcFlowService flow, OidcStepUpFlowService stepUp,
+                      OidcSessionLogoutService logout,
                       OidcBackChannelLogoutService backChannelLogout, OidcRequestTrace trace) {
         this.flow = flow;
+        this.stepUp = stepUp;
         this.logout = logout;
         this.backChannelLogout = backChannelLogout;
         this.trace = trace;
@@ -43,7 +46,14 @@ final class OidcBffController {
                                   @RequestParam(required = false) String state,
                                   @RequestParam(required = false) String error) {
         if (error != null) {
+            if (OidcStepUpFlowService.isStepUpState(state)) {
+                stepUp.rejectCallback(state);
+            }
             flow.rejectCallback(state);
+        }
+        if (OidcStepUpFlowService.isStepUpState(state)) {
+            return ResponseEntity.status(HttpStatus.SEE_OTHER)
+                .location(stepUp.callback(code, state).redirectUri()).build();
         }
         return ResponseEntity.status(HttpStatus.SEE_OTHER)
             .location(flow.callback(code, state).redirectUri()).build();
@@ -54,6 +64,21 @@ final class OidcBffController {
                                             HttpServletRequest request) {
         OidcFlowService.LoginResult result = flow.redeem(body.handoff(), request.getServerName());
         return OidcApiResponse.success(new MarkerResponse(result.marker()), trace.current());
+    }
+
+    @PostMapping("/oidc/step-up/start")
+    OidcApiResponse<StepUpStartResponse> startStepUp(HttpServletRequest request) {
+        OidcStepUpFlowService.StartResult result = stepUp.start(request.getServerName());
+        return OidcApiResponse.success(
+            new StepUpStartResponse(result.authorizationUri().toString()), trace.current());
+    }
+
+    @PostMapping("/oidc/step-up/handoff")
+    OidcApiResponse<StepUpResponse> stepUpHandoff(@Valid @RequestBody StepUpHandoffRequest body,
+                                                 HttpServletRequest request) {
+        OidcStepUpFlowService.StepUpResult result = stepUp.redeem(
+            body.handoff(), request.getServerName());
+        return OidcApiResponse.success(new StepUpResponse(result.stepUpAt().toString()), trace.current());
     }
 
     @PostMapping("/logout")
@@ -69,7 +94,10 @@ final class OidcBffController {
     }
 
     record HandoffRequest(@NotBlank @Size(max = 512) String handoff) { }
+    record StepUpHandoffRequest(@NotBlank @Size(max = 512) String handoff) { }
     record MarkerResponse(String accessToken) { }
+    record StepUpStartResponse(String redirectUrl) { }
+    record StepUpResponse(String stepUpAt) { }
     record LogoutResponse(String logoutUrl) { }
     record OidcApiResponse<T>(int code, T data, String error, String message, String traceId) {
         static <T> OidcApiResponse<T> success(T data, String traceId) {

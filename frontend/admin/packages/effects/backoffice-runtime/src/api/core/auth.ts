@@ -25,6 +25,14 @@ export namespace AuthApi {
     logoutUrl: string;
   }
 
+  export interface StepUpStartResult {
+    redirectUrl: string;
+  }
+
+  export interface StepUpResult {
+    stepUpAt: string;
+  }
+
   export interface RefreshTokenResult {
     data: string;
     status: number;
@@ -46,6 +54,20 @@ export async function oidcHandoffApi(handoff: string) {
   resetSessionRequestProof();
   return authenticationRequestClient.post<AuthApi.LoginResult>(
     '/auth/oidc/handoff',
+    { handoff },
+  );
+}
+
+export async function oidcStepUpStartApi() {
+  return requestClient.post<AuthApi.StepUpStartResult>(
+    '/auth/oidc/step-up/start',
+    null,
+  );
+}
+
+export async function oidcStepUpHandoffApi(handoff: string) {
+  return requestClient.post<AuthApi.StepUpResult>(
+    '/auth/oidc/step-up/handoff',
     { handoff },
   );
 }

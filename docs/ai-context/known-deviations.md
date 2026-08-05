@@ -9,7 +9,7 @@
 | finite `valid_until` 管理写授权 | RoleGrant 与角色 configuration PUT 已锁后重验；User、普通 Role lifecycle、Menu、Department 仍有 HTTP PEP 与写锁之间的纯时间 TOCTOU | 为其余管理写入口补同等数据库时间重验，或使用绑定 actor/permission/resource 的可验证短时授权凭据 |
 | RoleGrant 写闭环 | 第一阶段原子角色配置 UI/API、版本推进、审计、Outbox、锁后入口权限重验已实现；默认 production cutover 开关仍关闭 | 清零 N-1 旧调用方、完成双版本验证和生产审批后显式打开 cutover；不得从 menuIds 或 BUTTON 暗推 Grant |
 | 权限与安全审计 | 角色 configuration 已写真实 before/after/reason；多数其他成功 IAM 写仍是空 JSON | 补齐其他资源 before/after、拒绝事件、登录失败、reason、检索/告警和跨进程 correlation |
-| 身份与敏感操作 | 只有本地账密原型，新建身份默认不可登录；缺少可信 workflow evidence | 外部 IdP、MFA/step-up、邀请/激活/重置、可信审批、防重放与 break-glass 双人流程 |
+| 身份与敏感操作 | 三端 OIDC BFF、生产前端和十分钟 step-up 协议已实现，但新建身份默认不可登录；缺少真实 IdP 和可信 workflow evidence | 真实 Keycloak、MFA 恢复、邀请/激活/重置、可信审批、防重放与 break-glass 双人流程 |
 | IAM-002 身份撤销 | 三端已逐请求比较 `identity_version`、强制独立 CSRF，并分别显式装配签名 back-channel logout 和账号域 `sid/sub` Session 索引 | 接入生命周期版本推进与 Keycloak relay，完成真实 Keycloak 三 Realm 和 MFA 恢复撤销演练 |
 | 关系数据权限 | Core 只有 fail-closed 模型，未连接真实商户/市场/渠道/客户/历史关系 | Provider、历史快照和真实业务查询中的 tenant + scope 集成测试 |
 | Outbox 投递 | Schema 已拆成 append-only fact + relay state，但没有 relay 进程 | 投递、租约、重试、Inbox/幂等、重放、告警和恢复演练 |
@@ -21,7 +21,7 @@
 
 V21-V23 已增加 `identity_version`、IdP provisioning 状态、可信 Host 登记表、独立身份生命周期 Outbox/relay state，以及账号域用户名唯一约束。V1 已有的 `(idp_issuer, idp_subject)` 唯一约束继续作为唯一身份映射键；旧全局 username 唯一约束仍保留，因此当前只是 expand 阶段，尚不允许跨域同名账号落库。
 
-Schema 本身不等于生产身份能力。当前三端 Session 已携带并逐请求比较 `identity_version`，本地账密会话继续要求可登录摘要；外部会话还精确复核 `entryHost` 与数据库当前 `issuer + subject`。三端 Cookie 写请求使用 Session 内同步凭据和 `X-CSRF-Token`，三个独立组合根都已显式装配自己的 OIDC client 配置与 back-channel logout，校验签名 JWT、issuer、audience、iat、jti、event、sid/sub 和重放后撤销映射到的应用 Session。三套生产前端已切换为 OIDC 跳转与 handoff 兑换。仍缺生命周期 relay 对版本的可靠推进、LoA 2 step-up、完整 MFA 恢复编排和真实 Keycloak 三 Realm 演练，因此 IAM-002 继续 **NO-GO / Required**；Outbox 记录或局部代码都不能证明 Keycloak 已执行命令。
+Schema 本身不等于生产身份能力。当前三端 Session 已携带并逐请求比较 `identity_version`，本地账密会话继续要求可登录摘要；外部会话还精确复核 `entryHost` 与数据库当前 `issuer + subject`。三端 Cookie 写请求使用 Session 内同步凭据和 `X-CSRF-Token`，三个独立组合根都已显式装配自己的 OIDC client 配置与 back-channel logout，校验签名 JWT、issuer、audience、iat、jti、event、sid/sub 和重放后撤销映射到的应用 Session。三套生产前端已切换为 OIDC 跳转与 handoff 兑换，step-up 独立事务已绑定原主体、Host 和应用 Session，并逐请求按 `stepUpAt` 重算十分钟有效期。仍缺生命周期 relay 对版本的可靠推进、完整 MFA 恢复编排和真实 Keycloak 三 Realm 演练，因此 IAM-002 继续 **NO-GO / Required**；Outbox 记录或局部代码都不能证明 Keycloak 已执行命令。
 
 V22 使用非事务 `CREATE UNIQUE INDEX CONCURRENTLY`，因此所有 Flyway 执行端必须关闭 PostgreSQL transactional advisory lock。失败恢复要先检查同名索引有效性，只能删除精确的 invalid index 后重试；不得用 `repair` 代替 DDL 状态核验。删除旧全局 username 约束必须另建 contract 迁移，并以旧实例清零和双版本真实数据库证据为前提。
 
@@ -179,6 +179,6 @@ MERCHANT/AGENT 第一阶段仅开放登录、退出、当前用户、动态菜�
 
 ## 已定版、分阶段实现：生产 OIDC 与身份撤销边界
 
-[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 已接受三套独立前端应用、三套独立后端服务及生产 OIDC 目标。前端已拆为三个独立构建和部署单元，三套生产产物只提供 OIDC 跳转与 handoff 兑换，并只复用不含应用专属页面的 `backoffice-runtime`；三个后端组合根已分别显式装配自己的 OIDC client、逐请求身份版本、独立 CSRF 和 back-channel logout primitives。真实 Keycloak、生命周期 relay、step-up 和 MFA 恢复状态机仍未闭环。IAM-002 仍为 candidate；局部实现和单元/集成测试不能替代正式 repository gate 与受信 Review Result。
+[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 已接受三套独立前端应用、三套独立后端服务及生产 OIDC 目标。前端已拆为三个独立构建和部署单元，三套生产产物只提供 OIDC 跳转与 handoff 兑换，并只复用不含应用专属页面的 `backoffice-runtime`；三个后端组合根已分别显式装配自己的 OIDC client、逐请求身份版本、独立 CSRF、back-channel logout 和十分钟 step-up。真实 Keycloak、生命周期 relay 和 MFA 恢复状态机仍未闭环。IAM-002 仍为 candidate；局部实现和单元/集成测试不能替代正式 repository gate 与受信 Review Result。
 
 六条目标边界是：共享 Keycloak 的三 Realm 只构成逻辑隔离；本地 Session 必须同时响应 back-channel logout 与身份版本；OIDC callback 和 server-to-server logout 不依赖 Origin；Cookie 写请求必须使用独立 CSRF token；User 只按精确 `issuer + subject` 映射；MFA 恢复只有在 Credential、Recovery Code、Keycloak Session 和应用 Session 全部撤销后才能完成。任何部分恢复失败保持 `RECOVERY_PENDING` 和登录阻断，通过幂等重试继续收敛。

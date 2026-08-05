@@ -69,6 +69,24 @@ class BackofficeSecurityConfigurationTest {
         verify(sessions).requireRequestProof(null);
     }
 
+    @Test
+    void stepUpStartAndHandoffRequireCurrentSessionOriginAndRequestProof() {
+        AuthorizationSubject subject = mock(AuthorizationSubject.class);
+        when(sessions.currentSubject("merchant.example.test")).thenReturn(subject);
+
+        for (String path : Set.of(
+            "/api/auth/oidc/step-up/start", "/api/auth/oidc/step-up/handoff")) {
+            MockHttpServletRequest request = request("POST", path);
+            request.addHeader("Origin", ORIGIN);
+            request.addHeader("X-CSRF-Token", "request-proof");
+
+            assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        }
+
+        verify(sessions, org.mockito.Mockito.times(2)).currentSubject("merchant.example.test");
+        verify(sessions, org.mockito.Mockito.times(2)).requireRequestProof("request-proof");
+    }
+
     private static MockHttpServletRequest request(String method, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
         request.setServerName("merchant.example.test");

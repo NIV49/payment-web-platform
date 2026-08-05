@@ -8,12 +8,19 @@ import com.niv.payment.permission.security.InvalidSessionException;
 import com.niv.payment.permission.port.MembershipSessionVersionRepository.MembershipVersions;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class SaTokenSessionBridgeTest {
+
+    private static final Instant NOW = Instant.parse("2026-08-05T04:00:00Z");
 
     @Test
     void mapsOnlyTrustedServerSessionAttributesToAuthorizationSubject() {
@@ -192,6 +199,26 @@ class SaTokenSessionBridgeTest {
         bridge.requireRequestProof("synchronizer-proof");
         org.junit.jupiter.api.Assertions.assertThrows(InvalidSessionException.class,
             () -> bridge.requireRequestProof("session-cookie-value"));
+    }
+
+    @Test
+    void stepUpIsDerivedFromARecentTimestampInsteadOfAPermanentFlag() {
+        var attributes = new HashMap<>(baseAttributes());
+        attributes.put(SessionAttributeNames.STEP_UP_VERIFIED, true);
+        attributes.put(SessionAttributeNames.STEP_UP_AT, NOW.minus(Duration.ofMinutes(9)).getEpochSecond());
+        var repository = (com.niv.payment.permission.port.MembershipSessionVersionRepository)
+            (domain, tenantId, membershipId, userId) -> Optional.of(
+                new MembershipVersions(7L, 3L, 11L, "local", "local-user-10", true));
+        var bridge = new SaTokenSessionBridge(AccountDomain.PLATFORM,
+            new FakeSaTokenFacade(attributes), repository, Clock.fixed(NOW, ZoneOffset.UTC),
+            Duration.ofMinutes(10));
+
+        org.junit.jupiter.api.Assertions.assertTrue(bridge.currentSubject().stepUpVerified());
+
+        attributes.put(SessionAttributeNames.STEP_UP_AT, NOW.minus(Duration.ofMinutes(11)).getEpochSecond());
+        org.junit.jupiter.api.Assertions.assertFalse(bridge.currentSubject().stepUpVerified());
+        attributes.remove(SessionAttributeNames.STEP_UP_AT);
+        org.junit.jupiter.api.Assertions.assertFalse(bridge.currentSubject().stepUpVerified());
     }
 
     private static Map<String, Object> baseAttributes() {

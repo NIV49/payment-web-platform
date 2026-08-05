@@ -25,7 +25,8 @@ import java.util.Objects;
 import java.util.Set;
 
 public final class SpringOidcClient implements OidcFlowService.AuthorizationClient,
-    OidcFlowService.CodeExchangeClient {
+    OidcFlowService.CodeExchangeClient, OidcStepUpFlowService.AuthorizationClient,
+    OidcStepUpFlowService.CodeExchangeClient {
     private static final Duration CLOCK_SKEW = Duration.ofSeconds(60);
 
     private final OidcClientSettings settings;
@@ -53,6 +54,15 @@ public final class SpringOidcClient implements OidcFlowService.AuthorizationClie
 
     @Override
     public OidcFlowService.AuthorizationRequest begin(String state, String nonce) {
+        return begin(state, nonce, false);
+    }
+
+    @Override
+    public OidcFlowService.AuthorizationRequest beginStepUp(String state, String nonce) {
+        return begin(state, nonce, true);
+    }
+
+    private OidcFlowService.AuthorizationRequest begin(String state, String nonce, boolean stepUp) {
         OAuth2AuthorizationRequest.Builder builder = OAuth2AuthorizationRequest.authorizationCode()
             .authorizationUri(settings.authorizationUri().toString())
             .clientId(settings.clientId())
@@ -63,6 +73,10 @@ public final class SpringOidcClient implements OidcFlowService.AuthorizationClie
             .additionalParameters(parameters -> {
                 parameters.put(OidcParameterNames.NONCE, nonce);
                 parameters.put("acr_values", settings.requiredAcr());
+                if (stepUp) {
+                    parameters.put("prompt", "login");
+                    parameters.put("max_age", "0");
+                }
                 parameters.put("claims", "{\"id_token\":{\"acr\":{\"essential\":true,\"values\":[\""
                     + settings.requiredAcr() + "\"]},\"auth_time\":{\"essential\":true}}}");
             });
@@ -76,23 +90,34 @@ public final class SpringOidcClient implements OidcFlowService.AuthorizationClie
     @Override
     public OidcFlowService.AuthenticatedIdentity exchange(
         String code, OidcFlowService.LoginTransaction transaction) {
+        return exchange(code, transaction.state(), transaction.codeVerifier(), transaction.nonce());
+    }
+
+    @Override
+    public OidcFlowService.AuthenticatedIdentity exchange(
+        String code, OidcStepUpFlowService.StepUpTransaction transaction) {
+        return exchange(code, transaction.state(), transaction.codeVerifier(), transaction.nonce());
+    }
+
+    private OidcFlowService.AuthenticatedIdentity exchange(
+        String code, String state, String codeVerifier, String nonce) {
         try {
             OAuth2AuthorizationRequest request = OAuth2AuthorizationRequest.authorizationCode()
                 .authorizationUri(settings.authorizationUri().toString())
                 .clientId(settings.clientId())
                 .redirectUri(settings.redirectUri().toString())
                 .scopes(Set.of("openid"))
-                .state(transaction.state())
+                .state(state)
                 .attributes(attributes -> {
                     attributes.put(OAuth2ParameterNames.REGISTRATION_ID, "keycloak");
-                    attributes.put(PkceParameterNames.CODE_VERIFIER, transaction.codeVerifier());
+                    attributes.put(PkceParameterNames.CODE_VERIFIER, codeVerifier);
                 })
                 .additionalParameters(parameters -> parameters.put(
-                    OidcParameterNames.NONCE, transaction.nonce()))
+                    OidcParameterNames.NONCE, nonce))
                 .build();
             OAuth2AuthorizationResponse response = OAuth2AuthorizationResponse.success(code)
                 .redirectUri(settings.redirectUri().toString())
-                .state(transaction.state())
+                .state(state)
                 .build();
             var tokenResponse = tokens.getTokenResponse(new OAuth2AuthorizationCodeGrantRequest(
                 registration, new OAuth2AuthorizationExchange(request, response)));
@@ -101,7 +126,7 @@ public final class SpringOidcClient implements OidcFlowService.AuthorizationClie
                 throw new OidcFlowService.LoginRejectedException();
             }
             Jwt idToken = idTokens.decode(value);
-            validateIdToken(idToken, transaction.nonce());
+            validateIdToken(idToken, nonce);
             return new OidcFlowService.AuthenticatedIdentity(
                 idToken.getIssuer().toString(), idToken.getSubject(), requiredString(idToken, "sid"),
                 requiredInstant(idToken, IdTokenClaimNames.AUTH_TIME),

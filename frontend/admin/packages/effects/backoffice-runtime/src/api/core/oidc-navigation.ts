@@ -8,7 +8,7 @@ function isLoopback(hostname: string) {
   );
 }
 
-function resolveRealmLogoutUrl(value: unknown, currentOrigin: string) {
+function resolveOidcRedirectUrl(value: unknown, currentOrigin: string) {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error('Invalid realm logout URL');
   }
@@ -35,4 +35,33 @@ function resolveRealmLogoutUrl(value: unknown, currentOrigin: string) {
   throw new Error('Invalid realm logout URL');
 }
 
-export { OIDC_START_PATH, resolveRealmLogoutUrl };
+type OidcCallback =
+  | { kind: 'login'; value: string }
+  | { kind: 'step-up'; value: string };
+
+function parseOidcCallbackQuery(
+  handoff: unknown,
+  stepUp: unknown,
+): OidcCallback {
+  const validHandoff = validOpaque(handoff);
+  const validStepUp = validOpaque(stepUp);
+  if (validHandoff === validStepUp) {
+    throw new Error('Invalid OIDC callback');
+  }
+  if (validStepUp) return { kind: 'step-up', value: stepUp };
+  if (validHandoff) return { kind: 'login', value: handoff };
+  throw new Error('Invalid OIDC callback');
+}
+
+function validOpaque(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 512;
+}
+
+const resolveRealmLogoutUrl = resolveOidcRedirectUrl;
+
+export {
+  OIDC_START_PATH,
+  parseOidcCallbackQuery,
+  resolveOidcRedirectUrl,
+  resolveRealmLogoutUrl,
+};

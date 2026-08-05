@@ -10,7 +10,13 @@ import {
   resetSessionRequestProof,
 } from '../request';
 import { COOKIE_SESSION_MARKER } from '../session';
-import { loginApi, logoutApi, oidcHandoffApi } from './auth';
+import {
+  loginApi,
+  logoutApi,
+  oidcHandoffApi,
+  oidcStepUpHandoffApi,
+  oidcStepUpStartApi,
+} from './auth';
 
 const mocks = vi.hoisted(() => ({
   logout: vi.fn(),
@@ -172,6 +178,46 @@ describe('authentication request client', () => {
     expect(baseAdapter).toHaveBeenCalledOnce();
     for (const [config] of requestAdapter.mock.calls) {
       expect(config.headers['X-CSRF-Token']).toBe('b'.repeat(43));
+    }
+  });
+
+  it('requires the session proof for both step-up browser mutations', async () => {
+    baseAdapter.mockResolvedValue({
+      config: {},
+      data: { code: 0, data: { requestProof: 'c'.repeat(43) } },
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    });
+    requestAdapter
+      .mockImplementationOnce(async (config) => ({
+        config,
+        data: {
+          code: 0,
+          data: { redirectUrl: 'https://idp.example.test/auth' },
+        },
+        headers: {},
+        status: 200,
+        statusText: 'OK',
+      }))
+      .mockImplementationOnce(async (config) => ({
+        config,
+        data: { code: 0, data: { stepUpAt: '2026-08-05T04:00:00Z' } },
+        headers: {},
+        status: 200,
+        statusText: 'OK',
+      }));
+
+    await oidcStepUpStartApi();
+    await oidcStepUpHandoffApi('one-time-step-up');
+
+    expect(baseAdapter).toHaveBeenCalledOnce();
+    expect(requestAdapter.mock.calls.map(([config]) => config.url)).toEqual([
+      '/auth/oidc/step-up/start',
+      '/auth/oidc/step-up/handoff',
+    ]);
+    for (const [config] of requestAdapter.mock.calls) {
+      expect(config.headers['X-CSRF-Token']).toBe('c'.repeat(43));
     }
   });
 });

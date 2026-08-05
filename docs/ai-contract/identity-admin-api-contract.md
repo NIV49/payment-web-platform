@@ -11,7 +11,7 @@
 2. **Target Prototype Contract**：本轮原型认可的边界和不变量；
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
-当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 数据基础；三端已实施 Session-bound CSRF、逐请求 identityVersion、各自独立的 OIDC BFF、精确映射、Host 复核和签名 back-channel logout。三套生产前端已切换为 OIDC 跳转与一次性 handoff 兑换，本地开发仍保留账密验收入口。真实 Keycloak、生命周期 relay、MFA/step-up 和恢复编排仍未完成，因此整体仍是生产 NO-GO。
+当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 数据基础；三端已实施 Session-bound CSRF、逐请求 identityVersion、各自独立的 OIDC BFF、精确映射、Host 复核、签名 back-channel logout 和十分钟 LoA 2 step-up。三套生产前端已切换为 OIDC 跳转与一次性 handoff 兑换，本地开发仍保留账密验收入口。真实 Keycloak、生命周期 relay、MFA 恢复编排与生产演练仍未完成，因此整体仍是生产 NO-GO。
 
 ## IAM-001 已实现边界
 
@@ -151,7 +151,7 @@ departmentId
 permissionVersion
 sessionVersion
 identityVersion
-stepUpVerified
+stepUpAt
 ```
 
 约束：
@@ -907,7 +907,7 @@ V23__attach_account_domain_username_constraint.sql
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、递归拒绝全部核心/fallback/local canonical 冲突、退出/换用户清旧路由、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
 | Flyway | V1→V23 fresh/upgrade 可运行；V21-V23 覆盖身份基础、跨域原子约束、事件不可变和用户名 expand | 旧 username 约束 contract、生产 migration Job/审批和备份恢复演练未完成；V22 非事务失败需检查 invalid index |
-| 三后台 OIDC BFF 与前端 | PLATFORM、MERCHANT、AGENT 三个独立组合根均已显式装配各自 client credential/config、Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout 和账号域 Session 索引，默认关闭；三套生产前端只提供 OIDC 跳转和 handoff 兑换 | 尚未完成真实 Keycloak、生命周期 relay、step-up/MFA 恢复、配置即代码和三 Realm 联调，不得开放生产流量 |
+| 三后台 OIDC BFF 与前端 | PLATFORM、MERCHANT、AGENT 三个独立组合根均已显式装配各自 client credential/config、Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout、十分钟 step-up 和账号域 Session 索引，默认关闭；三套生产前端只提供 OIDC 跳转和 handoff 兑换 | 尚未完成真实 Keycloak、生命周期 relay、MFA 恢复、配置即代码和三 Realm 联调，不得开放生产流量 |
 
 ## 2.3 三后台 OIDC BFF 契约
 
@@ -939,6 +939,12 @@ PLATFORM、MERCHANT、AGENT 三个组合根分别固定自己的 AccountDomain�
 
 该浏览器端点要求目标入口的可信 Origin，并再次以请求 Host 复核 handoff；错误 Host 的尝试也会消费 handoff。成功后才以 `issuer + subject + tenant entry` 精确查找已邀请、ACTIVE、`PROVISIONED` 且持有本端 canonical portal Grant 的 User/Membership，签发本端 HttpOnly Cookie，并只返回 `cookie-session` marker。邮箱和 username 不参与身份映射。
 
+### POST `/auth/oidc/step-up/start` 与 `/auth/oidc/step-up/handoff`
+
+两个端点都要求有效 Cookie Session、可信 Origin 和 `X-CSRF-Token`。start 从当前 Session 固定 User、Membership、tenant、Host、issuer、subject 与应用 Session 摘要，发起包含 `prompt=login`、`max_age=0`、PKCE、nonce 和目标 ACR 的独立事务。共用 OIDC callback 不依赖 Origin，但 step-up state 使用独立 namespace；返回身份必须与原 `issuer + subject` 完全相同，`auth_time` 不得早于事务开始容差。handoff 错 Host、错应用 Session 或任一主体字段变化都会单次消费并失败。成功只记录 `stepUpAt`，不改变 User、Membership、tenant、Host 或当前登录身份。
+
+`AuthorizationSubject.stepUpVerified` 不信任一个永久 boolean；Session bridge 在每次请求中以 UTC 时钟重算 `stepUpAt` 是否在最近 10 分钟内，过期、缺失或未来时间均为 false。
+
 ### POST `/auth/logout`
 
 要求有效本端 Cookie Session、可信 Origin 和 `X-CSRF-Token`。应用先清除本地 Session，再返回标准 RP-Initiated Logout URL：
@@ -966,7 +972,7 @@ OIDC 认证失败统一返回 HTTP 401、code `40103`、error `OIDC_LOGIN_REJECT
 
 - 真实 Keycloak 三 Realm 联调和 Realm/client/认证流配置即代码；
 - 生命周期 relay 对 identityVersion 的可靠推进及跨系统撤销确认；
-- MFA、step-up、MFA 重置审批；
+- MFA 恢复、MFA 重置审批与四类凭证全撤销编排；
 - 生产级的新建用户密码激活、邀请、首次改密、忘记密码和管理员重置；
 - 超出本文精确目录、数据维度或审批规则的通用 RoleGrant 管理；
 - 商户、市场、渠道、销售客户关系和历史代理关系数据范围 Provider；
@@ -1057,8 +1063,8 @@ RoleGrant(permissionCode + dimensions + constraints)
 
 以下任一项未完成，不得把当前原型标记为生产身份与支付权限系统：
 
-1. 外部 IdP/OIDC、密码策略和身份生命周期未定版；
-2. MFA、step-up、MFA 重置、激活会话和旧会话撤销流程未实现；
+1. 真实 Keycloak 三 Realm、密码策略和身份生命周期尚未联调和演练；
+2. MFA 恢复、MFA 重置、激活会话和旧会话全撤销流程未实现；
 3. 新建用户没有生产可用的密码激活、邀请、首次改密或管理员重置流程；本地统一口令及重置能力不得用于生产；
 4. Cookie Secure 的生产强制、代理拓扑、TTL、Redis 故障和会话撤权未演练；
 5. CSRF/Origin/CORS 策略尚未经过真实部署安全测试；

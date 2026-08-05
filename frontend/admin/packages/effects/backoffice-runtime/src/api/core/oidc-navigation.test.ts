@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { OIDC_START_PATH, resolveRealmLogoutUrl } from './oidc-navigation';
+import {
+  OIDC_START_PATH,
+  parseOidcCallbackQuery,
+  resolveOidcRedirectUrl,
+  resolveRealmLogoutUrl,
+} from './oidc-navigation';
 
 describe('oidc browser navigation', () => {
   it('uses the same-origin bff start endpoint', () => {
@@ -39,5 +44,37 @@ describe('oidc browser navigation', () => {
         'https://merchant.example.test',
       ),
     ).toThrow('Invalid realm logout URL');
+  });
+
+  it('applies the same transport restrictions to step-up redirects', () => {
+    expect(
+      resolveOidcRedirectUrl(
+        'https://idp.example.test/realms/MERCHANT/auth?prompt=login',
+        'https://merchant.example.test',
+      ),
+    ).toBe('https://idp.example.test/realms/MERCHANT/auth?prompt=login');
+    expect(() =>
+      resolveOidcRedirectUrl(
+        'http://idp.example.test/auth',
+        'https://merchant.example.test',
+      ),
+    ).toThrow('Invalid realm logout URL');
+  });
+
+  it('accepts exactly one bounded callback handoff', () => {
+    expect(parseOidcCallbackQuery('login-code', undefined)).toEqual({
+      kind: 'login',
+      value: 'login-code',
+    });
+    expect(parseOidcCallbackQuery(undefined, 'step-up-code')).toEqual({
+      kind: 'step-up',
+      value: 'step-up-code',
+    });
+    expect(() => parseOidcCallbackQuery('login', 'step-up')).toThrow(
+      'Invalid OIDC callback',
+    );
+    expect(() => parseOidcCallbackQuery(undefined, undefined)).toThrow(
+      'Invalid OIDC callback',
+    );
   });
 });

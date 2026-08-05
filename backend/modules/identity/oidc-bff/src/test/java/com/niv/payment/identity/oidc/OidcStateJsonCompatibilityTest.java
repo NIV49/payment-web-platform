@@ -27,6 +27,28 @@ class OidcStateJsonCompatibilityTest {
         assertThat(roundTrip(handoff, OidcFlowService.LoginHandoff.class)).isEqualTo(handoff);
     }
 
+    @Test
+    void stepUpTransactionAndHandoffRoundTripThroughTheRuntimeMapper() throws Exception {
+        OidcFlowService.TrustedEntry entry = new OidcFlowService.TrustedEntry(
+            "ops.example.com", AccountDomain.PLATFORM, 11L);
+        OidcStepUpFlowService.StepUpPrincipal principal = new OidcStepUpFlowService.StepUpPrincipal(
+            AccountDomain.PLATFORM, 11L, 12L, 13L, "ops.example.com",
+            "https://idp.example.test/realms/PLATFORM", "subject", "session-binding");
+        OidcStepUpFlowService.StepUpTransaction transaction =
+            new OidcStepUpFlowService.StepUpTransaction(entry, principal, "stepup.state", "verifier",
+                "nonce", Instant.parse("2026-08-05T04:00:00Z"));
+        OidcStepUpFlowService.StepUpHandoff handoff = new OidcStepUpFlowService.StepUpHandoff(
+            transaction,
+            new OidcFlowService.AuthenticatedIdentity(
+                "https://idp.example.test/realms/PLATFORM", "subject", "session",
+                Instant.parse("2026-08-05T04:00:01Z"), "2", "id-token"),
+            Instant.parse("2026-08-05T04:00:02Z"));
+
+        assertThat(roundTrip(transaction, OidcStepUpFlowService.StepUpTransaction.class))
+            .isEqualTo(transaction);
+        assertThat(roundTrip(handoff, OidcStepUpFlowService.StepUpHandoff.class)).isEqualTo(handoff);
+    }
+
     private <T> T roundTrip(T value, Class<T> type) throws Exception {
         return json.readValue(json.writeValueAsString(value), type);
     }

@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { LOGIN_PATH } from '@vben/constants';
 import { preferences } from '@vben/preferences';
 
+import { parseOidcCallbackQuery } from '@payment/backoffice-runtime/api/core/oidc-navigation';
 import { useAuthStore } from '@payment/backoffice-runtime/store';
 import { Spin } from 'antdv-next';
 
@@ -15,17 +16,27 @@ const route = useRoute();
 const router = useRouter();
 
 onMounted(async () => {
-  const handoff = route.query.handoff;
-  if (
-    typeof handoff !== 'string' ||
-    handoff.length === 0 ||
-    handoff.length > 512
-  ) {
+  let callback;
+  try {
+    callback = parseOidcCallbackQuery(route.query.handoff, route.query.stepup);
+  } catch {
     await router.replace(LOGIN_PATH);
     return;
   }
+  if (callback.kind === 'step-up') {
+    try {
+      await authStore.redeemOidcStepUp(callback.value);
+      await router.replace(preferences.app.defaultHomePath);
+    } catch {
+      await router.replace(LOGIN_PATH);
+    }
+    return;
+  }
   try {
-    const result = await authStore.redeemOidcHandoff(handoff, () => undefined);
+    const result = await authStore.redeemOidcHandoff(
+      callback.value,
+      () => undefined,
+    );
     await router.replace(
       result.userInfo?.homePath || preferences.app.defaultHomePath,
     );
