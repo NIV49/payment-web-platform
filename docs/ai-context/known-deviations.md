@@ -10,11 +10,20 @@
 | RoleGrant 写闭环 | 第一阶段原子角色配置 UI/API、版本推进、审计、Outbox、锁后入口权限重验已实现；默认 production cutover 开关仍关闭 | 清零 N-1 旧调用方、完成双版本验证和生产审批后显式打开 cutover；不得从 menuIds 或 BUTTON 暗推 Grant |
 | 权限与安全审计 | 角色 configuration 已写真实 before/after/reason；多数其他成功 IAM 写仍是空 JSON | 补齐其他资源 before/after、拒绝事件、登录失败、reason、检索/告警和跨进程 correlation |
 | 身份与敏感操作 | 只有本地账密原型，新建身份默认不可登录；缺少可信 workflow evidence | 外部 IdP、MFA/step-up、邀请/激活/重置、可信审批、防重放与 break-glass 双人流程 |
+| IAM-002 身份撤销 | V21 已有 `identity_version`、Host 登记和独立生命周期 Outbox，但运行时尚未消费 | 接入逐请求身份版本、签名 back-channel logout、Keycloak relay、CSRF 和完整 MFA 恢复撤销 |
 | 关系数据权限 | Core 只有 fail-closed 模型，未连接真实商户/市场/渠道/客户/历史关系 | Provider、历史快照和真实业务查询中的 tenant + scope 集成测试 |
 | Outbox 投递 | Schema 已拆成 append-only fact + relay state，但没有 relay 进程 | 投递、租约、重试、Inbox/幂等、重放、告警和恢复演练 |
 | Payment/Ledger 可执行规格 | 只有目标架构约束，没有可实施的资金链规格 | 状态机、金额/币种/精度、幂等、账本分录、调账/对账、API/事件、迁移和回滚演练 |
 
 在上表全部闭环前，不得把当前原型连接到余额、账本、代付、提现、退款、冲正或调账写路径。
+
+## Required：IAM-002 数据基础尚未形成运行时身份边界
+
+V21-V23 已增加 `identity_version`、IdP provisioning 状态、可信 Host 登记表、独立身份生命周期 Outbox/relay state，以及账号域用户名唯一约束。V1 已有的 `(idp_issuer, idp_subject)` 唯一约束继续作为唯一身份映射键；旧全局 username 唯一约束仍保留，因此当前只是 expand 阶段，尚不允许跨域同名账号落库。
+
+这些 Schema 不等于生产身份能力。当前 Session 不携带或逐请求比较 `identity_version`，没有签名 Keycloak back-channel logout、Host resolver、OIDC BFF、独立 CSRF token、生命周期 relay、LoA 2 step-up 或 MFA 恢复编排。任何一项缺失都使 IAM-002 保持 **NO-GO / Required**；生命周期 Outbox 中存在记录也不能证明 Keycloak 已执行命令。
+
+V22 使用非事务 `CREATE UNIQUE INDEX CONCURRENTLY`，因此所有 Flyway 执行端必须关闭 PostgreSQL transactional advisory lock。失败恢复要先检查同名索引有效性，只能删除精确的 invalid index 后重试；不得用 `repair` 代替 DDL 状态核验。删除旧全局 username 约束必须另建 contract 迁移，并以旧实例清零和双版本真实数据库证据为前提。
 
 ## Required：时间型管理写授权仍存在锁等待 TOCTOU
 

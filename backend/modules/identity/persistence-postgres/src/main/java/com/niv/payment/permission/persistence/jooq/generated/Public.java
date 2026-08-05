@@ -9,6 +9,8 @@ import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuthentic
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamDepartment;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamGrantDimension;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamGrantTarget;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleOutbox;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleRelayState;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMenu;
@@ -19,6 +21,7 @@ import com.niv.payment.permission.persistence.jooq.generated.tables.IamRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleGrant;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleMenu;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamTenant;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamTenantEntryHost;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamUser;
 
 import java.util.Arrays;
@@ -70,6 +73,17 @@ public class Public extends SchemaImpl {
      * The table <code>public.iam_grant_target</code>.
      */
     public final IamGrantTarget IAM_GRANT_TARGET = IamGrantTarget.IAM_GRANT_TARGET;
+
+    /**
+     * Append-only identity lifecycle commands; never stores profile data or
+     * authentication secrets
+     */
+    public final IamIdentityLifecycleOutbox IAM_IDENTITY_LIFECYCLE_OUTBOX = IamIdentityLifecycleOutbox.IAM_IDENTITY_LIFECYCLE_OUTBOX;
+
+    /**
+     * Mutable retry and publication state for identity lifecycle commands
+     */
+    public final IamIdentityLifecycleRelayState IAM_IDENTITY_LIFECYCLE_RELAY_STATE = IamIdentityLifecycleRelayState.IAM_IDENTITY_LIFECYCLE_RELAY_STATE;
 
     /**
      * The table <code>public.iam_membership</code>.
@@ -125,6 +139,11 @@ public class Public extends SchemaImpl {
     public final IamTenant IAM_TENANT = IamTenant.IAM_TENANT;
 
     /**
+     * Server-controlled canonical Host to account-domain and tenant mapping
+     */
+    public final IamTenantEntryHost IAM_TENANT_ENTRY_HOST = IamTenantEntryHost.IAM_TENANT_ENTRY_HOST;
+
+    /**
      * The table <code>public.iam_user</code>.
      */
     public final IamUser IAM_USER = IamUser.IAM_USER;
@@ -157,6 +176,8 @@ public class Public extends SchemaImpl {
             IamDepartment.IAM_DEPARTMENT,
             IamGrantDimension.IAM_GRANT_DIMENSION,
             IamGrantTarget.IAM_GRANT_TARGET,
+            IamIdentityLifecycleOutbox.IAM_IDENTITY_LIFECYCLE_OUTBOX,
+            IamIdentityLifecycleRelayState.IAM_IDENTITY_LIFECYCLE_RELAY_STATE,
             IamMembership.IAM_MEMBERSHIP,
             IamMembershipRole.IAM_MEMBERSHIP_ROLE,
             IamMenu.IAM_MENU,
@@ -167,6 +188,7 @@ public class Public extends SchemaImpl {
             IamRoleGrant.IAM_ROLE_GRANT,
             IamRoleMenu.IAM_ROLE_MENU,
             IamTenant.IAM_TENANT,
+            IamTenantEntryHost.IAM_TENANT_ENTRY_HOST,
             IamUser.IAM_USER
         );
     }

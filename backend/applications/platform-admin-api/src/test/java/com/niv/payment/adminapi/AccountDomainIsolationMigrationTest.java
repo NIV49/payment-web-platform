@@ -145,7 +145,7 @@ class AccountDomainIsolationMigrationTest {
 
         flyway(null).migrate();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("20");
+        assertThat(currentSuccessfulVersion()).isEqualTo("23");
         assertThat(singleLong("""
             SELECT count(*)
               FROM iam_role role_row
@@ -211,7 +211,7 @@ class AccountDomainIsolationMigrationTest {
 
         flyway(null).migrate();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("20");
+        assertThat(currentSuccessfulVersion()).isEqualTo("23");
         assertThat(singleLong("""
             SELECT count(*) FROM iam_role_grant
              WHERE tenant_id=171 AND role_id=175 AND status='ACTIVE'
@@ -437,7 +437,7 @@ class AccountDomainIsolationMigrationTest {
     }
 
     private static Flyway flyway(String target) {
-        var configuration = Flyway.configure()
+        var configuration = PostgresFlywayTestSupport.configure()
             .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
             .locations("classpath:db/migration")
             .cleanDisabled(false);

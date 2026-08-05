@@ -7,6 +7,7 @@ package com.niv.payment.permission.persistence.jooq.generated;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuditEvent;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamDepartment;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamGrantTarget;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleRelayState;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMenu;
@@ -37,6 +38,7 @@ public class Indexes {
     public static final Index IDX_IAM_DEPARTMENT_PARENT = Internal.createIndex(DSL.name("idx_iam_department_parent"), IamDepartment.IAM_DEPARTMENT, new OrderField[] { IamDepartment.IAM_DEPARTMENT.TENANT_ID, IamDepartment.IAM_DEPARTMENT.PARENT_ID }, false);
     public static final Index IDX_IAM_DEPARTMENT_TENANT_LIVE = Internal.createIndex(DSL.name("idx_iam_department_tenant_live"), IamDepartment.IAM_DEPARTMENT, new OrderField[] { IamDepartment.IAM_DEPARTMENT.TENANT_ID, IamDepartment.IAM_DEPARTMENT.ID }, false);
     public static final Index IDX_IAM_GRANT_TARGET_REF = Internal.createIndex(DSL.name("idx_iam_grant_target_ref"), IamGrantTarget.IAM_GRANT_TARGET, new OrderField[] { IamGrantTarget.IAM_GRANT_TARGET.TARGET_REF, IamGrantTarget.IAM_GRANT_TARGET.DIMENSION_ID }, false);
+    public static final Index IDX_IAM_IDENTITY_RELAY_PENDING = Internal.createIndex(DSL.name("idx_iam_identity_relay_pending"), IamIdentityLifecycleRelayState.IAM_IDENTITY_LIFECYCLE_RELAY_STATE, new OrderField[] { IamIdentityLifecycleRelayState.IAM_IDENTITY_LIFECYCLE_RELAY_STATE.STATUS, IamIdentityLifecycleRelayState.IAM_IDENTITY_LIFECYCLE_RELAY_STATE.AVAILABLE_AT, IamIdentityLifecycleRelayState.IAM_IDENTITY_LIFECYCLE_RELAY_STATE.EVENT_RECORD_ID }, false);
     public static final Index IDX_IAM_MEMBERSHIP_DOMAIN_USER = Internal.createIndex(DSL.name("idx_iam_membership_domain_user"), IamMembership.IAM_MEMBERSHIP, new OrderField[] { IamMembership.IAM_MEMBERSHIP.ACCOUNT_DOMAIN, IamMembership.IAM_MEMBERSHIP.USER_ID, IamMembership.IAM_MEMBERSHIP.STATUS }, false);
     public static final Index IDX_IAM_MEMBERSHIP_ROLE_ROLE = Internal.createIndex(DSL.name("idx_iam_membership_role_role"), IamMembershipRole.IAM_MEMBERSHIP_ROLE, new OrderField[] { IamMembershipRole.IAM_MEMBERSHIP_ROLE.TENANT_ID, IamMembershipRole.IAM_MEMBERSHIP_ROLE.ROLE_ID, IamMembershipRole.IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID }, false);
     public static final Index IDX_IAM_MEMBERSHIP_TENANT_STATUS = Internal.createIndex(DSL.name("idx_iam_membership_tenant_status"), IamMembership.IAM_MEMBERSHIP, new OrderField[] { IamMembership.IAM_MEMBERSHIP.TENANT_ID, IamMembership.IAM_MEMBERSHIP.STATUS }, false);

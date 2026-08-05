@@ -1,5 +1,6 @@
 package com.niv.payment.adminapi.config;
 
+import com.niv.payment.adminapi.PostgresFlywayTestSupport;
 import com.niv.payment.permission.backoffice.BackofficeSchemaReadinessGuard;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +44,7 @@ class FlywaySchemaReadinessGuardIntegrationTest {
 
     @Test
     void oldSchemaWithFlywayDisabledFailsContextStartup() {
-        Flyway.configure()
+        PostgresFlywayTestSupport.configure()
             .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
             .locations("classpath:db/migration")
             .target("7")
@@ -171,11 +172,12 @@ class FlywaySchemaReadinessGuardIntegrationTest {
                 "spring.datasource.password=" + POSTGRES.getPassword(),
                 "spring.datasource.driver-class-name=org.postgresql.Driver",
                 "spring.flyway.enabled=" + flywayEnabled,
-                "spring.flyway.locations=classpath:db/migration");
+                "spring.flyway.locations=classpath:db/migration",
+                "spring.flyway.postgresql.transactional-lock=false");
     }
 
     private static Flyway migrationFlyway() {
-        return Flyway.configure()
+        return PostgresFlywayTestSupport.configure()
             .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
             .locations("classpath:db/migration")
             .cleanDisabled(false)

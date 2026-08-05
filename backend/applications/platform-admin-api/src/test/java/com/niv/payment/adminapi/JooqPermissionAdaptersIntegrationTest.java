@@ -103,7 +103,7 @@ class JooqPermissionAdaptersIntegrationTest {
 
     @BeforeAll
     static void migrateAndSeed() throws Exception {
-        Flyway.configure()
+        PostgresFlywayTestSupport.configure()
             .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
             .locations("classpath:db/migration")
             .load()

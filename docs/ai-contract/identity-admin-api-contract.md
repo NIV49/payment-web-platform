@@ -11,13 +11,13 @@
 2. **Target Prototype Contract**：本轮原型认可的边界和不变量；
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
-当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。PLATFORM 保留现有 IAM 管理能力，MERCHANT/AGENT 第一阶段仅开放登录、退出、当前用户、动态菜单、权限码和健康检查。外部 IdP、MFA、生产用户邀请/激活/重置、支付数据范围、资金权限和正式可观测性仍未完成。
+当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 的 Host、身份版本、provisioning、生命周期 Outbox 和用户名 expand 数据基础，但运行时 OIDC、CSRF、back-channel logout、身份版本校验、MFA 和生命周期 relay 尚未完成。PLATFORM 保留现有 IAM 管理能力，MERCHANT/AGENT 当前仅开放登录、退出、当前用户、动态菜单、权限码和健康检查。
 
 ## IAM-001 已实现边界
 
 [ADR-0008](../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 已关闭 `IAM-GLOBAL-USER-MULTI-TENANT`：PLATFORM、MERCHANT、AGENT 是独立应用账号域，同一个应用 User 不跨域；同域多 Membership 仍允许。V18 为 Tenant/User/Credential/Membership 增加并约束 `account_domain`，迁移遇到跨域或无法归属数据时原子失败。V19 新增三个服务端专用入口 Permission，并为历史及新建角色维护 canonical `system-backoffice-access` Grant；V20 前向收敛 V17 合法存在的同名普通 Grant，保留其授权语义并写入审计、角色/成员版本和 Outbox。三个服务端入口固定账号域和会话边界，严格登录 DTO 只接受 `username` 与 `password`；可信入口无法唯一解析 ACTIVE Membership 时统一认证失败。ACTIVE Membership 还必须经角色取得本端 `backoffice:{platform|merchant|agent}-access` RoleGrant，入口权限不从部门、导航或 Membership 状态推导，也不属于 18 项租户授权编辑面。进程级黑盒通过外部 HTTP、SQL 和 Redis 验证跨端 Cookie/token/cache 复用以及三端 login/logout 的 missing、wrong、cross-root Origin 均失败关闭；12 个 semantic mutant 分别覆盖平台与共享后台 Origin 守卫及其余账号/会话边界。本地技术验证不等于 Rule Card 已获受信 reviewer 正式签署。
 
-## IAM-002 已接受目标、尚未实现
+## IAM-002 已接受目标、实施中
 
 [ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 接受三套独立前端应用、三套独立后端服务和生产 OIDC 身份边界；IAM-002 当前仍是 candidate Rule，只登记决策契约 Judge，不能据此宣称生产实现已经通过。目标契约包含六条不可降级不变量：
 
@@ -822,13 +822,16 @@ V17__add_administration_tombstones.sql
 V18__isolate_backoffice_account_domains.sql
 V19__protect_backoffice_access_grants.sql
 V20__converge_reserved_backoffice_grant_keys.sql
+V21__add_production_identity_foundation.sql
+V22__build_account_domain_username_index.sql
+V23__attach_account_domain_username_constraint.sql
 ```
 
 语义：
 
 - `local` profile 启用自动迁移，但不启用 `baseline-on-migrate`；
 - 已经手工执行 V1、但没有 `flyway_schema_history` 的旧开发卷不属于升级契约；需要的数据先备份，然后从空库重建；
-- 全新空库正常执行 V1 到 V20；
+- 全新空库正常执行 V1 到 V23；
 - V2/V3 的历史固定身份和菜单只为兼容旧迁移链存在；V8 只在预留 footprint 仍是精确 fixture 时删除它，其他租户、用户、审计、Outbox 和扩展权限原样保留；
 - V3 为预置平台管理员补充 Dashboard、Analytics 和 Workspace 动态路由，保证 `/dashboard` 登录首页可用；
 - V4 把系统菜单 title 修正为 i18n key，并清除一级目录旧 `BasicLayout`；
@@ -841,6 +844,9 @@ V20__converge_reserved_backoffice_grant_keys.sql
 - V18 前向增加三账号域约束。升级前必须执行 `psql "$PAYMENT_DB_URL" -v ON_ERROR_STOP=1 -f backend/scripts/iam001-account-domain-preflight.sql`，结果必须为空；任何 `NO_MEMBERSHIP`、`CROSS_ACCOUNT_DOMAIN` 或无法唯一归属的主体都由人工拆分账号后重试，不复制凭证、不猜测审计归属；
 - V19 新增三条服务端专用入口 Permission，按 Tenant 账号域给每个未删除历史角色回填唯一 `system-backoffice-access`、`TENANT/TENANT_ALL` Grant，递增受影响角色与 Membership 权限版本，并写迁移审计和 Outbox。新建角色在同一事务中得到相同 Grant；角色 Grant/configuration 替换只管理既有 18 项权限，不能删除或伪造入口 Grant；
 - V20 不回写 V18/V19：它把历史非 portal Permission 占用的保留 key 确定性改为 `legacy-backoffice-access-{grantId}`，不改变 Permission、状态、维度、Target 或有效期；受影响角色和 Membership 版本递增，并写逐 Grant 审计及权限版本 Outbox。portal 存量畸形，或同角色任意 Permission 已占用目标 key 时整次迁移回滚。升级后每个未墓碑角色恰有一个 canonical portal 保留 key；读取侧使用完整 portal inventory，并在普通 Permission 占保留 key、重复 grant key、重复 Permission 或额外 disabled portal Grant 时返回 `editable=false`，禁止 PUT 静默覆盖。V20 是前向数据迁移，失败恢复依赖迁移前备份或修正异常存量后重试，不提供逆向脚本；
+- V21 增加 `iam_user.identity_version`、IdP provisioning 状态、可信 Host 登记和独立身份生命周期 Outbox/relay state。User、Tenant 和 realm 使用组合外键保持同域；Outbox 没有 profile 或 secret payload 字段，只保存 user、tenant、realm、操作、幂等键和时间。V1 的 `(idp_issuer,idp_subject)` 唯一约束不变；
+- V22 使用 sidecar `executeInTransaction=false` 和 `CREATE UNIQUE INDEX CONCURRENTLY` 建立 `(account_domain,username)` 唯一索引，所有 Flyway 执行端必须关闭 PostgreSQL transactional advisory lock。V23 把该索引附加为约束。旧全局 username 唯一约束仍保留；旧实例清零和双版本验证通过前不得执行 contract 删除；
+- V22 失败可能留下同名 invalid index；重试前必须核验 `pg_index.indisvalid`，只删除精确无效索引，不能用 `repair` 掩盖未完成 DDL；
 - `LocalIdentityFixtureBootstrap` 只在 `local` profile、Flyway 完成后事务性执行 `db/local/iam-local-bootstrap.sql` 并写入 BCrypt 密码；最终 fixture 对预置菜单只保留预留 ID、tenant、`system_managed` 所有权和活动 authCode 歧义校验，允许字段编辑与墓碑在重启后保留。身份、系统角色、Grant、role-menu 固定关系、物理缺失、所有权漂移、密码不匹配或预留权限码第二个活动绑定仍拒绝启动；MERCHANT/AGENT 预置角色必须 ACTIVE、未墓碑，其入口 Grant 必须与真实登录查询一样是无有效期、单一 `TENANT/TENANT_ALL`、无 Target 且没有其他活动 portal Grant，否则 bootstrap 原子回滚；
 - 任何环境的迁移都不得依赖 `baseline-on-migrate=true` 自动猜测历史状态。
 
@@ -899,9 +905,9 @@ V20__converge_reserved_backoffice_grant_keys.sql
 | Cross-tenant model | `SAME_TENANT_ONLY` 默认；只有受控 `READ/VIEW` action 可使用 `RELATED_PARTY_READ`，Core 与 V12 CHECK 双重约束 | 没有 Party/Relationship adapter，运行时仍 fail closed |
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、递归拒绝全部核心/fallback/local canonical 冲突、退出/换用户清旧路由、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
-| Flyway | V1→V20 fresh/upgrade 可运行；V20 覆盖真实 V17 保留 key 冲突的保语义收敛及异常存量原子阻断 | 旧 manage 码的 contract 迁移、生产 migration 审批和备份恢复演练未完成；已执行迁移只能前向修复 |
+| Flyway | V1→V23 fresh/upgrade 可运行；V21-V23 覆盖身份基础、跨域原子约束、事件不可变和用户名 expand | 旧 username 约束 contract、生产 migration Job/审批和备份恢复演练未完成；V22 非事务失败需检查 invalid index |
 
-## 2.3 明确不在本轮实现
+## 2.3 当前尚未实现
 
 - 外部 IdP/OIDC；
 - MFA、step-up、MFA 重置审批；

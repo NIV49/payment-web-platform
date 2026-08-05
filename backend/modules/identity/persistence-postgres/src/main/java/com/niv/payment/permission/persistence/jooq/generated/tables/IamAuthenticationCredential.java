@@ -185,7 +185,7 @@ public class IamAuthenticationCredential extends TableImpl<IamAuthenticationCred
 
     @Override
     public List<UniqueKey<IamAuthenticationCredentialRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.UK_IAM_AUTHENTICATION_USERNAME);
+        return Arrays.asList(Keys.UK_IAM_AUTHENTICATION_DOMAIN_USERNAME, Keys.UK_IAM_AUTHENTICATION_USERNAME);
     }
 
     @Override

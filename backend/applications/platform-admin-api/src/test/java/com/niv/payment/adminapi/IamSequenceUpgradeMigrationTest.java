@@ -104,7 +104,7 @@ class IamSequenceUpgradeMigrationTest {
     }
 
     private static void migrateTo(String version) {
-        var configuration = Flyway.configure()
+        var configuration = PostgresFlywayTestSupport.configure()
             .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
             .locations("classpath:db/migration");
         if (version != null) {

@@ -173,7 +173,7 @@ class MenuExternalNavigationSafetyMigrationTest {
     }
 
     private static Flyway flyway(String version) {
-        var configuration = Flyway.configure()
+        var configuration = PostgresFlywayTestSupport.configure()
             .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
             .locations("classpath:db/migration")
             .cleanDisabled(false);

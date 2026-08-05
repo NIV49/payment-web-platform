@@ -33,6 +33,8 @@ backend
 | 模块 | 职责 | 可以依赖 | 不应承载 |
 | --- | --- | --- | --- |
 | `applications/platform-admin-api` | Spring Boot 启动、Bean 组合、HTTP/CORS/安全拦截、DTO、异常 envelope、本地 fixture 入口 | identity 的 core 与 adapters | 领域规则、jOOQ 查询细节 |
+| `applications/merchant-admin-api` | MERCHANT 独立启动、固定账号域和最小 HTTP 暴露面 | identity 的 core 与 adapters | PLATFORM 管理 API、领域规则、jOOQ 查询细节 |
+| `applications/agent-admin-api` | AGENT 独立启动、固定账号域和最小 HTTP 暴露面 | identity 的 core 与 adapters | PLATFORM 管理 API、领域规则、jOOQ 查询细节 |
 | `identity/core` | 身份、授权、数据范围模型；应用服务；外部端口 | JDK 和内部领域代码 | Spring、jOOQ、Redis、Sa-Token |
 | `identity/persistence-postgres` | jOOQ repository、生成表模型、Identity 表和 Flyway | identity-core、jOOQ | 其他业务上下文的表 |
 | `identity/cache-redis` | 权限快照缓存、登录失败限流 | identity-core、Redis 抽象/adapter | 业务真相、会话真相 |
@@ -41,7 +43,7 @@ backend
 依赖方向：
 
 ```text
-platform-admin-api composition root
+platform-admin-api | merchant-admin-api | agent-admin-api composition root
   -> identity adapters
   -> identity core ports/model
 ```
@@ -88,9 +90,9 @@ Admin CRUD 的 HTTP PEP 已接入 `DefaultAuthorizationService` 和版本化 Gra
 
 ## 4. 可启动 Admin API
 
-### Composition root
+### Composition roots
 
-- `AdminApiApplication`：唯一 Spring Boot main。
+- `AdminApiApplication`、`MerchantAdminApiApplication`、`AgentAdminApiApplication`：三个独立 Spring Boot main，分别固定 PLATFORM、MERCHANT、AGENT 账号域。
 - `IdentityConfiguration`：jOOQ repository、Identity services、BCrypt、Redis 登录限流和 Sa-Token bridge 组装；RoleGrant 全量替换受默认关闭的 `payment.permissions.legacy-administration-cutover-complete` 控制；Sa-Token 安全属性由 Boot auto-configuration 在 ApplicationContext 创建期绑定，不使用启服后 `ApplicationRunner`。
 - `LocalIdentityFixtureBootstrap`：仅在 `local` profile、Flyway 完成后事务性装载开发身份和 BCrypt 密码。
 - `SecurityConfiguration`：Cookie 会话校验、可信 Origin、URL 到权限码映射、CORS 与安全响应头。
@@ -126,7 +128,7 @@ POST /api/auth/login
   -> account-domain-specific HttpOnly Cookie
 ```
 
-登录请求只接受 username/password；账号域由 composition root 注入 `AuthenticationService`，不能由 body/query/header 选择。登录成功把 `accountDomain/userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/stepUpVerified` 写入 Sa-Token session。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要：仅接受 `$2a/$2b/$2y`、cost 10..14 和 53 字符编码体；非法或过高 cost 摘要改用安全 dummy 路径并返回统一登录失败。V13 把同一规则固化为数据库 CHECK。Session bridge 同时精确匹配 account domain、tenant、membership、user、credential，要求四者均为 `ACTIVE`，并比较 permissionVersion 与 sessionVersion。任一域或版本失效时，包含 `/auth/codes` 在内的下一个已认证请求都返回 401 `SESSION_INVALID`，服务端注销会话并清 Cookie。
+登录请求只接受 username/password；账号域由 composition root 注入 `AuthenticationService`，不能由 body/query/header 选择。登录成功把 `accountDomain/userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/stepUpVerified` 写入 Sa-Token session。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要：仅接受 `$2a/$2b/$2y`、cost 10..14 和 53 字符编码体；非法或过高 cost 摘要改用安全 dummy 路径并返回统一登录失败。V13 把同一规则固化为数据库 CHECK。Session bridge 同时精确匹配 account domain、tenant、membership、user、credential，要求四者均为 `ACTIVE`，并比较 permissionVersion 与 sessionVersion。任一域或版本失效时，包含 `/auth/codes` 在内的下一个已认证请求都返回 401 `SESSION_INVALID`，服务端注销会话并清 Cookie。V21 虽已增加 User `identity_version`，当前 Session 尚未携带或逐请求比较该版本，不能据此宣称身份级撤销已接通。
 
 Sa-Token 配置：PLATFORM/MERCHANT/AGENT 分别使用 `platform-admin`/`merchant-admin`/`agent-admin` login type 和 `PAYMENT_PLATFORM_SESSION`/`PAYMENT_MERCHANT_SESSION`/`PAYMENT_AGENT_SESSION` Cookie；均为 8 小时总超时、30 分钟 active timeout、禁止并发共享、只读 Cookie、不读 Header/Body、HttpOnly、SameSite Strict。生产环境必须启用 Secure Cookie。
 
@@ -279,11 +281,23 @@ V16 是只增不改的前向守卫：已执行的 V14/V15 不回写；V16 精确
 
 V17 为 `iam_role/iam_menu/iam_department` 增加 `deleted_at`，为菜单和部门增加 `system_managed`，并把角色 name、菜单 canonical name/path 的唯一索引改成只约束 `deleted_at IS NULL` 的 live rows。迁移不删除历史业务行；local bootstrap 只对精确预置 ID 设置 system-managed 标记。旧二进制不理解 tombstone，因此写入墓碑后的数据库只能前向恢复，不能依赖回滚旧应用继续写入。
 
+### V18-V20 三账号域约束与入口授权
+
+V18 为 Tenant、User、Credential、Membership 增加 `account_domain` 并用组合外键拒绝跨域关系；V19 为三个组合根增加服务端维护的入口 Permission/Grant；V20 收敛保留 grant key 冲突并保留原授权语义、审计和版本证据。登录入口固定账号域，客户端不能提交 tenant、realm 或 portal 切换后台。
+
+### V21-V23 生产身份数据基础
+
+V21 增加 User `identity_version` 和 IdP provisioning 状态、服务端管理的 `iam_tenant_entry_host`，以及独立的 append-only `iam_identity_lifecycle_outbox` 与 mutable relay state。生命周期事件只允许 user、tenant、realm、操作类型、幂等键和时间，不提供可保存邮箱、邀请 Token、密码、TOTP Secret 或 Recovery Code 的 payload 字段；`issuer + subject` 唯一约束继续沿用 V1。
+
+用户名迁移处于 expand 阶段。V21 先证明旧的全局 `uk_iam_authentication_username` 仍存在；V22 使用 `CREATE UNIQUE INDEX CONCURRENTLY` 建立 `(account_domain, username)` 唯一索引；V23 将其附加为 `uk_iam_authentication_domain_username`。运行时代码已按账号域预检用户名冲突，但旧全局约束尚未删除，因此跨域同名仍会被数据库拒绝。只有旧实例清零和 N/N-1 兼容证据通过后，才能用新的 contract 迁移删除旧约束。
+
+V22 的 sidecar 明确 `executeInTransaction=false`。三个应用、测试 helper 和 jOOQ codegen 都关闭 PostgreSQL transactional advisory lock，避免非事务并发索引等待 Flyway 自身事务锁。生产迁移 Job 必须使用同一设置；V22 异常中断后先检查同名索引是否 `indisvalid=false`，仅删除该精确无效索引后再重试，不得直接 `repair` 掩盖未完成 DDL。
+
 ### 迁移纪律
 
 - 所有已执行版本不可修改 checksum；
-- 结构和数据修正新增 V4+；
-- 同时测试空库从 V1 全量迁移、V2/V3 序列升级，以及 V8 fixture 隔离的成功与拒绝路径；V9-V13 遇到历史重复路由、非法授权组合、不安全外链、跨租户写 action 或非法 BCrypt 摘要必须拒绝升级；V14/V15 还要覆盖简单和带有效期/多维度/target 的旧 Grant 等价展开、版本、审计和 Outbox，V16 覆盖目录元数据漂移的失败关闭，V17 覆盖墓碑列、live-only 唯一性和旧数据保留，禁止静默丢权或自动修复未知权限事实；
+- 结构和数据修正新增前向版本；
+- 同时测试空库从 V1 全量迁移、历史版本升级，以及各拒绝路径；V21-V23 还要覆盖 IdP 状态回填、跨域 Host/Outbox 原子拒绝、事件不可变、expand 前置约束和账号域用户名唯一性；
 - 密码和固定身份初始化只允许 local profile；已有库先按 [V8 fixture 隔离迁移手册](../../runbooks/iam-v8-fixture-isolation.md) 盘点。无关真实数据可原样保留，只有落入预留 footprint 或依赖 tenant `1` 的历史数据才需要单独的前向迁移；
 - 菜单 component 和 i18n key 属于跨端协议，迁移前要有契约校验。
 

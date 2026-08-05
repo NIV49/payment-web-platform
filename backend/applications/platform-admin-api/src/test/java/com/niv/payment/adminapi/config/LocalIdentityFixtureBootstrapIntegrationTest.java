@@ -1,5 +1,6 @@
 package com.niv.payment.adminapi.config;
 
+import com.niv.payment.adminapi.PostgresFlywayTestSupport;
 import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.persistence.repository.JooqCredentialRepository;
 import org.flywaydb.core.Flyway;
@@ -56,7 +57,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
 
     @BeforeEach
     void migrateProductionSchema() {
-        Flyway flyway = Flyway.configure()
+        Flyway flyway = PostgresFlywayTestSupport.configure()
             .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
             .locations("classpath:db/migration")
             .cleanDisabled(false)
@@ -798,7 +799,7 @@ class LocalIdentityFixtureBootstrapIntegrationTest {
     }
 
     private Flyway flyway(String version) {
-        var configuration = Flyway.configure()
+        var configuration = PostgresFlywayTestSupport.configure()
             .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
             .locations("classpath:db/migration")
             .cleanDisabled(false);
