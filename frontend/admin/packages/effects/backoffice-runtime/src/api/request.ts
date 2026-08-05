@@ -20,6 +20,13 @@ import { refreshTokenApi } from './core';
 import { resolveApiErrorMessage } from './error-contract';
 import { COOKIE_SESSION_MARKER, formatSessionAuthorization } from './session';
 
+const REQUEST_PROOF_HEADER = 'X-CSRF-Token';
+const MUTATING_METHODS = new Set(['DELETE', 'PATCH', 'POST', 'PUT']);
+const PROOF_EXEMPT_PATHS = new Set(['/auth/login', '/auth/oidc/handoff']);
+let cachedRequestProof: null | string = null;
+let pendingRequestProof: null | Promise<string> = null;
+let requestProofGeneration = 0;
+
 const { apiURL } = useAppConfig(
   { VITE_GLOB_API_URL: import.meta.env.VITE_GLOB_API_URL },
   import.meta.env.PROD,
@@ -41,6 +48,7 @@ function createRequestClient(
    */
   async function doReAuthenticate() {
     console.warn('Access token or refresh token is invalid or expired. ');
+    resetSessionRequestProof();
     const accessStore = useAccessStore();
     const authStore = useAuthStore();
     accessStore.setAccessToken(null);
@@ -72,6 +80,12 @@ function createRequestClient(
   client.addRequestInterceptor({
     fulfilled: async (config) => {
       const accessStore = useAccessStore();
+
+      if (requiresRequestProof(config.method, config.url)) {
+        config.headers[REQUEST_PROOF_HEADER] = await sessionRequestProof();
+      } else {
+        delete config.headers['X-CSRF-Token'];
+      }
 
       const authorization = formatSessionAuthorization(accessStore.accessToken);
       if (authorization) {
@@ -116,6 +130,44 @@ function createRequestClient(
   );
 
   return client;
+}
+
+function requiresRequestProof(method?: string, url?: string) {
+  if (!method || !MUTATING_METHODS.has(method.toUpperCase())) return false;
+  const path = new URL(url ?? '/', 'https://backoffice.invalid').pathname;
+  return !PROOF_EXEMPT_PATHS.has(path);
+}
+
+async function sessionRequestProof() {
+  if (cachedRequestProof) return cachedRequestProof;
+  if (pendingRequestProof) return pendingRequestProof;
+  const generation = requestProofGeneration;
+  const loading = loadSessionRequestProof();
+  pendingRequestProof = loading;
+  try {
+    const proof = await loading;
+    if (requestProofGeneration === generation) cachedRequestProof = proof;
+    return proof;
+  } finally {
+    if (pendingRequestProof === loading) pendingRequestProof = null;
+  }
+}
+
+async function loadSessionRequestProof() {
+  const response = (await baseRequestClient.get('/auth/csrf')) as unknown as {
+    data?: { data?: { requestProof?: unknown } };
+  };
+  const proof = response.data?.data?.requestProof;
+  if (typeof proof !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(proof)) {
+    throw new Error('Invalid session request proof response');
+  }
+  return proof;
+}
+
+export function resetSessionRequestProof() {
+  requestProofGeneration += 1;
+  cachedRequestProof = null;
+  pendingRequestProof = null;
 }
 
 export const requestClient = createRequestClient(apiURL, {

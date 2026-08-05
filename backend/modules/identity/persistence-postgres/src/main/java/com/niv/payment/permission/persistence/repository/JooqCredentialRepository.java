@@ -98,6 +98,7 @@ public final class JooqCredentialRepository implements AuthenticationService.Cre
                 IAM_MEMBERSHIP.DEPARTMENT_ID,
                 IAM_MEMBERSHIP.PERMISSION_VERSION,
                 IAM_MEMBERSHIP.SESSION_VERSION,
+                IAM_USER.IDENTITY_VERSION,
                 IAM_MEMBERSHIP.ACCOUNT_DOMAIN,
                 IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
             .from(IAM_AUTHENTICATION_CREDENTIAL)
@@ -132,6 +133,7 @@ public final class JooqCredentialRepository implements AuthenticationService.Cre
             record.get(IAM_MEMBERSHIP.DEPARTMENT_ID),
             record.get(IAM_MEMBERSHIP.PERMISSION_VERSION),
             record.get(IAM_MEMBERSHIP.SESSION_VERSION),
+            record.get(IAM_USER.IDENTITY_VERSION),
             AccountDomain.valueOf(record.get(IAM_MEMBERSHIP.ACCOUNT_DOMAIN)),
             record.get(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)));
     }

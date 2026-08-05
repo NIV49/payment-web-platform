@@ -4,6 +4,7 @@ import {
   authenticationRequestClient,
   baseRequestClient,
   requestClient,
+  resetSessionRequestProof,
 } from '@payment/backoffice-runtime/api/request';
 
 export const LOGIN_CREDENTIAL_FIELD = 'password' as const;
@@ -30,6 +31,7 @@ export namespace AuthApi {
  * 登录
  */
 export async function loginApi(data: AuthApi.LoginParams) {
+  resetSessionRequestProof();
   return authenticationRequestClient.post<AuthApi.LoginResult>('/auth/login', {
     [LOGIN_CREDENTIAL_FIELD]: data.password,
     username: data.username,
@@ -50,7 +52,11 @@ export async function refreshTokenApi() {
  * 退出登录
  */
 export async function logoutApi() {
-  return authenticationRequestClient.post('/auth/logout', null);
+  try {
+    return await authenticationRequestClient.post('/auth/logout', null);
+  } finally {
+    resetSessionRequestProof();
+  }
 }
 
 /**

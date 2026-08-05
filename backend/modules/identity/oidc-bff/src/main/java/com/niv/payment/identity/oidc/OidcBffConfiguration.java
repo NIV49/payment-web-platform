@@ -13,6 +13,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import tools.jackson.databind.ObjectMapper;
 
@@ -42,12 +43,17 @@ public class OidcBffConfiguration {
     }
 
     @Bean
-    SpringOidcClient springOidcClient(OidcClientSettings settings) {
+    JwtDecoder oidcJwtDecoder(OidcClientSettings settings) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(settings.jwkSetUri().toString())
             .jwsAlgorithm(SignatureAlgorithm.RS256)
             .build();
         decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(settings.issuer().toString()));
-        return new SpringOidcClient(settings, new RestClientAuthorizationCodeTokenResponseClient(), decoder);
+        return decoder;
+    }
+
+    @Bean
+    SpringOidcClient springOidcClient(OidcClientSettings settings, JwtDecoder oidcJwtDecoder) {
+        return new SpringOidcClient(settings, new RestClientAuthorizationCodeTokenResponseClient(), oidcJwtDecoder);
     }
 
     @Bean
@@ -74,8 +80,9 @@ public class OidcBffConfiguration {
     OidcSessionAuthenticator oidcSessionAuthenticator(
         AccountDomain accountDomain,
         JooqOidcIdentityRepository identities,
-        SaTokenSessionIssuer sessions) {
-        return new OidcSessionAuthenticator(accountDomain, identities, sessions);
+        SaTokenSessionIssuer sessions,
+        OidcSessionIndex sessionIndex) {
+        return new OidcSessionAuthenticator(accountDomain, identities, sessions, sessionIndex);
     }
 
     @Bean
@@ -95,5 +102,30 @@ public class OidcBffConfiguration {
     OidcSessionLogoutService oidcSessionLogoutService(
         StpLogic stpLogic, SpringOidcClient client, OidcClientSettings settings) {
         return new OidcSessionLogoutService(stpLogic, client, settings);
+    }
+
+    @Bean
+    OidcSessionIndex oidcSessionIndex(
+        StringRedisTemplate redis,
+        AccountDomain accountDomain,
+        @Value("${payment.oidc.application-session-index-ttl:PT9H}") Duration sessionTtl,
+        @Value("${payment.oidc.logout-processing-ttl:PT30S}") Duration processingTtl,
+        @Value("${payment.oidc.logout-replay-ttl:PT24H}") Duration completedTtl) {
+        return new RedisOidcSessionIndex(redis, accountDomain.cacheNamespace(), sessionTtl,
+            processingTtl, completedTtl);
+    }
+
+    @Bean
+    OidcLogoutTokenVerifier oidcLogoutTokenVerifier(
+        OidcClientSettings settings,
+        JwtDecoder oidcJwtDecoder,
+        @Value("${payment.oidc.logout-event-maximum-age:PT5M}") Duration maximumAge) {
+        return new OidcLogoutTokenVerifier(settings, oidcJwtDecoder, Clock.systemUTC(), maximumAge);
+    }
+
+    @Bean
+    OidcBackChannelLogoutService oidcBackChannelLogoutService(
+        OidcLogoutTokenVerifier verifier, OidcSessionIndex index, StpLogic stpLogic) {
+        return new OidcBackChannelLogoutService(verifier, index, stpLogic::logout);
     }
 }

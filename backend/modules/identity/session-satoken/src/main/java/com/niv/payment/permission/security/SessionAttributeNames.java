@@ -18,6 +18,7 @@ public final class SessionAttributeNames {
     public static final String OIDC_ID_ASSERTION = "oidcIdToken";
     public static final String STEP_UP_AT = "stepUpAt";
     public static final String STEP_UP_VERIFIED = "stepUpVerified";
+    public static final String REQUEST_PROOF = "requestProof";
 
     private SessionAttributeNames() {
     }

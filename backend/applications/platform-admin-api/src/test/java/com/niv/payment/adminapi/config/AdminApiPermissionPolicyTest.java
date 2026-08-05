@@ -17,6 +17,7 @@ class AdminApiPermissionPolicyTest {
         assertThat(policy.isPublic("GET", "/api/auth/oidc/start")).isTrue();
         assertThat(policy.isPublic("GET", "/api/auth/oidc/callback")).isTrue();
         assertThat(policy.isPublic("POST", "/api/auth/oidc/handoff")).isTrue();
+        assertThat(policy.isPublic("POST", "/api/auth/oidc/backchannel-logout")).isTrue();
         assertThat(policy.isPublic("GET", "/api/health")).isTrue();
         assertThat(policy.isPublic("GET", "/api/auth/login")).isFalse();
     }
@@ -25,6 +26,7 @@ class AdminApiPermissionPolicyTest {
     void mapsEveryRegisteredEndpointToItsPermission() {
         assertThat(policy.requiredPermissions("GET", "/api/user/info")).isEmpty();
         assertThat(policy.requiredPermissions("POST", "/api/auth/logout")).isEmpty();
+        assertThat(policy.requiredPermissions("GET", "/api/auth/csrf")).isEmpty();
         assertThat(policy.requiredPermissions("GET", "/api/system/user/list")).isEqualTo(List.of("user:view"));
         assertThat(policy.requiredPermissions("POST", "/api/system/user")).isEqualTo(List.of("user:create"));
         assertThat(policy.requiredPermissions("PUT", "/api/system/user/100"))

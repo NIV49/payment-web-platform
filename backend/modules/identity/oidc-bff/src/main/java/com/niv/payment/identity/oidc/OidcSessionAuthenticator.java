@@ -11,12 +11,14 @@ public final class OidcSessionAuthenticator implements OidcFlowService.SessionAu
     private final AccountDomain accountDomain;
     private final IdentityRepository identities;
     private final SaTokenSessionIssuer sessions;
+    private final OidcSessionIndex sessionIndex;
 
     public OidcSessionAuthenticator(AccountDomain accountDomain, IdentityRepository identities,
-                                    SaTokenSessionIssuer sessions) {
+                                    SaTokenSessionIssuer sessions, OidcSessionIndex sessionIndex) {
         this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
         this.identities = Objects.requireNonNull(identities, "identities");
         this.sessions = Objects.requireNonNull(sessions, "sessions");
+        this.sessionIndex = Objects.requireNonNull(sessionIndex, "sessionIndex");
     }
 
     @Override
@@ -31,6 +33,12 @@ public final class OidcSessionAuthenticator implements OidcFlowService.SessionAu
             account.permissionVersion(), account.sessionVersion(), account.identityVersion(), accountDomain,
             entry.entryHost(), identity.issuer(), identity.subject(), identity.sessionId(), identity.authTime(),
             identity.acr(), identity.idToken()));
+        try {
+            sessionIndex.register(identity.issuer(), identity.subject(), identity.sessionId(), account.membershipId());
+        } catch (RuntimeException exception) {
+            sessions.logout();
+            throw exception;
+        }
     }
 
     @FunctionalInterface

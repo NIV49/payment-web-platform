@@ -26,6 +26,7 @@ public final class AdminApiPermissionPolicy {
             || ("GET".equals(method) && ("/api/auth/oidc/start".equals(path)
                 || "/api/auth/oidc/callback".equals(path)))
             || ("POST".equals(method) && "/api/auth/oidc/handoff".equals(path))
+            || ("POST".equals(method) && "/api/auth/oidc/backchannel-logout".equals(path))
             || ("GET".equals(method) && "/api/health".equals(path));
     }
 
@@ -81,7 +82,8 @@ public final class AdminApiPermissionPolicy {
 
     private static boolean sessionOnly(String method, String path) {
         return ("POST".equals(method) && "/api/auth/logout".equals(path))
-            || ("GET".equals(method) && ("/api/user/info".equals(path)
+            || ("GET".equals(method) && ("/api/auth/csrf".equals(path)
+                || "/api/user/info".equals(path)
                 || "/api/auth/codes".equals(path) || "/api/menu/all".equals(path)));
     }
 }

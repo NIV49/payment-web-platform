@@ -1,6 +1,7 @@
 package com.niv.payment.permission.backoffice;
 
 import com.niv.payment.permission.security.SaTokenSessionBridge;
+import com.niv.payment.permission.security.InvalidSessionException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -14,9 +15,11 @@ import java.util.Map;
 import java.util.Set;
 
 final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
+    private static final String REQUEST_PROOF_HEADER = "X-CSRF-Token";
     private static final Map<String, Set<String>> ROUTES = Map.of(
         "/api/auth/login", Set.of("POST"),
         "/api/auth/logout", Set.of("POST"),
+        "/api/auth/csrf", Set.of("GET"),
         "/api/user/info", Set.of("GET"),
         "/api/auth/codes", Set.of("GET"),
         "/api/menu/all", Set.of("GET"),
@@ -41,7 +44,7 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**").allowedOrigins(allowedOrigin)
             .allowedMethods("GET", "POST", "OPTIONS")
-            .allowedHeaders("Content-Type", "Accept-Language", "X-Requested-With")
+            .allowedHeaders("Content-Type", "Accept-Language", "X-Requested-With", REQUEST_PROOF_HEADER)
             .allowCredentials(true).maxAge(3600);
     }
 
@@ -90,7 +93,14 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
                 throw new BackofficeAccessDeniedException();
             }
             if (!PUBLIC.contains(request.getMethod() + " " + request.getRequestURI())) {
-                sessions.currentSubject();
+                sessions.currentSubject(request.getServerName());
+                if (!Set.of("GET", "HEAD").contains(request.getMethod())) {
+                    try {
+                        sessions.requireRequestProof(request.getHeader(REQUEST_PROOF_HEADER));
+                    } catch (InvalidSessionException exception) {
+                        throw new BackofficeAccessDeniedException();
+                    }
+                }
             }
             return true;
         }

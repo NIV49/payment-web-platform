@@ -82,6 +82,10 @@ payment:
     frontend-callback-path: /auth/oidc/callback
     transaction-ttl: PT5M
     handoff-ttl: PT1M
+    application-session-index-ttl: PT9H
+    logout-event-maximum-age: PT5M
+    logout-processing-ttl: PT30S
+    logout-replay-ttl: PT24H
 
 logging:
   level:

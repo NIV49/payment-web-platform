@@ -11,7 +11,7 @@
 2. **Target Prototype Contract**：本轮原型认可的边界和不变量；
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
-当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 的 Host、身份版本、provisioning、生命周期 Outbox 和用户名 expand 数据基础；PLATFORM 已实现默认关闭的 OIDC BFF 协议骨架和生产认证模式门禁，MERCHANT/AGENT 尚未接入。CSRF、back-channel logout、身份版本逐请求校验、真实 Keycloak 联调、MFA 和生命周期 relay 仍未完成，因此整体仍是生产 NO-GO。
+当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 数据基础；三端已实施 Session-bound CSRF 和逐请求 identityVersion，PLATFORM 已实现默认关闭的 OIDC BFF、精确映射、Host 复核和签名 back-channel logout。MERCHANT/AGENT OIDC、真实 Keycloak、生命周期 relay、MFA/step-up 和恢复编排仍未完成，因此整体仍是生产 NO-GO。
 
 ## IAM-001 已实现边界
 
@@ -109,7 +109,7 @@ Sa-Token 当前配置：
 - 不从 Authorization header 读取；
 - 不从 request body 读取；
 - 不把 token 写入响应 header；
-- Session 保存服务端可信的 accountDomain、userId、membershipId、tenantId、departmentId、permissionVersion、sessionVersion。
+- Session 保存服务端可信的 accountDomain、userId、membershipId、tenantId、departmentId、permissionVersion、sessionVersion、identityVersion 和 requestProof；外部 Session 另保存 entryHost、issuer、subject、sid、authTime 与 acr。
 
 上述属性由 `application.yml` 交给 Sa-Token Boot auto-configuration，在 ApplicationContext 创建期完成绑定；不存在等 Web Server 已接受请求后再修改全局安全配置的 `ApplicationRunner`。集成测试在 context 中核对最终 `SaTokenConfig` 值并断言该 runner bean 不存在。
 
@@ -150,6 +150,7 @@ tenantId
 departmentId
 permissionVersion
 sessionVersion
+identityVersion
 stepUpVerified
 ```
 
@@ -157,7 +158,7 @@ stepUpVerified
 
 - tenantId、membershipId、operatorId 不从浏览器 body/query/header 获取；
 - 所有管理查询都强制使用 Session tenantId；
-- Session bridge 先要求 session accountDomain 与 composition root 完全一致，再以 accountDomain + tenantId + membershipId + userId 单次精确查询当前 permissionVersion 与 sessionVersion，并校验 Tenant、User、Credential、Membership 全部 `ACTIVE`、Credential hash 受 V13 约束满足统一 BCrypt 格式/成本策略；任一域或版本失效时，包含 `/auth/codes` 在内的下一个已认证请求立即返回 401 `SESSION_INVALID`，服务端注销当前会话并清除 Cookie；Admin 写事务还会在锁后复核两个版本；
+- Session bridge 先要求 session accountDomain 与 composition root 完全一致，再以 accountDomain + tenantId + membershipId + userId 单次精确查询当前 permissionVersion、sessionVersion、identityVersion 和身份映射，并校验 Tenant、User、Credential、Membership 全部 `ACTIVE`。本地会话要求可登录 BCrypt 摘要；外部会话允许空摘要但逐请求精确匹配 issuer+subject，HTTP PEP 另复核 entryHost。任一域、映射或版本失效时，下一个已认证请求立即返回 401 `SESSION_INVALID` 并清除 Cookie；Admin 写事务仍在锁后复核 actor 版本；
 - Membership 更新、状态变化和终止会递增 Membership 的 sessionVersion 与 permissionVersion；
 - 角色更新、状态变化和删除会递增该角色成员的 permissionVersion；
 - 权限码从当前租户、当前 Membership 的有效 RoleGrant 读取。
@@ -194,7 +195,7 @@ stepUpVerified
 | 400 | 40001 | `INVALID_REQUEST` | DTO 校验、JSON、ID、时间、状态等非法 |
 | 401 | 40101 | `INVALID_CREDENTIALS` | 用户名或密码错误 |
 | 401 | 40101 | `AUTH_REQUIRED` | 无有效 Sa-Token 会话 |
-| 401 | 40102 | `SESSION_INVALID` | sessionVersion/permissionVersion 失效、actor 主体状态变化、密码不可用或 Session 不合法；服务端注销并清 Cookie |
+| 401 | 40102 | `SESSION_INVALID` | permission/session/identity version 失效、issuer+subject/Host 漂移、actor 主体状态变化、本地密码不可用或 Session 不合法；服务端注销并清 Cookie |
 | 403 | 40301 | `PERMISSION_DENIED` | 缺少动作权限、Origin 不可信或 API method/path 未登记 |
 | 404 | 40401 | `RESOURCE_NOT_FOUND` | 当前租户下目标资源不存在，或非 API 资源未命中 |
 | 409 | 40901 | `DATA_CONFLICT` | 数据依赖、业务不变量或数据库唯一约束冲突 |
@@ -899,14 +900,14 @@ V23__attach_account_domain_username_constraint.sql
 | Capability | Prototype status | Production meaning |
 | --- | --- | --- |
 | username/password login | BCrypt + 统一 hash 格式/成本策略 + Redis 原子 client/client+username 双桶已实现 | 仅本地过渡凭证，不替代 IdP/MFA，也不代表分布式攻击防护已完成 |
-| Cookie session | Sa-Token/Redis 已实现；安全配置在 context 创建期绑定 | 尚需部署拓扑、密钥、TTL、故障和撤权演练 |
+| Cookie session | Sa-Token/Redis、逐请求 identityVersion/issuer+subject/Host 复核和独立 CSRF 已实现 | 尚需真实部署拓扑、密钥、TTL、故障和跨 Realm 撤权演练 |
 | RBAC management | 用户/角色/菜单/部门与受限 RoleGrant API 已实现 | 仅平台租户、本轮 19 个当前管理权限；V15 另保留 2 个不进入新授权面的旧码；角色授权仅支持 18 个精确目录权限 |
 | Permission load | HTTP PEP + 版本化 Redis GrantSnapshot 已接通 | RoleGrant 写入仍需正式审批、部署与恢复演练 |
 | Cross-tenant model | `SAME_TENANT_ONLY` 默认；只有受控 `READ/VIEW` action 可使用 `RELATED_PARTY_READ`，Core 与 V12 CHECK 双重约束 | 没有 Party/Relationship adapter，运行时仍 fail closed |
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、递归拒绝全部核心/fallback/local canonical 冲突、退出/换用户清旧路由、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
 | Flyway | V1→V23 fresh/upgrade 可运行；V21-V23 覆盖身份基础、跨域原子约束、事件不可变和用户名 expand | 旧 username 约束 contract、生产 migration Job/审批和备份恢复演练未完成；V22 非事务失败需检查 invalid index |
-| PLATFORM OIDC BFF | Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff 和 RP-Initiated Logout URL 已实现，默认关闭 | 尚未完成真实 Keycloak、CSRF、back-channel logout、身份版本撤销、前端和三 Realm 联调，不得开放生产流量 |
+| PLATFORM OIDC BFF | Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout 和应用 Session 索引已实现，默认关闭 | 尚未完成真实 Keycloak、生命周期 relay、MERCHANT/AGENT OIDC、配置即代码和三 Realm 联调，不得开放生产流量 |
 
 ## 2.3 PLATFORM OIDC BFF 契约
 
@@ -940,7 +941,7 @@ V23__attach_account_domain_username_constraint.sql
 
 ### POST `/auth/logout`
 
-要求有效本端 Cookie Session 和可信 Origin。应用先清除本地 Session，再返回标准 RP-Initiated Logout URL：
+要求有效本端 Cookie Session、可信 Origin 和 `X-CSRF-Token`。应用先清除本地 Session，再返回标准 RP-Initiated Logout URL：
 
 ```json
 {
@@ -949,13 +950,22 @@ V23__attach_account_domain_username_constraint.sql
 }
 ```
 
-ID Token 只保存在服务端 Session，用于标准 `id_token_hint`，不进入 localStorage/sessionStorage。前端必须导航至返回 URL 才完成 Realm logout。S4 接入独立 CSRF token 前，此端点不得作为生产完成证据。
+ID Token 只保存在服务端 Session，用于标准 `id_token_hint`，不进入 localStorage/sessionStorage。前端必须导航至返回 URL 才完成 Realm logout。
+
+### GET `/auth/csrf`
+
+要求有效 Cookie Session。成功返回 `{ requestProof }`；该值由服务端随机生成并绑定当前 Session，前端只在内存保存。所有 Cookie 认证的 POST/PUT/PATCH/DELETE 都必须在可信 Origin 之外携带精确 `X-CSRF-Token`。登录和 OIDC handoff 没有既有 Cookie 授权上下文，不要求该值；SameSite 不能替代该校验。
+
+### POST `/auth/oidc/backchannel-logout`
+
+仅接受 `application/x-www-form-urlencoded` 的 `logout_token` 字段。端点不校验 Origin 或浏览器 CSRF；它使用固定 Realm JWKS 验证 RS256 签名、精确 issuer、client audience、iat 最大时效、jti、back-channel event、可选 `typ=logout+jwt`，拒绝 nonce，并要求 subject 或 sid。sid 存在时只查 `issuer + sid`，否则查 `issuer + subject`；映射到的 membership 应用 Session 全部撤销。Redis key 只保存复合值摘要，event 使用 owner CAS 短租约和 24 小时完成标记；重放成功幂等返回 204，非法协议消息返回 400 `OIDC_LOGOUT_REJECTED`。
 
 OIDC 认证失败统一返回 HTTP 401、code `40103`、error `OIDC_LOGIN_REJECTED`，并与其他 API 一样返回 `traceId`；不披露 User、Membership、Host 注册状态或具体 token claim。
 
 ## 2.4 当前尚未实现
 
 - MERCHANT/AGENT OIDC 组合根、真实 Keycloak 三 Realm 联调和配置即代码；
+- 生命周期 relay 对 identityVersion 的可靠推进及跨系统撤销确认；
 - MFA、step-up、MFA 重置审批；
 - 生产级的新建用户密码激活、邀请、首次改密、忘记密码和管理员重置；
 - 超出本文精确目录、数据维度或审批规则的通用 RoleGrant 管理；

@@ -6,7 +6,7 @@ Decision-ID: IAM-PRODUCTION-IDENTITY-BOUNDARY
 
 ## Context
 
-[ADR-0004](0004-external-idp-and-application-authorization-boundary.md) assigns production authentication to an external OpenID Connect identity provider, while [ADR-0008](0008-isolate-three-backoffice-account-domains-and-sessions.md) separates PLATFORM, MERCHANT, and AGENT application accounts and sessions. The current prototype already has three backend composition roots, but one frontend source application still produces three variants and production OIDC, CSRF, identity lifecycle, and external-session revocation are not implemented.
+[ADR-0004](0004-external-idp-and-application-authorization-boundary.md) assigns production authentication to an external OpenID Connect identity provider, while [ADR-0008](0008-isolate-three-backoffice-account-domains-and-sessions.md) separates PLATFORM, MERCHANT, and AGENT application accounts and sessions. Implementation proceeds in independently verifiable slices; accepting this ADR does not allow a partially implemented realm, revocation, CSRF, lifecycle, or recovery path to be described as production-ready.
 
 The target topology uses three independently built and deployed frontend applications and three independently built and deployed backend services. Stable framework packages, Identity Core, PostgreSQL IAM tables, and one managed Keycloak cluster may still be shared. Sharing those components reduces duplication, but it also creates common administrative, storage, upgrade, and outage failure domains that must not be described as physical isolation.
 
@@ -64,7 +64,7 @@ MFA recovery is a durable state machine rather than a fictitious cross-system da
 - Origin, OIDC state, PKCE, CSRF, Cookie attributes, back-channel logout, and identity versions solve different threats. Passing one control never disables another.
 - The application never maps an IdP login by email or username and never infers identity from account domain alone.
 - Keycloak owns passwords, MFA credentials, and recovery codes. The application owns account-domain mapping, Membership, authorization, local session versions, recovery orchestration state, and audit evidence.
-- The current local username/password prototype, shared frontend variant source, missing CSRF synchronizer token, and missing OIDC/back-channel logout implementation remain production blockers. This ADR accepts the target architecture; it does not claim that the repository currently implements it.
+- The repository now has three frontend applications and backend services, session-bound CSRF enforcement, per-request identity-version checks, and PLATFORM OIDC/back-channel primitives. Real Keycloak integration, MERCHANT/AGENT OIDC, lifecycle version advancement, complete MFA recovery, configuration-as-code, and formal Judges remain production blockers.
 
 ## Release and rollback
 

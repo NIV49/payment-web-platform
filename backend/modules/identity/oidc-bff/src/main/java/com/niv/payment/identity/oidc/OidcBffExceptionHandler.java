@@ -22,5 +22,12 @@ final class OidcBffExceptionHandler {
                 40103, null, "OIDC_LOGIN_REJECTED", "OIDC login was rejected", trace.current()));
     }
 
+    @ExceptionHandler(OidcLogoutTokenVerifier.BackChannelLogoutRejectedException.class)
+    ResponseEntity<OidcErrorResponse> rejectedBackChannelLogout() {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(new OidcErrorResponse(
+                40003, null, "OIDC_LOGOUT_REJECTED", "OIDC back-channel logout was rejected", trace.current()));
+    }
+
     record OidcErrorResponse(int code, Void data, String error, String message, String traceId) { }
 }

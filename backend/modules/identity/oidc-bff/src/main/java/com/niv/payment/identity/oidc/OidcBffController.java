@@ -5,6 +5,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,11 +21,14 @@ import java.net.URI;
 final class OidcBffController {
     private final OidcFlowService flow;
     private final OidcSessionLogoutService logout;
+    private final OidcBackChannelLogoutService backChannelLogout;
     private final OidcRequestTrace trace;
 
-    OidcBffController(OidcFlowService flow, OidcSessionLogoutService logout, OidcRequestTrace trace) {
+    OidcBffController(OidcFlowService flow, OidcSessionLogoutService logout,
+                      OidcBackChannelLogoutService backChannelLogout, OidcRequestTrace trace) {
         this.flow = flow;
         this.logout = logout;
+        this.backChannelLogout = backChannelLogout;
         this.trace = trace;
     }
 
@@ -55,6 +59,13 @@ final class OidcBffController {
     @PostMapping("/logout")
     OidcApiResponse<LogoutResponse> logout() {
         return OidcApiResponse.success(new LogoutResponse(logout.logout().toString()), trace.current());
+    }
+
+    @PostMapping(value = "/oidc/backchannel-logout",
+        consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+    ResponseEntity<Void> backChannelLogout(@RequestParam("logout_token") String signedLogout) {
+        backChannelLogout.logout(signedLogout);
+        return ResponseEntity.noContent().build();
     }
 
     record HandoffRequest(@NotBlank @Size(max = 512) String handoff) { }

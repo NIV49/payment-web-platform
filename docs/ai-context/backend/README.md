@@ -94,7 +94,7 @@ Admin CRUD 的 HTTP PEP 已接入 `DefaultAuthorizationService` 和版本化 Gra
 ### Composition roots
 
 - `AdminApiApplication`、`MerchantAdminApiApplication`、`AgentAdminApiApplication`：三个独立 Spring Boot main，分别固定 PLATFORM、MERCHANT、AGENT 账号域。
-- `IdentityConfiguration`：jOOQ repository、Identity services、BCrypt、Redis 登录限流、Sa-Token bridge 和 PLATFORM OIDC BFF 组装；RoleGrant 全量替换受默认关闭的 `payment.permissions.legacy-administration-cutover-complete` 控制；Sa-Token 安全属性由 Boot auto-configuration 在 ApplicationContext 创建期绑定，不使用启服后 `ApplicationRunner`。
+- `IdentityConfiguration`：jOOQ repository、Identity services、BCrypt、Redis 登录限流、Sa-Token bridge 和 PLATFORM OIDC BFF/back-channel logout 组装；RoleGrant 全量替换受默认关闭的 `payment.permissions.legacy-administration-cutover-complete` 控制；Sa-Token 安全属性由 Boot auto-configuration 在 ApplicationContext 创建期绑定，不使用启服后 `ApplicationRunner`。
 - `LocalIdentityFixtureBootstrap`：仅在 `local` profile、Flyway 完成后事务性装载开发身份和 BCrypt 密码。
 - `SecurityConfiguration`：Cookie 会话校验、可信 Origin、URL 到权限码映射、CORS 与安全响应头。
 - `application.yml`：生产默认 fail-closed 的 DB、Redis、Flyway、jOOQ 和安全配置。
@@ -104,7 +104,8 @@ Admin CRUD 的 HTTP PEP 已接入 `DefaultAuthorizationService` 和版本化 Gra
 
 - `LocalAuthController`：只在 `local` profile 且 `payment.identity.local-login-enabled=true` 时注册 `/api/auth/login|logout`；非 local profile 禁止开启。
 - `AuthUserMenuController`：当前用户、权限码、运行时菜单和健康检查；`/user/info` 的 Web DTO 补齐空 `desc` 和固定非秘密 `cookie-session` marker，不把这些展示/适配字段下沉到 Core。
-- `OidcBffController`：仅 `payment.oidc.enabled=true` 时注册 PLATFORM 的 `/api/auth/oidc/start|callback|handoff` 与生产 logout；协议失败统一且不泄露身份存在性。
+- `OidcBffController`：仅 `payment.oidc.enabled=true` 时注册 PLATFORM 的 `/api/auth/oidc/start|callback|handoff|backchannel-logout` 与生产 logout；协议失败统一且不泄露身份存在性。
+- `SessionSecurityController`：为有效 Cookie Session 返回服务端绑定的请求凭据；不接受客户端选择 Session 或账号域。
 - `SystemAdministrationController`：`/api/system/user|role|dept|menu` 管理接口。
 - `ApiResponse`：`{ code, data, error, message, traceId }`。
 - `ApiExceptionHandler`：校验、认证、授权、冲突和内部异常转换。
@@ -131,7 +132,7 @@ POST /api/auth/login
   -> account-domain-specific HttpOnly Cookie
 ```
 
-登录请求只接受 username/password；账号域由 composition root 注入 `AuthenticationService`，不能由 body/query/header 选择。登录成功把 `accountDomain/userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/stepUpVerified` 写入 Sa-Token session。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要：仅接受 `$2a/$2b/$2y`、cost 10..14 和 53 字符编码体；非法或过高 cost 摘要改用安全 dummy 路径并返回统一登录失败。V13 把同一规则固化为数据库 CHECK。Session bridge 同时精确匹配 account domain、tenant、membership、user、credential，要求四者均为 `ACTIVE`，并比较 permissionVersion 与 sessionVersion。任一域或版本失效时，包含 `/auth/codes` 在内的下一个已认证请求都返回 401 `SESSION_INVALID`，服务端注销会话并清 Cookie。V21 虽已增加 User `identity_version`，当前 Session 尚未携带或逐请求比较该版本，不能据此宣称身份级撤销已接通。
+登录请求只接受 username/password；账号域由 composition root 注入 `AuthenticationService`，不能由 body/query/header 选择。登录成功把 `accountDomain/userId/membershipId/tenantId/departmentId/permissionVersion/sessionVersion/identityVersion/stepUpVerified/requestProof` 写入 Sa-Token session。Core 在调用 BCrypt verifier 前先用统一 `LoginCredentialPolicy` 校验摘要。Session bridge 精确匹配 account domain、tenant、membership、user、credential，要求四者均为 `ACTIVE`，逐请求比较 permissionVersion、sessionVersion 和 identityVersion；本地会话继续要求可登录的 BCrypt 摘要，外部会话允许空摘要但必须精确匹配当前 `issuer + subject`，且 HTTP PEP 复核 `entryHost`。任一域、映射或版本失效时，下一个已认证请求返回 401 `SESSION_INVALID` 并清 Cookie。
 
 Sa-Token 配置：PLATFORM/MERCHANT/AGENT 分别使用 `platform-admin`/`merchant-admin`/`agent-admin` login type 和 `PAYMENT_PLATFORM_SESSION`/`PAYMENT_MERCHANT_SESSION`/`PAYMENT_AGENT_SESSION` Cookie；均为 8 小时总超时、30 分钟 active timeout、禁止并发共享、只读 Cookie、不读 Header/Body、HttpOnly、SameSite Strict。生产环境必须启用 Secure Cookie。
 
@@ -139,7 +140,7 @@ Sa-Token 配置：PLATFORM/MERCHANT/AGENT 分别使用 `platform-admin`/`merchan
 
 服务默认使用 `PAYMENT_FORWARD_HEADERS_STRATEGY=NONE`，不会把调用方自行提供的 `Forwarded`、`X-Forwarded-For` 等头当成客户端地址。这也是登录失败限流正确性的组成部分。只有当请求必经可信反向代理，且该代理会先剥离外部请求携带的全部 `Forwarded`/`X-Forwarded-*` 再写入自己的值时，部署方才可显式启用 forwarded-header 处理；不能仅因“部署在代理后”就打开。
 
-PLATFORM 已增加默认关闭的生产 OIDC 流：登记 Host -> Authorization Code + S256 PKCE -> callback 单次消费 state -> 服务端 token exchange -> RS256/JWKS 及 issuer/audience/azp/nonce/ACR/time/sid 校验 -> 60 秒 Host-bound handoff -> `issuer + subject` 精确映射 -> Sa-Token Cookie。OIDC token 只进入服务端短期 handoff/Session；浏览器只拿 opaque handoff 和 `cookie-session` marker。当前外部 Session 已写入 `entryHost/issuer/subject/identityVersion/authTime/acr/sid`，但逐请求比较 identityVersion、back-channel logout 和 CSRF 将在后续切片接通，因此不能宣称撤销链路完成。
+PLATFORM 已增加默认关闭的生产 OIDC 流：登记 Host -> Authorization Code + S256 PKCE -> callback 单次消费 state -> 服务端 token exchange -> RS256/JWKS 及 issuer/audience/azp/nonce/ACR/time/sid 校验 -> 60 秒 Host-bound handoff -> `issuer + subject` 精确映射 -> Sa-Token Cookie。外部 Session 逐请求复核 Host、映射和 identityVersion。签名 back-channel logout 使用 issuer+sid 优先、无 sid 时 issuer+subject 的 Redis 索引撤销应用 Session，并以带所有者的短租约和完成标记处理并发及重放；OIDC callback/back-channel 均不依赖 Origin。真实 Keycloak 与 MERCHANT/AGENT 尚未接入，不能据此宣称三 Realm 撤销链路完成。
 
 ### 请求鉴权
 
@@ -147,8 +148,9 @@ PLATFORM 已增加默认关闭的生产 OIDC 流：登记 Host -> Authorization 
 /api/**
   -> security headers filter / trace
   -> AdminSecurityInterceptor
-  -> 非 GET 请求校验 Origin
-  -> SaTokenSessionBridge.currentSubject
+  -> 浏览器写请求校验 Origin；OIDC callback/back-channel 按协议豁免
+  -> SaTokenSessionBridge.currentSubject（含 identityVersion/Host/issuer+subject）
+  -> Cookie 写请求校验 Session-bound X-CSRF-Token
   -> AdminApiPermissionPolicy 精确匹配 HTTP method + path
   -> AdminAuthorizationEnforcer
   -> CachedPermissionGrantLoader
@@ -157,7 +159,7 @@ PLATFORM 已增加默认关闭的生产 OIDC 流：登记 Host -> Authorization 
   -> Controller
 ```
 
-当前策略公开 `GET /api/auth/oidc/start|callback`、`POST /api/auth/oidc/handoff`、local-only `POST /api/auth/login` 和健康检查；OIDC callback 不是浏览器状态修改 API，不依赖 Origin。用户信息、权限码、动态菜单和退出是 session-only；系统 CRUD 使用精确 method/path 注册表和完整授权服务。未知路径、未知方法和相似前缀默认拒绝。`permissionCodes` 只服务 UI 展示，不再承担 HTTP PEP。`/user/info.systemAdministrator` 由当前 Membership 的 ACTIVE `system_role` 服务端计算，只用于让前端与角色委派策略共享身份事实，不能替代后端授权。Admin 资源上下文由服务端 Session 构造；未来业务详情/列表还必须从可信资源授权视图补齐 merchant、market、channel 和 resource-owner tenant。
+当前策略公开 `GET /api/auth/oidc/start|callback`、`POST /api/auth/oidc/handoff|backchannel-logout`、local-only `POST /api/auth/login` 和健康检查；callback 与 server-to-server logout 不依赖 Origin，后者必须通过 Logout Token 协议校验。`GET /api/auth/csrf`、用户信息、权限码、动态菜单和退出是 session-only；所有 Cookie 认证写请求同时要求可信 Origin 和 Session-bound `X-CSRF-Token`。系统 CRUD 使用精确 method/path 注册表和完整授权服务。未知路径、未知方法和相似前缀默认拒绝。`permissionCodes` 只服务 UI 展示，不再承担 HTTP PEP。`/user/info.systemAdministrator` 由当前 Membership 的 ACTIVE `system_role` 服务端计算，只用于让前端与角色委派策略共享身份事实，不能替代后端授权。Admin 资源上下文由服务端 Session 构造；未来业务详情/列表还必须从可信资源授权视图补齐 merchant、market、channel 和 resource-owner tenant。
 
 ### 动态菜单
 
@@ -323,6 +325,7 @@ V22 的 sidecar 明确 `executeInTransaction=false`。三个应用、测试 help
 - `iam:{platform|merchant|agent}:login-attempt:{client-sha256}:username:<username-sha256>`：账号域独立的 client/username 桶，最多 5；同一请求的两个 key 同 hash slot，Lua 原子检查并预留；
 - `iam:{platform|merchant|agent}:grant:{tenantId}:{membershipId}:v{permissionVersion}`：账号域独立的版本化 GrantSnapshot；只有不含 temporal boundary 的快照才进入 Redis，TTL 5 分钟，解码后再次核验 domain/tenant/membership/version；
 - `iam:{account-domain}:oidc:transaction:{sha256(state)}` 与 `...:handoff:{sha256(code)}`：PLATFORM 已接入的单次 OIDC state/PKCE 事务和 Host-bound handoff，默认 TTL 分别为 5 分钟和 1 分钟；Redis key 不保存原始 bearer 值，读取使用原子 GETDEL；
+- `iam:{account-domain}:oidc-session:{sid|sub|event}:{sha256(...)}`：PLATFORM 外部 Session 的 sid/subject 撤销索引与 logout event 状态；原始 issuer、subject、sid、jti 不进入 key，处理租约使用 owner CAS，Session 索引 9 小时、完成重放标记 24 小时；
 - 快照携带当前角色 Grant 的最近 `valid_from/valid_until` 边界；只要该边界存在就完全绕过 Redis，每个请求都回源，禁止应用节点 Clock 延长或提前截断数据库授权时间；
 - PostgreSQL 回源在单条 SQL、同一 MVCC statement snapshot 内同时校验 ACTIVE Membership、permissionVersion、角色/权限状态和时间边界，并使用数据库 `statement_timestamp()` 作为统一判定时间；
 - 登录凭证查询还要求 Membership 通过角色持有当前 composition root 的 `backoffice:{platform|merchant|agent}-access` Grant；该 Grant 必须是服务端维护的 canonical `system-backoffice-access`、`TENANT/TENANT_ALL` 记录。V19 回填历史角色，V20 把 V17 可能合法存在的同 key 普通 Grant 确定性重命名并保留全部授权语义、审计和版本证据；两条角色创建事务为新角色生成 canonical Grant。18 项授权编辑器不返回或替换它，读取发现普通 Permission 再占保留 key 或 portal 存量错误时只读失败。ACTIVE Membership 本身不能进入后台。缓存 payload 以账号域前缀编码并在解码时复核，复制到另一账号域 key 的快照会被拒绝；
@@ -387,7 +390,7 @@ cd backend
 - `meta_json` 已有容器、深度、key/string 和总 value 硬上限，外链字段也按菜单类型隔离；新增字段仍必须先定义跨端语义和测试，不得把任意 JSON 当成无约束扩展口。
 - `SystemAdministrationController` 同时承担多资源 DTO/映射，继续扩展会形成浅而宽的入口层。
 - Role、Department、Menu 与 User 管理写入已统一执行 optimistic version 契约；Local fixture 仍不是生产 provisioning；命中 V8 预留 footprint 冲突的历史库需要人工前向迁移，无关业务数据不受 V8 影响。
-- 角色 `menuIds` 只是导航/展示，BUTTON authCode 只是目录展示绑定；统一角色配置 UI/API 仍分别写 `role_menu` 与 RoleGrant，不从任一方推导另一方。RoleGrant 写在生产默认受 legacy cutover 闸门禁用，N-1 清退、正式审批和演练完成前不得打开；PLATFORM OIDC 仍缺真实 Keycloak、CSRF、back-channel/identity-version 撤销和前端联调，MERCHANT/AGENT 尚未接入；Outbox relay、MFA/step-up 时效、可信审批证据、关系数据权限、审计拒绝/登录失败和生产级可观测性仍是明确阻断项。
+- 角色 `menuIds` 只是导航/展示，BUTTON authCode 只是目录展示绑定；统一角色配置 UI/API 仍分别写 `role_menu` 与 RoleGrant，不从任一方推导另一方。RoleGrant 写在生产默认受 legacy cutover 闸门禁用，N-1 清退、正式审批和演练完成前不得打开；PLATFORM OIDC 仍缺真实 Keycloak 和生命周期 relay，MERCHANT/AGENT 尚未接入；MFA/step-up、可信审批证据、关系数据权限、审计拒绝/登录失败和生产级可观测性仍是明确阻断项。
 - 资金权限核心已有模型和测试，但不得在完成 [迁移计划](../permission/09-migration-plan.md) 的门禁前直接接入真实资金写路径。
 
 ## 11. 改动检查清单

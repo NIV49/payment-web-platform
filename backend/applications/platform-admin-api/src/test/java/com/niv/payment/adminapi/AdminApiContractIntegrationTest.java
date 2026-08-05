@@ -9,6 +9,7 @@ import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.IdentityModels;
 import com.niv.payment.permission.service.RoleConfigurationCommand;
 import com.niv.payment.permission.service.RoleAssignmentPolicy;
+import com.niv.payment.identity.oidc.RedisOidcSessionIndex;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +32,9 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -48,6 +52,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("local")
 class AdminApiContractIntegrationTest {
     private static final String ORIGIN = "http://localhost:5999";
+    private static final String REQUEST_PROOF_HEADER = "X-CSRF-Token";
     private static final String ADMIN_LOGIN_INPUT = "Admin-Test-Password-2026";
     private static final String RESTRICTED_LOGIN_INPUT = "Low-Test-Password-2026";
     private static final String LOCAL_SERVICE_SENTINEL = "disabled";
@@ -81,6 +86,7 @@ class AdminApiContractIntegrationTest {
     @Autowired JooqRoleConfigurationRepository roleConfigurations;
     @Autowired ApplicationContext applicationContext;
     @Autowired SaTokenConfig saTokenConfig;
+    private final Map<String, String> requestProofs = new ConcurrentHashMap<>();
 
     @BeforeEach
     void seedRestrictedUserAndSameDomainMembership() {
@@ -318,6 +324,56 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void cookieAuthenticatedMutationsRequireAnIndependentRequestProof() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+
+        mvc.perform(post("/api/auth/logout").cookie(cookie).header("Origin", ORIGIN))
+            .andExpect(status().isForbidden());
+        mvc.perform(get("/api/user/info").cookie(cookie))
+            .andExpect(status().isOk());
+
+        mvc.perform(post("/api/auth/logout").cookie(cookie).header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isOk());
+        mvc.perform(get("/api/user/info").cookie(cookie))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void oidcCallbackAndBackChannelProtocolEndpointsDoNotDependOnOrigin() throws Exception {
+        mvc.perform(get("/api/auth/oidc/callback").queryParam("code", "code-1")
+                .queryParam("state", "state-1"))
+            .andExpect(status().isNotFound());
+        mvc.perform(post("/api/auth/oidc/backchannel-logout")
+                .contentType("application/x-www-form-urlencoded")
+                .param("logout_token", "signed-value"))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void redisOidcSessionIndexSeparatesSidSubjectAndReplayNamespaces() {
+        var index = new RedisOidcSessionIndex(redis, "platform", Duration.ofHours(9),
+            Duration.ofSeconds(30), Duration.ofHours(24));
+
+        index.register("https://idp.example.test/realms/platform", "subject-1", "session-1", 1000L);
+
+        assertThat(index.findBySession(
+            "https://idp.example.test/realms/platform", "session-1")).containsExactly(1000L);
+        assertThat(index.findBySubject(
+            "https://idp.example.test/realms/platform", "subject-1")).containsExactly(1000L);
+        assertThat(index.claimEvent(
+            "https://idp.example.test/realms/platform", "event-1"))
+            .extracting(com.niv.payment.identity.oidc.OidcSessionIndex.EventClaim::status)
+            .isEqualTo(com.niv.payment.identity.oidc.OidcSessionIndex.Status.ACQUIRED);
+        var claim = index.claimEvent(
+            "https://idp.example.test/realms/platform", "event-2");
+        index.completeEvent("https://idp.example.test/realms/platform", "event-2", claim.owner());
+        assertThat(index.claimEvent(
+            "https://idp.example.test/realms/platform", "event-2").status())
+            .isEqualTo(com.niv.payment.identity.oidc.OidcSessionIndex.Status.COMPLETED);
+    }
+
+    @Test
     void roleGrantEndpointsKeepPresentationMenusSeparateAndUseTheFrozenDimensionsContract() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         mvc.perform(get("/api/v1/iam/permissions/grantable").cookie(cookie))
@@ -329,7 +385,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(jsonPath("$.data[0].requiredDimensions[0].allowedModes[0]").value("TENANT_ALL"))
             .andExpect(jsonPath("$.data[0].allowedScopeModes").doesNotExist());
 
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Grant Contract Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -338,7 +394,7 @@ class AdminApiContractIntegrationTest {
             "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
             Long.class, Long.parseLong(roleId));
         String username = "portal-role-user-" + roleId;
-        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Portal Role User\","
                     + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
@@ -346,12 +402,12 @@ class AdminApiContractIntegrationTest {
         assertThat(login(username, ADMIN_LOGIN_INPUT)).isNotBlank();
 
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"expectedVersion\":0,\"reason\":\"reject null grant\",\"grants\":[null]}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("""
                     {"expectedVersion":0,"reason":"reject null dimension",
                      "grants":[{"grantKey":"invalid","permissionCode":"user:view",
@@ -388,7 +444,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(jsonPath("$.data.grants.length()").value(0));
 
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("""
                     {"expectedVersion":0,"reason":"least privilege acceptance",
                      "grants":[{"grantKey":"user-view","permissionCode":"user:view",
@@ -423,12 +479,12 @@ class AdminApiContractIntegrationTest {
             """, Long.class, roleId)).isOne();
 
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"expectedVersion\":0,\"reason\":\"stale\",\"grants\":[]}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.error").value("OPTIMISTIC_LOCK_CONFLICT"));
         mvc.perform(put("/api/v1/iam/roles/2000/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"expectedVersion\":0,\"reason\":\"forbidden system role\",\"grants\":[]}"))
             .andExpect(status().isForbidden());
     }
@@ -447,7 +503,7 @@ class AdminApiContractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.editable").value(false));
 
-            mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN)
+            mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                     .contentType("application/json")
                     .content("{\"name\":\"Must Stay Protected\",\"menuIds\":[],"
                         + "\"status\":1,\"expectedVersion\":0}"))
@@ -455,7 +511,7 @@ class AdminApiContractIntegrationTest {
                 .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
 
             mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                    .header("Origin", ORIGIN).contentType("application/json")
+                    .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                     .content("{\"expectedVersion\":0,\"reason\":\"ordinary workflow denied\",\"grants\":[]}"))
                 .andExpect(status().isUnprocessableContent())
                 .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
@@ -479,7 +535,7 @@ class AdminApiContractIntegrationTest {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String rejectedRoleName = "Button Menu Role";
 
-        mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"" + rejectedRoleName
                     + "\",\"menuIds\":[\"6020\"],\"status\":1}"))
@@ -489,13 +545,13 @@ class AdminApiContractIntegrationTest {
             SELECT count(*) FROM iam_role WHERE tenant_id=1 AND role_name=?
             """, Long.class, rejectedRoleName)).isZero();
 
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Disabled Menu Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
 
-        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Must Not Persist\",\"menuIds\":[\"6031\"],"
                     + "\"status\":1,\"expectedVersion\":0}"))
@@ -524,7 +580,7 @@ class AdminApiContractIntegrationTest {
             .andReturn().getResponse().getContentAsString();
         Number filteredVersion = JsonPath.read(filteredRoleBody, "$.data.items[0].rowVersion");
 
-        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Disabled Menu Role\",\"menuIds\":[\"6001\"],"
                     + "\"status\":1,\"expectedVersion\":" + filteredVersion.longValue() + "}"))
@@ -537,7 +593,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void roleGrantRevocationInvalidatesMemberSessionAndRefreshesAuthorizationCodes() throws Exception {
         Cookie admin = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(admin).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(admin).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(admin))
                 .contentType("application/json")
                 .content("{\"name\":\"Revocation Contract Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -555,7 +611,7 @@ class AdminApiContractIntegrationTest {
                 SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=802
                 """, Long.class);
             mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(admin)
-                    .header("Origin", ORIGIN).contentType("application/json")
+                    .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(admin)).contentType("application/json")
                     .content("""
                         {"expectedVersion":0,"reason":"grant acceptance permission",
                          "grants":[{"grantKey":"acceptance-user-create","permissionCode":"user:create",
@@ -575,7 +631,7 @@ class AdminApiContractIntegrationTest {
                 .andExpect(jsonPath("$.data[?(@ == 'backoffice:platform-access')]").exists());
 
             mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(admin)
-                    .header("Origin", ORIGIN).contentType("application/json")
+                    .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(admin)).contentType("application/json")
                     .content("{\"expectedVersion\":1,\"reason\":\"revoke acceptance permission\",\"grants\":[]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.roleVersion").value(2))
@@ -679,7 +735,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void unsupportedExistingGrantMakesTheRoleReadOnlyAndRejectsReplacement() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Unsupported Grant Role\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -699,7 +755,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.editable").value(false));
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"expectedVersion\":0,\"reason\":\"must reject unsupported\",\"grants\":[]}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
@@ -708,7 +764,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void nonPortalPermissionUsingTheReservedGrantKeyFailsClosed() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Reserved Key Conflict Role\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -728,7 +784,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.editable").value(false));
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"expectedVersion\":0,\"reason\":\"reserved key conflict\",\"grants\":[]}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
@@ -789,7 +845,7 @@ class AdminApiContractIntegrationTest {
         Object grants = JsonPath.read(response, "$.data.grants");
 
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"expectedVersion\":" + roleVersion.longValue()
                     + ",\"reason\":\"HTTP round trip\",\"grants\":" + grants + "}"))
             .andExpect(status().isOk())
@@ -800,7 +856,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void wrongDomainOrMalformedProtectedPortalGrantFailsClosed() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Malformed Portal Grant Role\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -815,7 +871,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.editable").value(false));
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"expectedVersion\":0,\"reason\":\"wrong domain\",\"grants\":[]}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
@@ -833,7 +889,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void legacyCompatibilityShadowDoesNotBlockGranularGrantReplacement() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Legacy Shadow Role\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -859,7 +915,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(jsonPath("$.data.grants[0].permissionCode").value("menu:create"));
 
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"expectedVersion\":0,\"reason\":\"retire legacy shadow\",\"grants\":[]}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.roleVersion").value(1))
@@ -874,7 +930,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void outboxFailureRollsBackRoleGrantReplacementAuditAndVersion() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Grant Rollback Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -897,7 +953,7 @@ class AdminApiContractIntegrationTest {
             """);
         try {
             mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                    .header("Origin", ORIGIN).contentType("application/json")
+                    .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                     .content("""
                         {"expectedVersion":0,"reason":"rollback acceptance",
                          "grants":[{"grantKey":"user-view","permissionCode":"user:view",
@@ -1008,7 +1064,7 @@ class AdminApiContractIntegrationTest {
     void menuWritesEnforceVbenTitleAndComponentContract() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
 
-        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"pid":"6000","type":"menu","name":"InvalidLiteralTitle","path":"/contract/literal-title",
@@ -1016,7 +1072,7 @@ class AdminApiContractIntegrationTest {
                     """))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
-        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"pid":"6000","type":"menu","name":"InvalidPageComponent","path":"/contract/component",
@@ -1024,7 +1080,7 @@ class AdminApiContractIntegrationTest {
                     """))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
-        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"pid":"0","type":"catalog","name":"LegacyLayoutComponent","path":"/contract/catalog",
@@ -1032,7 +1088,7 @@ class AdminApiContractIntegrationTest {
                     """))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
-        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"pid":"6000","type":"menu","name":"InjectedPageMeta","path":"/contract/injected-page",
@@ -1041,7 +1097,7 @@ class AdminApiContractIntegrationTest {
                     """))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
-        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"pid":"6001","type":"button","name":"InjectedButtonMeta","authCode":"user:create",
@@ -1049,7 +1105,7 @@ class AdminApiContractIntegrationTest {
                     """))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
-        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"pid":"6000","type":"link","name":"ContractDocumentation","path":"/contract/docs",
@@ -1062,7 +1118,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void auditEventUsesTheHttpRequestTraceId() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String traceId = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        String traceId = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"username":"trace-audit-user","name":"Trace Audit User","deptId":"10",
@@ -1128,7 +1184,7 @@ class AdminApiContractIntegrationTest {
         Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
         mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(cookie))
             .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
-        mvc.perform(patch("/api/system/role/2000/status").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(patch("/api/system/role/2000/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"status\":1,\"expectedVersion\":0}"))
             .andExpect(status().isForbidden());
     }
@@ -1172,7 +1228,7 @@ class AdminApiContractIntegrationTest {
                  WHERE tenant_id=1 AND membership_id=802 ORDER BY role_id
                 """, Long.class);
 
-            mvc.perform(put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN)
+            mvc.perform(put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                     .contentType("application/json")
                     .content("{\"deptId\":\"10\",\"roleIds\":[\"" + roleId
                         + "\"],\"status\":0,\"userVersion\":0}"))
@@ -1237,7 +1293,7 @@ class AdminApiContractIntegrationTest {
                 """, String.class);
 
             mvc.perform(post("/api/system/user/100/password/reset")
-                    .cookie(restricted).header("Origin", ORIGIN).contentType("application/json")
+                    .cookie(restricted).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(restricted)).contentType("application/json")
                     .content("{\"credentialVersion\":" + credentialVersion + "}"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
@@ -1302,7 +1358,7 @@ class AdminApiContractIntegrationTest {
     void ordinaryUserManagementCannotAssignOrRemoveSystemRoles() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
 
-        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"username":"system-role-escalation","name":"Escalation Attempt","deptId":"10",
@@ -1312,7 +1368,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .put("/api/system/user/100").cookie(cookie).header("Origin", ORIGIN)
+                .put("/api/system/user/100").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"username":"admin","name":"Platform Administrator","deptId":"10",
@@ -1325,13 +1381,13 @@ class AdminApiContractIntegrationTest {
     @Test
     void disabledOrdinaryRoleCanBePreservedOrRemovedButCannotBeNewlyAssigned() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Disabled Assignment Role\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
         String username = "disabled-role-user-" + roleId;
-        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Disabled Role User\","
                     + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":0}"))
@@ -1342,7 +1398,7 @@ class AdminApiContractIntegrationTest {
             """, Long.class, userId);
 
         try {
-            mvc.perform(patch("/api/system/role/" + roleId + "/status").cookie(cookie).header("Origin", ORIGIN)
+            mvc.perform(patch("/api/system/role/" + roleId + "/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                     .contentType("application/json")
                     .content("{\"status\":0,\"expectedVersion\":0}"))
                 .andExpect(status().isOk());
@@ -1350,7 +1406,7 @@ class AdminApiContractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[0].roleIds[0]").value(Long.toString(roleId)));
 
-            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN)
+            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                     .contentType("application/json")
                     .content("{\"deptId\":\"10\",\"roleIds\":[\"" + roleId
                         + "\"],\"status\":0,\"userVersion\":0}"))
@@ -1360,7 +1416,7 @@ class AdminApiContractIntegrationTest {
                  WHERE tenant_id=1 AND membership_id=? ORDER BY role_id
                 """, Long.class, membershipId)).containsExactly(roleId);
 
-            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN)
+            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                     .contentType("application/json")
                     .content("{\"deptId\":\"10\",\"roleIds\":[],\"status\":0,\"userVersion\":1}"))
                 .andExpect(status().isOk());
@@ -1369,7 +1425,7 @@ class AdminApiContractIntegrationTest {
                  WHERE tenant_id=1 AND membership_id=?
                 """, Long.class, membershipId)).isZero();
 
-            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN)
+            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                     .contentType("application/json")
                     .content("{\"deptId\":\"10\",\"roleIds\":[\"" + roleId
                         + "\"],\"status\":0,\"userVersion\":2}"))
@@ -1390,7 +1446,7 @@ class AdminApiContractIntegrationTest {
                 SELECT count(*) FROM iam_audit_event
                  WHERE tenant_id=1 AND target_type='USER' AND action_code='CREATE'
                 """, Long.class);
-            mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+            mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                     .contentType("application/json")
                     .content("{\"username\":\"" + rejectedUsername + "\",\"name\":\"Rejected Disabled Role\","
                         + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":0}"))
@@ -1458,7 +1514,7 @@ class AdminApiContractIntegrationTest {
 
         try {
             Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
-            mvc.perform(put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN)
+            mvc.perform(put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                     .contentType("application/json")
                     .content("{\"deptId\":\"10\",\"roleIds\":[\"" + operatorRoleId
                         + "\"],\"status\":1,\"userVersion\":0}"))
@@ -1492,7 +1548,7 @@ class AdminApiContractIntegrationTest {
     void lastActiveSystemAdministratorCannotBeDisabled() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
 
-        mvc.perform(patch("/api/system/user/100/status").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(patch("/api/system/user/100/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
             .andExpect(status().isUnprocessableEntity())
             .andExpect(jsonPath("$.error").value("IAM_LAST_ADMIN_PROTECTED"));
@@ -1514,7 +1570,7 @@ class AdminApiContractIntegrationTest {
             unreachable.add(seedSystemAdministrator("ACTIVE", "LOCKED", "not-used"));
             unreachable.add(seedSystemAdministrator("ACTIVE", "ACTIVE", null));
             unreachable.add(seedSystemAdministrator("ACTIVE", "ACTIVE", "not-a-bcrypt-hash"));
-            mvc.perform(patch("/api/system/user/100/status").cookie(cookie).header("Origin", ORIGIN)
+            mvc.perform(patch("/api/system/user/100/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                     .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error").value("IAM_LAST_ADMIN_PROTECTED"));
@@ -1544,13 +1600,13 @@ class AdminApiContractIntegrationTest {
     void userRoleIdsAreRequiredButEmptyAssignmentsAreAccepted() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String base = "{\"username\":\"no-roles\",\"name\":\"No Roles\",\"deptId\":\"10\",\"status\":1";
-        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content(base + "}"))
             .andExpect(status().isBadRequest());
-        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content(base + ",\"roleIds\":null}"))
             .andExpect(status().isBadRequest());
-        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content(base + ",\"roleIds\":[]}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").isString());
     }
@@ -1559,10 +1615,10 @@ class AdminApiContractIntegrationTest {
     void userStatusUsesOptimisticVersionAndDoesNotDisableGlobalCredential() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=4 AND id=803");
-        mvc.perform(patch("/api/system/user/801/status").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(patch("/api/system/user/801/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.userVersion").value(1));
-        mvc.perform(patch("/api/system/user/801/status").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(patch("/api/system/user/801/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"status\":1,\"userVersion\":0}"))
             .andExpect(status().isConflict());
         assertThat(jdbc.queryForObject("SELECT status FROM iam_user WHERE id=801", String.class)).isEqualTo("ACTIVE");
@@ -1575,29 +1631,29 @@ class AdminApiContractIntegrationTest {
     @Test
     void staleRoleWritesReturn409WithoutOverwritingOrDeletingTheCurrentRow() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String body = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String body = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Versioned Role\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long roleId = Long.parseLong(JsonPath.read(body, "$.data.id"));
 
-        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Current Role\",\"menuIds\":[],\"status\":1,\"expectedVersion\":0}"))
             .andExpect(status().isOk());
-        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Stale Role\",\"menuIds\":[],\"status\":1,\"expectedVersion\":0}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value(40902))
             .andExpect(jsonPath("$.error").value("OPTIMISTIC_LOCK_CONFLICT"))
             .andExpect(jsonPath("$.message").value("The record has changed; reload and retry"));
-        mvc.perform(patch("/api/system/role/" + roleId + "/status").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(patch("/api/system/role/" + roleId + "/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"status\":0,\"expectedVersion\":0}"))
             .andExpect(status().isConflict());
         mvc.perform(delete("/api/system/role/" + roleId).queryParam("expectedVersion", "0")
-                .cookie(cookie).header("Origin", ORIGIN))
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
             .andExpect(status().isConflict());
 
         assertThat(jdbc.queryForMap("SELECT role_name,status,row_version FROM iam_role WHERE tenant_id=1 AND id=?", roleId))
@@ -1605,13 +1661,13 @@ class AdminApiContractIntegrationTest {
             .containsEntry("status", "ACTIVE")
             .containsEntry("row_version", 1L);
 
-        mvc.perform(put("/api/system/role/9223372036854775807").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/role/9223372036854775807").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Missing Role\",\"menuIds\":[],\"status\":1,\"expectedVersion\":0}"))
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.error").value("RESOURCE_NOT_FOUND"));
         mvc.perform(delete("/api/system/role/9223372036854775807").queryParam("expectedVersion", "0")
-                .cookie(cookie).header("Origin", ORIGIN))
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
             .andExpect(status().isNotFound());
     }
 
@@ -1619,7 +1675,7 @@ class AdminApiContractIntegrationTest {
     void roleConfigurationCreationPersistsMenusAndGrantsAtomically() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String response = mvc.perform(post("/api/v1/iam/roles/configuration")
-                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("""
                     {"name":"Atomic Created Role","status":1,"remark":"single transaction",
                      "menuIds":["6000","6002"],
@@ -1677,7 +1733,7 @@ class AdminApiContractIntegrationTest {
             """;
 
         mvc.perform(post("/api/v1/iam/roles/configuration")
-                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("""
                     {"name":"Reserved Key Create","status":1,"menuIds":[],"grants":%s}
                     """.formatted(reservedGrant)))
@@ -1687,13 +1743,13 @@ class AdminApiContractIntegrationTest {
             "SELECT count(*) FROM iam_role WHERE tenant_id=1 AND role_name='Reserved Key Create'",
             Long.class)).isZero();
 
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Reserved Key Replace\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/configuration")
-                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("""
                     {"expectedVersion":0,"name":"Reserved Key Replace","status":1,
                      "menuIds":[],"reason":"must stay server managed","grants":%s}
@@ -1709,7 +1765,7 @@ class AdminApiContractIntegrationTest {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String roleName = "R".repeat(128);
         String response = mvc.perform(post("/api/v1/iam/roles/configuration")
-                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("""
                     {"name":"%s","status":1,"remark":"maximum role name",
                      "menuIds":[],"grants":[]}
@@ -1730,7 +1786,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void roleConfigurationReplacesRoleMenusAndGrantsWithOneVersionChange() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Atomic Configuration Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -1746,7 +1802,7 @@ class AdminApiContractIntegrationTest {
             INSERT INTO iam_role_menu(tenant_id,role_id,menu_id) VALUES(1,?,?),(1,?,6031)
             """, roleId, tombstonedMenuId, roleId);
         String username = "atomic-role-user-" + roleId;
-        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Atomic Role User\","
                     + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
@@ -1757,7 +1813,7 @@ class AdminApiContractIntegrationTest {
             """, Long.class, userId);
 
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/configuration")
-                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("""
                     {"expectedVersion":0,"name":"Atomic Configuration Updated","status":1,
                      "remark":"one transaction","menuIds":["6001"],"reason":"least privilege",
@@ -1805,7 +1861,7 @@ class AdminApiContractIntegrationTest {
     @Test
     void roleConfigurationRechecksAllFourPermissionsInsideTheDatabaseTransaction() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"DB Time Authorization Role\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -1858,13 +1914,13 @@ class AdminApiContractIntegrationTest {
     @Test
     void deletingRoleRevokesMembershipButPreservesConfigurationHistory() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Soft Deleted Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
         mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
-                .header("Origin", ORIGIN).contentType("application/json")
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("""
                     {"expectedVersion":0,"reason":"seed delete history",
                      "grants":[{"grantKey":"user-view","permissionCode":"user:view",
@@ -1872,7 +1928,7 @@ class AdminApiContractIntegrationTest {
                     """))
             .andExpect(status().isOk());
         String username = "soft-delete-user-" + roleId;
-        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Soft Delete User\","
                     + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
@@ -1886,7 +1942,7 @@ class AdminApiContractIntegrationTest {
             """, Long.class, membershipId);
 
         mvc.perform(delete("/api/system/role/" + roleId).queryParam("expectedVersion", "1")
-                .cookie(cookie).header("Origin", ORIGIN))
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
             .andExpect(status().isOk());
 
         assertThat(jdbc.queryForMap("""
@@ -1925,11 +1981,11 @@ class AdminApiContractIntegrationTest {
             """, Long.class, Long.toString(roleId))).isOne();
         mvc.perform(get("/api/system/role/list")
                 .queryParam("id", Long.toString(roleId))
-                .cookie(cookie).header("Origin", ORIGIN))
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.items").isEmpty())
             .andExpect(jsonPath("$.data.total").value(0));
-        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"deleted-role-candidate-" + roleId
                     + "\",\"name\":\"Deleted Role Candidate\",\"deptId\":\"10\","
@@ -1995,22 +2051,22 @@ class AdminApiContractIntegrationTest {
     @Test
     void staleDepartmentWritesReturn409WithoutOverwritingOrDeletingTheCurrentRow() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String body = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        String body = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"10\",\"name\":\"Versioned Department\",\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long departmentId = Long.parseLong(JsonPath.read(body, "$.data.id"));
 
-        mvc.perform(put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"10\",\"name\":\"Current Department\",\"status\":1,\"expectedVersion\":0}"))
             .andExpect(status().isOk());
-        mvc.perform(put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"10\",\"name\":\"Stale Department\",\"status\":1,\"expectedVersion\":0}"))
             .andExpect(status().isConflict());
         mvc.perform(delete("/api/system/dept/" + departmentId).queryParam("expectedVersion", "0")
-                .cookie(cookie).header("Origin", ORIGIN))
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
             .andExpect(status().isConflict());
 
         assertThat(jdbc.queryForMap("SELECT department_name,row_version FROM iam_department WHERE tenant_id=1 AND id=?", departmentId))
@@ -2022,27 +2078,27 @@ class AdminApiContractIntegrationTest {
     void staleMenuWritesReturn409WithoutOverwritingOrDeletingTheCurrentRow() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String path = "/versioned-menu-" + jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
-        String body = mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN)
+        String body = mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"6000\",\"type\":\"menu\",\"name\":\"VersionedMenu\",\"path\":\""
                     + path + "\",\"component\":\"/system/user/list\",\"meta\":{\"title\":\"system.user.title\"},\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long menuId = Long.parseLong(JsonPath.read(body, "$.data.id"));
 
-        mvc.perform(put("/api/system/menu/" + menuId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/menu/" + menuId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"6000\",\"type\":\"menu\",\"name\":\"CurrentMenu\",\"path\":\""
                     + path + "\",\"component\":\"/system/user/list\",\"meta\":{\"title\":\"system.user.title\"},"
                     + "\"status\":1,\"expectedVersion\":0}"))
             .andExpect(status().isOk());
-        mvc.perform(put("/api/system/menu/" + menuId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/menu/" + menuId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"6000\",\"type\":\"menu\",\"name\":\"StaleMenu\",\"path\":\""
                     + path + "\",\"component\":\"/system/user/list\",\"meta\":{\"title\":\"system.user.title\"},"
                     + "\"status\":1,\"expectedVersion\":0}"))
             .andExpect(status().isConflict());
         mvc.perform(delete("/api/system/menu/" + menuId).queryParam("expectedVersion", "0")
-                .cookie(cookie).header("Origin", ORIGIN))
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
             .andExpect(status().isConflict());
 
         assertThat(jdbc.queryForMap("SELECT menu_name,row_version FROM iam_menu WHERE tenant_id=1 AND id=?", menuId))
@@ -2054,19 +2110,19 @@ class AdminApiContractIntegrationTest {
     void staleUserDeleteReturns409WithoutTerminatingTheCurrentMembership() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String username = "versioned-delete-user-" + jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
-        String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Versioned Delete User\","
                     + "\"deptId\":\"10\",\"roleIds\":[],\"status\":0}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long userId = Long.parseLong(JsonPath.read(body, "$.data.id"));
 
-        mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"deptId\":\"10\",\"roleIds\":[],\"status\":0,\"userVersion\":0}"))
             .andExpect(status().isOk());
         mvc.perform(delete("/api/system/user/" + userId).queryParam("expectedVersion", "0")
-                .cookie(cookie).header("Origin", ORIGIN))
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
             .andExpect(status().isConflict());
 
         assertThat(jdbc.queryForMap("SELECT status,row_version FROM iam_membership WHERE tenant_id=1 AND user_id=?", userId))
@@ -2078,7 +2134,7 @@ class AdminApiContractIntegrationTest {
     void createdLocalIdentityUsesTheConfiguredInitialPasswordAndSupportsReset() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
         String username = "recoverable-disabled-user";
-        String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Recoverable Disabled User\","
                     + "\"deptId\":\"10\",\"roleIds\":[\"8800\"],\"status\":0}"))
@@ -2102,7 +2158,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.items[0].identityStatus").value("ACTIVE"))
             .andExpect(jsonPath("$.data.items[0].status").value(0));
-        mvc.perform(patch("/api/system/user/" + userId + "/status").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(patch("/api/system/user/" + userId + "/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"status\":1,\"userVersion\":0}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.userVersion").value(1));
@@ -2126,7 +2182,7 @@ class AdminApiContractIntegrationTest {
             """, Long.class, userId);
 
         mvc.perform(post("/api/system/user/" + userId + "/password/reset")
-                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"credentialVersion\":" + resetCredentialVersion + "}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.credentialVersion").value(resetCredentialVersion + 1));
@@ -2160,7 +2216,7 @@ class AdminApiContractIntegrationTest {
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error").value("SESSION_INVALID"));
         mvc.perform(post("/api/system/user/" + userId + "/password/reset")
-                .cookie(cookie).header("Origin", ORIGIN).contentType("application/json")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("{\"credentialVersion\":" + resetCredentialVersion + "}"))
             .andExpect(status().isConflict());
     }
@@ -2177,7 +2233,7 @@ class AdminApiContractIntegrationTest {
             """);
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN)
+                .put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
                     {"deptId":"10","roleIds":[],"status":0,"userVersion":0}
@@ -2201,22 +2257,22 @@ class AdminApiContractIntegrationTest {
     @Test
     void departmentTreeRejectsCyclesAndOrphaningChildren() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Cycle Parent\",\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String parentId = JsonPath.read(parentBody, "$.data.id");
-        String childBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        String childBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"" + parentId + "\",\"name\":\"Cycle Child\",\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String childId = JsonPath.read(childBody, "$.data.id");
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .put("/api/system/dept/" + parentId).cookie(cookie).header("Origin", ORIGIN)
+                .put("/api/system/dept/" + parentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"" + childId
                     + "\",\"name\":\"Cycle Parent\",\"status\":1,\"expectedVersion\":0}"))
             .andExpect(status().isBadRequest());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                 .delete("/api/system/dept/" + parentId).queryParam("expectedVersion", "0")
-                .cookie(cookie).header("Origin", ORIGIN))
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
             .andExpect(status().isConflict());
     }
 
@@ -2233,17 +2289,17 @@ class AdminApiContractIntegrationTest {
             parentId = id;
         }
 
-        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"" + parentId + "\",\"name\":\"Too Deep\",\"status\":1}"))
             .andExpect(status().isBadRequest());
 
-        String movableBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        String movableBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"10\",\"name\":\"Movable\",\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String movableId = JsonPath.read(movableBody, "$.data.id");
-        mvc.perform(put("/api/system/dept/" + movableId).cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(put("/api/system/dept/" + movableId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"" + parentId
                     + "\",\"name\":\"Movable\",\"status\":1,\"expectedVersion\":0}"))
@@ -2253,17 +2309,17 @@ class AdminApiContractIntegrationTest {
     @Test
     void putCannotDisableDepartmentWithActiveChild() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Protected Parent\",\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String parentId = JsonPath.read(parentBody, "$.data.id");
-        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"" + parentId
                     + "\",\"name\":\"Active Child\",\"status\":1}"))
             .andExpect(status().isOk());
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .put("/api/system/dept/" + parentId).cookie(cookie).header("Origin", ORIGIN)
+                .put("/api/system/dept/" + parentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"10\",\"name\":\"Protected Parent\",\"status\":0,\"expectedVersion\":0}"))
             .andExpect(status().isConflict());
@@ -2272,18 +2328,18 @@ class AdminApiContractIntegrationTest {
     @Test
     void putCannotDisableDepartmentWithActiveMembership() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Assigned Department\",\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String departmentId = JsonPath.read(departmentBody, "$.data.id");
-        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"username\":\"assigned-department-user\","
                     + "\"name\":\"Assigned User\",\"deptId\":\"" + departmentId
                     + "\",\"roleIds\":[],\"status\":1}"))
             .andExpect(status().isOk());
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN)
+                .put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"10\",\"name\":\"Assigned Department\",\"status\":0,\"expectedVersion\":0}"))
             .andExpect(status().isConflict());
@@ -2292,12 +2348,12 @@ class AdminApiContractIntegrationTest {
     @Test
     void cannotActivateMembershipInDisabledDepartment() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Disabled Department\",\"status\":0}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String departmentId = JsonPath.read(departmentBody, "$.data.id");
 
-        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"username\":\"disabled-department-user\","
                     + "\"name\":\"Disabled Department User\",\"deptId\":\"" + departmentId
                     + "\",\"roleIds\":[],\"status\":1}"))
@@ -2307,12 +2363,12 @@ class AdminApiContractIntegrationTest {
     @Test
     void cannotCreateActiveDepartmentBelowDisabledParent() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Disabled Parent\",\"status\":0}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String parentId = JsonPath.read(parentBody, "$.data.id");
 
-        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN)
+        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"" + parentId
                     + "\",\"name\":\"Invalid Active Child\",\"status\":1}"))
             .andExpect(status().isBadRequest());
@@ -2321,12 +2377,12 @@ class AdminApiContractIntegrationTest {
     @Test
     void failedJooqRoleReplacementRollsBackRoleMenusAndMembershipVersion() throws Exception {
         Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Jooq Transaction Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
-        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN)
+        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"jooq-transaction-user\",\"name\":\"Jooq Transaction User\","
                     + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
@@ -2382,11 +2438,24 @@ class AdminApiContractIntegrationTest {
                 org.hamcrest.Matchers.containsString("HttpOnly"),
                 org.hamcrest.Matchers.containsString("SameSite=Strict"))))
             .andReturn().getResponse().getHeader("Set-Cookie");
-        return header.substring("PAYMENT_PLATFORM_SESSION=".length(), header.indexOf(';'));
+        String sessionValue = header.substring("PAYMENT_PLATFORM_SESSION=".length(), header.indexOf(';'));
+        String body = mvc.perform(get("/api/auth/csrf").cookie(cookie(sessionValue)))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString();
+        requestProofs.put(sessionValue, JsonPath.read(body, "$.data.requestProof"));
+        return sessionValue;
+    }
+
+    private String requestProof(Cookie cookie) {
+        String proof = requestProofs.get(cookie.getValue());
+        if (proof == null) {
+            throw new IllegalStateException("No request proof was issued for the test session");
+        }
+        return proof;
     }
 
     private String createRole(Cookie cookie, String name) throws Exception {
-        String body = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN)
+        String body = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"" + name + "\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();

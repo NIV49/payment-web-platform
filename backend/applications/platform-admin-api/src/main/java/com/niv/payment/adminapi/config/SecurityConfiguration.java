@@ -4,6 +4,7 @@ import com.niv.payment.adminapi.web.AccessDeniedException;
 import com.niv.payment.adminapi.web.RequestTrace;
 import com.niv.payment.permission.domain.AuthorizationSubject;
 import com.niv.payment.permission.security.SaTokenSessionBridge;
+import com.niv.payment.permission.security.InvalidSessionException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +23,8 @@ import java.util.Set;
 
 @Configuration
 public class SecurityConfiguration implements WebMvcConfigurer {
+    private static final String REQUEST_PROOF_HEADER = "X-CSRF-Token";
+    private static final String BACKCHANNEL_LOGOUT_PATH = "/api/auth/oidc/backchannel-logout";
     private final SaTokenSessionBridge sessions;
     private final AdminAuthorizationEnforcer authorization;
     private final AdminApiPermissionPolicy permissionPolicy;
@@ -45,7 +48,7 @@ public class SecurityConfiguration implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**").allowedOrigins(allowedOrigins.toArray(String[]::new))
             .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-            .allowedHeaders("Content-Type", "Accept-Language", "X-Requested-With")
+            .allowedHeaders("Content-Type", "Accept-Language", "X-Requested-With", REQUEST_PROOF_HEADER)
             .allowCredentials(true).maxAge(3600);
     }
 
@@ -74,10 +77,20 @@ public class SecurityConfiguration implements WebMvcConfigurer {
         @Override
         public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
             if ("OPTIONS".equals(request.getMethod())) return true;
-            requireTrustedOriginForMutation(request);
+            boolean backchannelLogout = isBackchannelLogout(request);
+            if (!backchannelLogout) {
+                requireTrustedOriginForMutation(request);
+            }
             if (permissionPolicy.isPublic(request.getMethod(), request.getRequestURI())) return true;
 
-            AuthorizationSubject subject = sessions.currentSubject();
+            AuthorizationSubject subject = sessions.currentSubject(request.getServerName());
+            if (isMutation(request)) {
+                try {
+                    sessions.requireRequestProof(request.getHeader(REQUEST_PROOF_HEADER));
+                } catch (InvalidSessionException exception) {
+                    throw new AccessDeniedException();
+                }
+            }
             List<String> required = permissionPolicy.requiredPermissions(request.getMethod(), request.getRequestURI());
             for (String permission : required) {
                 authorization.requireTenantPermission(subject, permission);
@@ -87,10 +100,18 @@ public class SecurityConfiguration implements WebMvcConfigurer {
         }
 
         private void requireTrustedOriginForMutation(HttpServletRequest request) {
-            if (Set.of("GET", "HEAD", "OPTIONS").contains(request.getMethod())) return;
+            if (!isMutation(request)) return;
             String origin = request.getHeader("Origin");
             if (origin == null || !allowedOrigins.contains(origin)) throw new AccessDeniedException();
         }
 
+        private boolean isBackchannelLogout(HttpServletRequest request) {
+            return "POST".equals(request.getMethod())
+                && BACKCHANNEL_LOGOUT_PATH.equals(request.getRequestURI());
+        }
+
+        private boolean isMutation(HttpServletRequest request) {
+            return !Set.of("GET", "HEAD", "OPTIONS").contains(request.getMethod());
+        }
     }
 }

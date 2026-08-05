@@ -3,7 +3,12 @@ import type { AuthApi } from './auth';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { authenticationRequestClient } from '../request';
+import {
+  authenticationRequestClient,
+  baseRequestClient,
+  requestClient,
+  resetSessionRequestProof,
+} from '../request';
 import { COOKIE_SESSION_MARKER } from '../session';
 import { loginApi, logoutApi } from './auth';
 
@@ -38,18 +43,29 @@ function loginResult(): AuthApi.LoginResult {
 
 describe('authentication request client', () => {
   const originalAdapter = authenticationRequestClient.instance.defaults.adapter;
+  const originalBaseAdapter = baseRequestClient.instance.defaults.adapter;
+  const originalRequestAdapter = requestClient.instance.defaults.adapter;
   const adapter = vi.fn();
+  const baseAdapter = vi.fn();
+  const requestAdapter = vi.fn();
 
   beforeEach(() => {
     setActivePinia(createPinia());
     mocks.logout.mockReset();
     mocks.messageError.mockReset();
     adapter.mockReset();
+    baseAdapter.mockReset();
+    requestAdapter.mockReset();
+    resetSessionRequestProof();
     authenticationRequestClient.instance.defaults.adapter = adapter;
+    baseRequestClient.instance.defaults.adapter = baseAdapter;
+    requestClient.instance.defaults.adapter = requestAdapter;
   });
 
   afterEach(() => {
     authenticationRequestClient.instance.defaults.adapter = originalAdapter;
+    baseRequestClient.instance.defaults.adapter = originalBaseAdapter;
+    requestClient.instance.defaults.adapter = originalRequestAdapter;
   });
 
   it('rejects invalid credentials without re-auth and permits retry', async () => {
@@ -79,6 +95,13 @@ describe('authentication request client', () => {
   });
 
   it('rejects a failed logout without recursively re-authenticating', async () => {
+    baseAdapter.mockResolvedValueOnce({
+      config: {},
+      data: { code: 0, data: { requestProof: 'a'.repeat(43) } },
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    });
     adapter.mockRejectedValueOnce({
       response: {
         data: { code: 40_101, error: 'AUTH_REQUIRED' },
@@ -90,6 +113,44 @@ describe('authentication request client', () => {
       code: 40_101,
       error: 'AUTH_REQUIRED',
     });
+    expect(adapter.mock.calls[0]?.[0]?.headers?.['X-CSRF-Token']).toBe(
+      'a'.repeat(43),
+    );
     expect(mocks.logout).not.toHaveBeenCalled();
+  });
+
+  it('single-flights the session proof and attaches it to browser mutations', async () => {
+    let releaseProof!: () => void;
+    const proofReady = new Promise<void>((resolve) => {
+      releaseProof = resolve;
+    });
+    baseAdapter.mockImplementationOnce(async (config) => {
+      await proofReady;
+      return {
+        config,
+        data: { code: 0, data: { requestProof: 'b'.repeat(43) } },
+        headers: {},
+        status: 200,
+        statusText: 'OK',
+      };
+    });
+    requestAdapter.mockImplementation(async (config) => ({
+      config,
+      data: { code: 0, data: null },
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    }));
+
+    const create = requestClient.post('/system/role', {});
+    const update = requestClient.put('/system/role/1', {});
+    await vi.waitFor(() => expect(baseAdapter).toHaveBeenCalledOnce());
+    releaseProof();
+    await Promise.all([create, update]);
+
+    expect(baseAdapter).toHaveBeenCalledOnce();
+    for (const [config] of requestAdapter.mock.calls) {
+      expect(config.headers['X-CSRF-Token']).toBe('b'.repeat(43));
+    }
   });
 });

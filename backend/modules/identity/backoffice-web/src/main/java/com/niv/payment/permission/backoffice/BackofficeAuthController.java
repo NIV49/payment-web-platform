@@ -45,6 +45,11 @@ final class BackofficeAuthController {
         return BackofficeApiResponse.success(null);
     }
 
+    @GetMapping("/auth/csrf")
+    BackofficeApiResponse<RequestProofResponse> requestProof() {
+        return BackofficeApiResponse.success(new RequestProofResponse(sessions.requestProof()));
+    }
+
     @GetMapping("/user/info")
     BackofficeApiResponse<UserInfoResponse> currentUser() {
         AuthorizationSubject subject = sessions.currentSubject();
@@ -78,6 +83,7 @@ final class BackofficeAuthController {
     record LoginRequest(@NotBlank @Size(max = 100) String username,
                         @NotBlank @Size(max = 256) String password) { }
     record LoginResponse(String accessToken) { }
+    record RequestProofResponse(String requestProof) { }
     record UserInfoResponse(String userId, String username, String realName, String avatar,
                             List<String> roles, String homePath, String desc, String token,
                             boolean systemAdministrator) { }

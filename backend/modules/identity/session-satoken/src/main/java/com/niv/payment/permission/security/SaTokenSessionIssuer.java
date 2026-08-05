@@ -5,15 +5,23 @@ import cn.dev33.satoken.stp.StpLogic;
 import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.service.AuthenticationService;
 
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.Objects;
 
 public final class SaTokenSessionIssuer implements AuthenticationService.SessionIssuer {
     private final StpLogic stpLogic;
     private final AccountDomain accountDomain;
+    private final SecureRandom random;
 
     public SaTokenSessionIssuer(StpLogic stpLogic, AccountDomain accountDomain) {
+        this(stpLogic, accountDomain, new SecureRandom());
+    }
+
+    SaTokenSessionIssuer(StpLogic stpLogic, AccountDomain accountDomain, SecureRandom random) {
         this.stpLogic = Objects.requireNonNull(stpLogic, "stpLogic");
         this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
+        this.random = Objects.requireNonNull(random, "random");
     }
 
     @Override
@@ -30,7 +38,9 @@ public final class SaTokenSessionIssuer implements AuthenticationService.Session
         session.set(SessionAttributeNames.DEPARTMENT_ID, account.departmentId());
         session.set(SessionAttributeNames.PERMISSION_VERSION, account.permissionVersion());
         session.set(SessionAttributeNames.SESSION_VERSION, account.sessionVersion());
+        session.set(SessionAttributeNames.IDENTITY_VERSION, account.identityVersion());
         session.set(SessionAttributeNames.STEP_UP_VERIFIED, false);
+        session.set(SessionAttributeNames.REQUEST_PROOF, newRequestProof());
         return new AuthenticationService.LoginSession(stpLogic.getTokenValue());
     }
 
@@ -57,11 +67,18 @@ public final class SaTokenSessionIssuer implements AuthenticationService.Session
         session.set(SessionAttributeNames.OIDC_ID_ASSERTION, principal.idToken());
         session.set(SessionAttributeNames.STEP_UP_AT, null);
         session.set(SessionAttributeNames.STEP_UP_VERIFIED, false);
+        session.set(SessionAttributeNames.REQUEST_PROOF, newRequestProof());
         return new AuthenticationService.LoginSession(stpLogic.getTokenValue());
     }
 
     @Override
     public void logout() {
         stpLogic.logout();
+    }
+
+    private String newRequestProof() {
+        byte[] value = new byte[32];
+        random.nextBytes(value);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
     }
 }

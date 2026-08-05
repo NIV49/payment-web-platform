@@ -133,6 +133,7 @@ class JooqPermissionAdaptersIntegrationTest {
             .orElseThrow();
         assertEquals(17L, versions.permissionVersion());
         assertEquals(23L, versions.sessionVersion());
+        assertEquals(0L, versions.identityVersion());
         assertFalse(sessionVersions.findActiveVersions(
                 AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID + 1)
             .isPresent());
@@ -170,20 +171,18 @@ class JooqPermissionAdaptersIntegrationTest {
                 .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID)).execute();
         }
 
-        String passwordHash = dsl.select(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
-            .from(IAM_AUTHENTICATION_CREDENTIAL)
-            .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID))
-            .fetchSingle(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH);
         try {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
                 .setNull(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
                 .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID)).execute();
             assertTrue(sessionVersions.findActiveVersions(
-                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID).isEmpty());
-            assertAuthorizationSubjectInvalid(permissionVersions, grants);
+                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID).isPresent());
+            assertFalse(sessionVersions.findActiveVersions(
+                AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID).orElseThrow()
+                .localLoginCapable());
         } finally {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
-                .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, passwordHash)
+                .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, TEST_PASSWORD_HASH)
                 .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID)).execute();
         }
 
