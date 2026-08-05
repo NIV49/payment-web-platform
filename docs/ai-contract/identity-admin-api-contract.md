@@ -11,7 +11,7 @@
 2. **Target Prototype Contract**：本轮原型认可的边界和不变量；
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
-当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 数据基础；三端已实施 Session-bound CSRF、逐请求 identityVersion、各自独立的 OIDC BFF、精确映射、Host 复核、签名 back-channel logout 和十分钟 LoA 2 step-up。三套生产前端已切换为 OIDC 跳转与一次性 handoff 兑换，本地开发仍保留账密验收入口。真实 Keycloak、生命周期 relay、MFA 恢复编排与生产演练仍未完成，因此整体仍是生产 NO-GO。
+当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V24 已落地 IAM-002 数据基础和 MFA 恢复状态机；三端已实施 Session-bound CSRF、逐请求 identityVersion、各自独立的 OIDC BFF、精确映射、Host 复核、签名 back-channel logout、十分钟 LoA 2 step-up，以及默认关闭的 Keycloak MFA 恢复 relay。三套生产前端已切换为 OIDC 跳转与一次性 handoff 兑换，本地开发仍保留账密验收入口。三份 Keycloak 26.7.0 Realm bootstrap 已通过全新实例导入和 service-account token 交换；邀请/激活、已有 Realm 声明式更新与漂移检测、生产演练和正式签名 gate 仍未完成，因此整体仍是生产 NO-GO。
 
 ## IAM-001 已实现边界
 
@@ -19,7 +19,7 @@
 
 ## IAM-002 已接受目标、实施中
 
-[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 接受三套独立前端应用、三套独立后端服务和生产 OIDC 身份边界；IAM-002 当前仍是 candidate Rule，只登记决策契约 Judge，不能据此宣称生产实现已经通过。目标契约包含六条不可降级不变量：
+[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 接受三套独立前端应用、三套独立后端服务和生产 OIDC 身份边界；IAM-002 当前仍是 candidate Rule，已登记决策契约、Keycloak 配置和后端全量验证 Judge，但尚未形成绑定最终 commit 的 closed Capability Slice 与两份独立签名 PASS，不能据此宣称生产实现已经通过。目标契约包含六条不可降级不变量：
 
 1. 三个 Keycloak Realm 只提供逻辑隔离；共享集群仍有共同管理、存储、升级、容量和可用性故障域，不能描述为完整基础设施隔离。
 2. 本地应用 Session 同时接入经过验证的 Keycloak back-channel logout 和逐请求身份版本撤销；任一信号都必须使旧 Session 失效。
@@ -78,7 +78,7 @@ Accept-Language = 当前前端语言
 - 本地精确 Origin 分别为 PLATFORM `http://127.0.0.1:5999`、MERCHANT `http://127.0.0.1:6002`、AGENT `http://127.0.0.1:6001`；`6000` 是 Chromium 禁止访问的 unsafe port，不得用于浏览器入口；
 - 允许 GET、POST、PUT、PATCH、DELETE、OPTIONS；
 - `allowCredentials=true`；
-- 允许请求头仅包含 `Content-Type`、`Accept-Language`、`X-Requested-With`；
+- 允许请求头仅包含 `Content-Type`、`Accept-Language`、`X-Requested-With`、`X-CSRF-Token`；
 - 不允许通配 Origin。
 
 所有 POST、PUT、PATCH、DELETE 请求，包括登录和退出，都必须带受信任的 `Origin`。GET、HEAD、OPTIONS 不执行 Origin 写保护。missing、任意错误值和另一后台的 cross-root Origin 都返回 403 且登录不签发 Cookie；被拒绝的跨 Origin 退出不得改变已有会话，只有携带本端精确 Origin 的退出才撤销并清 Cookie。
@@ -826,13 +826,14 @@ V20__converge_reserved_backoffice_grant_keys.sql
 V21__add_production_identity_foundation.sql
 V22__build_account_domain_username_index.sql
 V23__attach_account_domain_username_constraint.sql
+V24__add_mfa_recovery_state_machine.sql
 ```
 
 语义：
 
 - `local` profile 启用自动迁移，但不启用 `baseline-on-migrate`；
 - 已经手工执行 V1、但没有 `flyway_schema_history` 的旧开发卷不属于升级契约；需要的数据先备份，然后从空库重建；
-- 全新空库正常执行 V1 到 V23；
+- 全新空库正常执行 V1 到 V24；
 - V2/V3 的历史固定身份和菜单只为兼容旧迁移链存在；V8 只在预留 footprint 仍是精确 fixture 时删除它，其他租户、用户、审计、Outbox 和扩展权限原样保留；
 - V3 为预置平台管理员补充 Dashboard、Analytics 和 Workspace 动态路由，保证 `/dashboard` 登录首页可用；
 - V4 把系统菜单 title 修正为 i18n key，并清除一级目录旧 `BasicLayout`；
@@ -906,8 +907,9 @@ V23__attach_account_domain_username_constraint.sql
 | Cross-tenant model | `SAME_TENANT_ONLY` 默认；只有受控 `READ/VIEW` action 可使用 `RELATED_PARTY_READ`，Core 与 V12 CHECK 双重约束 | 没有 Party/Relationship adapter，运行时仍 fail closed |
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、递归拒绝全部核心/fallback/local canonical 冲突、退出/换用户清旧路由、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
-| Flyway | V1→V23 fresh/upgrade 可运行；V21-V23 覆盖身份基础、跨域原子约束、事件不可变和用户名 expand | 旧 username 约束 contract、生产 migration Job/审批和备份恢复演练未完成；V22 非事务失败需检查 invalid index |
-| 三后台 OIDC BFF 与前端 | PLATFORM、MERCHANT、AGENT 三个独立组合根均已显式装配各自 client credential/config、Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout、十分钟 step-up 和账号域 Session 索引，默认关闭；三套生产前端只提供 OIDC 跳转和 handoff 兑换 | 尚未完成真实 Keycloak、生命周期 relay、MFA 恢复、配置即代码和三 Realm 联调，不得开放生产流量 |
+| Flyway | V1→V24 fresh/upgrade 可运行；V21-V23 覆盖身份基础、跨域原子约束、事件不可变和用户名 expand，V24 增加 fail-closed MFA 恢复状态机 | 旧 username 约束 contract、生产 migration Job/审批和备份恢复演练未完成；V22 非事务失败需检查 invalid index |
+| 三后台 OIDC BFF 与前端 | PLATFORM、MERCHANT、AGENT 三个独立组合根均已显式装配各自 client credential/config、Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout、十分钟 step-up 和账号域 Session 索引，默认关闭；三套生产前端只提供 OIDC 跳转和 handoff 兑换 | 三 Realm bootstrap 已在全新 Keycloak 26.7.0 实例导入并通过三个 lifecycle token exchange；仍缺已有 Realm 声明式更新/漂移检测、完整浏览器登录和故障演练 |
+| MFA 恢复 | V24 + relay 按 Credential、Recovery Code、Keycloak Session、应用 Session 顺序幂等撤销；请求即推进 identity/session version 并阻断登录，四步完成前保持 `RECOVERY_PENDING` | 尚缺生产监控告警、真实 TOTP/恢复码端到端演练、邀请 UI 和 break-glass 审批，不得视为生产闭环 |
 
 ## 2.3 三后台 OIDC BFF 契约
 
@@ -968,16 +970,33 @@ ID Token 只保存在服务端 Session，用于标准 `id_token_hint`，不进�
 
 OIDC 认证失败统一返回 HTTP 401、code `40103`、error `OIDC_LOGIN_REJECTED`，并与其他 API 一样返回 `traceId`；不披露 User、Membership、Host 注册状态或具体 token claim。
 
+### POST `/identity/mfa-recoveries`
+
+要求有效 Cookie Session、可信 Origin、`X-CSRF-Token` 和最近十分钟内的 LoA 2 step-up。请求者必须是当前可信 tenant 内 ACTIVE system role 的管理员，目标必须是同一 tenant、同一账号域的另一位 ACTIVE、`PROVISIONED` OIDC User；客户端不能提交 tenant、Realm、issuer、subject 或 Host。
+
+Request：
+
+```json
+{
+  "targetMembershipId": "22612",
+  "idempotencyKey": "8ce154cf-4f13-4aac-b0de-74922513a14f"
+}
+```
+
+成功返回 string `recoveryId` 与 `RECOVERY_PENDING` 或幂等重放所得状态。首次请求在单个 PostgreSQL 事务中写 append-only lifecycle Outbox 和恢复状态，立即把目标 User 置为 `RECOVERY_PENDING`、禁用应用 credential 状态，并推进 identityVersion 及全部未终止 Membership 的 sessionVersion。relay 以租约和 `SKIP LOCKED` 逐步执行：删除 Keycloak OTP/WebAuthn credential 并要求重新配置 TOTP、删除全部恢复码、注销 Keycloak User Session、注销全部应用 Membership Session。只有四个完成时间都落库后才可标记 `COMPLETED` 并恢复 `PROVISIONED`；部分失败只记录有界错误码并退避重试，不保存 IdP 响应体、邮箱、密码、TOTP Secret、恢复码或邀请 Token。
+
+该端点当前使用 system-role + recent step-up 的服务端策略，不虚构一个未进入权限目录的 permission code；审计 reason 为 `SYSTEM_ADMIN_STEP_UP`。
+
 ## 2.4 当前尚未实现
 
-- 真实 Keycloak 三 Realm 联调和 Realm/client/认证流配置即代码；
-- 生命周期 relay 对 identityVersion 的可靠推进及跨系统撤销确认；
-- MFA 恢复、MFA 重置审批与四类凭证全撤销编排；
+- 已存在 Realm 的声明式更新、漂移检测、生产密钥轮换和完整三 Realm 浏览器联调；bootstrap import 对已有 Realm 使用 `IGNORE_EXISTING`，不能承担配置更新；
+- 通用 PROVISION/ENABLE/DISABLE/DEPROVISION 生命周期 relay、邀请/激活和首位租户管理员创建；
+- MFA 恢复的生产告警、TOTP/恢复码端到端演练和 break-glass 审批；
 - 生产级的新建用户密码激活、邀请、首次改密、忘记密码和管理员重置；
 - 超出本文精确目录、数据维度或审批规则的通用 RoleGrant 管理；
 - 商户、市场、渠道、销售客户关系和历史代理关系数据范围 Provider；
 - 可信审批 workflow evidence、资源指纹、金额/币种绑定、过期和防重放；
-- Outbox relay、投递、重试、Inbox、重放和告警；
+- 除 MFA 恢复专用 relay 外的通用 Outbox relay、投递、重试、Inbox、重放和告警；
 - 订单、导出、资金查看或资金写权限；
 - Payment/Ledger 状态机、金额精度、幂等、账本分录、调账/对账与 API/事件可执行规格；
 - payout、withdrawal、refund、ledger 等任何资金权限；
@@ -1063,8 +1082,8 @@ RoleGrant(permissionCode + dimensions + constraints)
 
 以下任一项未完成，不得把当前原型标记为生产身份与支付权限系统：
 
-1. 真实 Keycloak 三 Realm、密码策略和身份生命周期尚未联调和演练；
-2. MFA 恢复、MFA 重置、激活会话和旧会话全撤销流程未实现；
+1. 三 Realm bootstrap 只在全新 Keycloak 26.7.0 验证实例完成导入和 service-account token 交换；真实用户浏览器流、已有 Realm 更新/漂移、生产数据库拓扑、密钥轮换和故障恢复尚未联调和演练；
+2. MFA 恢复四步编排已实现并由数据库/relay 测试覆盖，但真实 TOTP/恢复码、告警与 break-glass 演练未完成；
 3. 新建用户没有生产可用的密码激活、邀请、首次改密或管理员重置流程；本地统一口令及重置能力不得用于生产；
 4. Cookie Secure 的生产强制、代理拓扑、TTL、Redis 故障和会话撤权未演练；
 5. CSRF/Origin/CORS 策略尚未经过真实部署安全测试；

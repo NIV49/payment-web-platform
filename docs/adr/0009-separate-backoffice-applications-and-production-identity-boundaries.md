@@ -64,7 +64,7 @@ MFA recovery is a durable state machine rather than a fictitious cross-system da
 - Origin, OIDC state, PKCE, CSRF, Cookie attributes, back-channel logout, and identity versions solve different threats. Passing one control never disables another.
 - The application never maps an IdP login by email or username and never infers identity from account domain alone.
 - Keycloak owns passwords, MFA credentials, and recovery codes. The application owns account-domain mapping, Membership, authorization, local session versions, recovery orchestration state, and audit evidence.
-- The repository now has three frontend applications and backend services, session-bound CSRF enforcement, per-request identity-version checks, and explicit OIDC/back-channel composition in all three backend roots. Real Keycloak integration, lifecycle version advancement, frontend OIDC cutover, complete MFA recovery, configuration-as-code, and formal Judges remain production blockers.
+- The repository now has three frontend applications and backend services, session-bound CSRF enforcement, per-request identity-version checks, explicit OIDC/back-channel composition, production-only OIDC frontends, a durable four-step MFA recovery relay, and reviewed bootstrap configuration for all three Keycloak realms. A clean Keycloak 26.7.0 validation instance has imported all three realms and exchanged each lifecycle service-account credential. Existing-realm drift remediation, invitation/provisioning, production topology and recovery drills, observability, and formal signed Judges remain production blockers.
 
 ## Release and rollback
 

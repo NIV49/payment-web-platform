@@ -16,6 +16,11 @@ ADR_PATH = Path(
 )
 RULE_PATH = Path(".agents/payment-modernization/rules/IAM-002.json")
 CHECK_ID = "IAM-002-DECISION-CONTRACT"
+JUDGE_TESTS = [
+    CHECK_ID,
+    "IAM-002-KEYCLOAK-CONFIG",
+    "IAM-002-BACKEND-VERIFY",
+]
 DECISION_ID = "IAM-PRODUCTION-IDENTITY-BOUNDARY"
 
 REQUIRED_INVARIANTS = {
@@ -174,8 +179,8 @@ def _validate_rule(repository: Path) -> list[str]:
         errors.append(
             "IAM-002 Rule Card counterexamples must equal the exact ordered counterexample set"
         )
-    if payload.get("judgeTests") != [CHECK_ID]:
-        errors.append(f"IAM-002 Rule Card must bind only {CHECK_ID} while candidate")
+    if payload.get("judgeTests") != JUDGE_TESTS:
+        errors.append("IAM-002 Rule Card must bind the exact ordered Judge set")
     return errors
 
 

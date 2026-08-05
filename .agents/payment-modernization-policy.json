@@ -54,6 +54,7 @@
     ".github/workflows/documentation.yml",
     "scripts/check-doc-decisions.py",
     "scripts/check_iam001_three_backoffice_boundary.py",
+    "scripts/check_iam002_keycloak_realms.py",
     "scripts/check_iam002_production_identity_boundary.py",
     "scripts/check_modernization_artifacts.py",
     "scripts/check_modernization_evidence.py",
@@ -67,6 +68,7 @@
     "scripts/tests/test_documentation_python_runtime_security.py",
     "scripts/tests/test_documentation_workflow_security.py",
     "scripts/tests/test_iam001_three_backoffice_boundary.py",
+    "scripts/tests/test_iam002_keycloak_realms.py",
     "scripts/tests/test_iam002_production_identity_boundary.py",
     "scripts/tests/test_modernization_contracts.py",
     "scripts/tests/test_payment_modernization_governance.py"

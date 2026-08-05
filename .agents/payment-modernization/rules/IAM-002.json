@@ -38,6 +38,8 @@
   "evidence": [],
   "confidence": "high",
   "judgeTests": [
-    "IAM-002-DECISION-CONTRACT"
+    "IAM-002-DECISION-CONTRACT",
+    "IAM-002-KEYCLOAK-CONFIG",
+    "IAM-002-BACKEND-VERIFY"
   ]
 }

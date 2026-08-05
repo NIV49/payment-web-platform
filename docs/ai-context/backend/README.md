@@ -140,7 +140,7 @@ Sa-Token 配置：PLATFORM/MERCHANT/AGENT 分别使用 `platform-admin`/`merchan
 
 服务默认使用 `PAYMENT_FORWARD_HEADERS_STRATEGY=NONE`，不会把调用方自行提供的 `Forwarded`、`X-Forwarded-For` 等头当成客户端地址。这也是登录失败限流正确性的组成部分。只有当请求必经可信反向代理，且该代理会先剥离外部请求携带的全部 `Forwarded`/`X-Forwarded-*` 再写入自己的值时，部署方才可显式启用 forwarded-header 处理；不能仅因“部署在代理后”就打开。
 
-三个组合根都已增加默认关闭且必须显式配置的生产 OIDC 流：登记 Host -> Authorization Code + S256 PKCE -> callback 单次消费 state -> 服务端 token exchange -> RS256/JWKS 及 issuer/audience/azp/nonce/ACR/time/sid 校验 -> 60 秒 Host-bound handoff -> `issuer + subject` 精确映射 -> Sa-Token Cookie。各服务使用独立环境变量、client credential、Cookie/login type 和账号域 Redis namespace；外部 Session 逐请求复核 Host、映射和 identityVersion。签名 back-channel logout 使用 issuer+sid 优先、无 sid 时 issuer+subject 的 Redis 索引撤销应用 Session，并以带所有者的短租约和完成标记处理并发及重放；OIDC callback/back-channel 均不依赖 Origin，browser handoff 仍要求可信 Origin，Cookie logout 还要求独立 CSRF。真实 Keycloak 三 Realm 联调尚未完成，不能据此宣称撤销链路已生产闭环。
+三个组合根都已增加默认关闭且必须显式配置的生产 OIDC 流：登记 Host -> Authorization Code + S256 PKCE -> callback 单次消费 state -> 服务端 token exchange -> RS256/JWKS 及 issuer/audience/azp/nonce/ACR/time/sid 校验 -> 60 秒 Host-bound handoff -> `issuer + subject` 精确映射 -> Sa-Token Cookie。各服务使用独立环境变量、client credential、Cookie/login type 和账号域 Redis namespace；外部 Session 逐请求复核 Host、映射和 identityVersion。签名 back-channel logout 使用 issuer+sid 优先、无 sid 时 issuer+subject 的 Redis 索引撤销应用 Session，并以带所有者的短租约和完成标记处理并发及重放；OIDC callback/back-channel 均不依赖 Origin，browser handoff 仍要求可信 Origin，Cookie logout 还要求独立 CSRF。三 Realm bootstrap 已在全新 Keycloak 26.7.0 实例导入并验证三个 lifecycle service account；真实用户浏览器流、已有 Realm 漂移治理和生产故障演练仍未完成，不能据此宣称撤销链路已生产闭环。
 
 ### 请求鉴权
 
@@ -292,11 +292,13 @@ V17 为 `iam_role/iam_menu/iam_department` 增加 `deleted_at`，为菜单和部
 
 V18 为 Tenant、User、Credential、Membership 增加 `account_domain` 并用组合外键拒绝跨域关系；V19 为三个组合根增加服务端维护的入口 Permission/Grant；V20 收敛保留 grant key 冲突并保留原授权语义、审计和版本证据。登录入口固定账号域，客户端不能提交 tenant、realm 或 portal 切换后台。
 
-### V21-V23 生产身份数据基础
+### V21-V24 生产身份数据与恢复基础
 
 V21 增加 User `identity_version` 和 IdP provisioning 状态、服务端管理的 `iam_tenant_entry_host`，以及独立的 append-only `iam_identity_lifecycle_outbox` 与 mutable relay state。生命周期事件只允许 user、tenant、realm、操作类型、幂等键和时间，不提供可保存邮箱、邀请 Token、密码、TOTP Secret 或 Recovery Code 的 payload 字段；`issuer + subject` 唯一约束继续沿用 V1。
 
 用户名迁移处于 expand 阶段。V21 先证明旧的全局 `uk_iam_authentication_username` 仍存在；V22 使用 `CREATE UNIQUE INDEX CONCURRENTLY` 建立 `(account_domain, username)` 唯一索引；V23 将其附加为 `uk_iam_authentication_domain_username`。运行时代码已按账号域预检用户名冲突，但旧全局约束尚未删除，因此跨域同名仍会被数据库拒绝。只有旧实例清零和 N/N-1 兼容证据通过后，才能用新的 contract 迁移删除旧约束。
+
+V24 追加 `iam_mfa_recovery`，把 MFA 恢复建模为四步 durable state machine。请求事务写独立 lifecycle Outbox 后立即阻断目标身份并推进 identity/session version；relay 按 Keycloak MFA Credential、Recovery Code、Keycloak Session、应用 Session 顺序执行，使用行租约、`SKIP LOCKED`、有界错误码和退避重试。数据库 CHECK 禁止在四个完成时间齐备前写 `COMPLETED`，partial unique index 禁止同一 User 同时存在两个 pending recovery。该表没有 profile/secret payload 字段。
 
 V22 的 sidecar 明确 `executeInTransaction=false`。三个应用、测试 helper 和 jOOQ codegen 都关闭 PostgreSQL transactional advisory lock，避免非事务并发索引等待 Flyway 自身事务锁。生产迁移 Job 必须使用同一设置；V22 异常中断后先检查同名索引是否 `indisvalid=false`，仅删除该精确无效索引后再重试，不得直接 `repair` 掩盖未完成 DDL。
 
@@ -304,7 +306,7 @@ V22 的 sidecar 明确 `executeInTransaction=false`。三个应用、测试 help
 
 - 所有已执行版本不可修改 checksum；
 - 结构和数据修正新增前向版本；
-- 同时测试空库从 V1 全量迁移、历史版本升级，以及各拒绝路径；V21-V23 还要覆盖 IdP 状态回填、跨域 Host/Outbox 原子拒绝、事件不可变、expand 前置约束和账号域用户名唯一性；
+- 同时测试空库从 V1 全量迁移、历史版本升级，以及各拒绝路径；V21-V24 还要覆盖 IdP 状态回填、跨域 Host/Outbox 原子拒绝、事件不可变、expand 前置约束、账号域用户名唯一性和 MFA 四步完成约束；
 - 密码和固定身份初始化只允许 local profile；已有库先按 [V8 fixture 隔离迁移手册](../../runbooks/iam-v8-fixture-isolation.md) 盘点。无关真实数据可原样保留，只有落入预留 footprint 或依赖 tenant `1` 的历史数据才需要单独的前向迁移；
 - 菜单 component 和 i18n key 属于跨端协议，迁移前要有契约校验。
 
@@ -390,7 +392,7 @@ cd backend
 - `meta_json` 已有容器、深度、key/string 和总 value 硬上限，外链字段也按菜单类型隔离；新增字段仍必须先定义跨端语义和测试，不得把任意 JSON 当成无约束扩展口。
 - `SystemAdministrationController` 同时承担多资源 DTO/映射，继续扩展会形成浅而宽的入口层。
 - Role、Department、Menu 与 User 管理写入已统一执行 optimistic version 契约；Local fixture 仍不是生产 provisioning；命中 V8 预留 footprint 冲突的历史库需要人工前向迁移，无关业务数据不受 V8 影响。
-- 角色 `menuIds` 只是导航/展示，BUTTON authCode 只是目录展示绑定；统一角色配置 UI/API 仍分别写 `role_menu` 与 RoleGrant，不从任一方推导另一方。RoleGrant 写在生产默认受 legacy cutover 闸门禁用，N-1 清退、正式审批和演练完成前不得打开；三端 OIDC 与 step-up 协议已接入，但仍缺真实 Keycloak、生命周期 relay、MFA 恢复、可信审批证据、关系数据权限、审计拒绝/登录失败和生产级可观测性。
+- 角色 `menuIds` 只是导航/展示，BUTTON authCode 只是目录展示绑定；统一角色配置 UI/API 仍分别写 `role_menu` 与 RoleGrant，不从任一方推导另一方。RoleGrant 写在生产默认受 legacy cutover 闸门禁用，N-1 清退、正式审批和演练完成前不得打开；三端 OIDC、step-up 和 MFA 恢复 relay 已接入，三份 Realm bootstrap 已在全新 Keycloak 26.7.0 实例验证导入，但仍缺邀请/通用 lifecycle、已有 Realm 漂移治理、可信审批证据、关系数据权限、审计拒绝/登录失败和生产级可观测性。
 - 资金权限核心已有模型和测试，但不得在完成 [迁移计划](../permission/09-migration-plan.md) 的门禁前直接接入真实资金写路径。
 
 ## 11. 改动检查清单
