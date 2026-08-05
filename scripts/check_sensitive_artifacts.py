@@ -202,19 +202,19 @@ SAFE_EMAIL_SUFFIXES = (".example", ".invalid", ".test")
 APPROVED_FINDING_HASHES = {
     (
         "frontend/admin/pnpm-lock.yaml",
-        7095,
+        7474,
         "EMAIL_ADDRESS",
         "b0373516d594ddd199b25c3655332b354837e065c5cc232f5043189897900ca7",
     ): "Published upstream deprecation contact in the frozen pnpm lockfile",
     (
         "frontend/admin/pnpm-lock.yaml",
-        17063,
+        17867,
         "GENERIC_SECRET_ASSIGNMENT",
         "4ccec3fd47ee5162962804420d4b53c8ee5ecfc827f79ffd21e679b305742003",
     ): "Package version mapping in the frozen pnpm lockfile",
     (
         "frontend/admin/pnpm-lock.yaml",
-        17063,
+        17867,
         "YAML_SECRET_SCALAR",
         "4ccec3fd47ee5162962804420d4b53c8ee5ecfc827f79ffd21e679b305742003",
     ): "Package version mapping in the frozen pnpm lockfile",
@@ -222,7 +222,7 @@ APPROVED_FINDING_HASHES = {
 APPROVED_FINDING_CONTEXTS = {
     (
         "frontend/admin/pnpm-lock.yaml",
-        7095,
+        7474,
         "EMAIL_ADDRESS",
     ): (
         "exact_line",
@@ -230,7 +230,7 @@ APPROVED_FINDING_CONTEXTS = {
     ),
     (
         "frontend/admin/pnpm-lock.yaml",
-        17063,
+        17867,
         "GENERIC_SECRET_ASSIGNMENT",
     ): (
         "exact_line",
@@ -238,7 +238,7 @@ APPROVED_FINDING_CONTEXTS = {
     ),
     (
         "frontend/admin/pnpm-lock.yaml",
-        17063,
+        17867,
         "YAML_SECRET_SCALAR",
     ): (
         "exact_line",

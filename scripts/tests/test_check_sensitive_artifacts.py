@@ -1050,8 +1050,8 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
         relative_path = "frontend/admin/pnpm-lock.yaml"
         content = REPOSITORY.joinpath(relative_path).read_text(encoding="utf-8")
         lines = content.splitlines()
-        email_line_number = 7095
-        dependency_line_number = 17063
+        email_line_number = 7474
+        dependency_line_number = 17867
         email_line_index = email_line_number - 1
         dependency_line_index = dependency_line_number - 1
 
