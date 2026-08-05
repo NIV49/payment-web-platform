@@ -145,7 +145,7 @@ class AccountDomainIsolationMigrationTest {
 
         flyway(null).migrate();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("23");
+        assertThat(currentSuccessfulVersion()).isEqualTo("24");
         assertThat(singleLong("""
             SELECT count(*)
               FROM iam_role role_row
@@ -211,7 +211,7 @@ class AccountDomainIsolationMigrationTest {
 
         flyway(null).migrate();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("23");
+        assertThat(currentSuccessfulVersion()).isEqualTo("24");
         assertThat(singleLong("""
             SELECT count(*) FROM iam_role_grant
              WHERE tenant_id=171 AND role_id=175 AND status='ACTIVE'
