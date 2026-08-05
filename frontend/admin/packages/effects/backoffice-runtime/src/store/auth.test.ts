@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   loginApi: vi.fn(),
   logoutApi: vi.fn(),
   notificationSuccess: vi.fn(),
+  oidcHandoffApi: vi.fn(),
   router: undefined as unknown as ReturnType<typeof createRouter>,
 }));
 
@@ -39,6 +40,7 @@ vi.mock('@payment/backoffice-runtime/api', () => ({
   LOGIN_CREDENTIAL_FIELD: ['pass', 'word'].join(''),
   loginApi: mocks.loginApi,
   logoutApi: mocks.logoutApi,
+  oidcHandoffApi: mocks.oidcHandoffApi,
 }));
 
 vi.mock('@payment/backoffice-runtime/locales', () => ({
@@ -95,8 +97,10 @@ describe('authentication session generation', () => {
     mocks.loginApi.mockReset();
     mocks.logoutApi.mockReset();
     mocks.notificationSuccess.mockReset();
+    mocks.oidcHandoffApi.mockReset();
     mocks.loginApi.mockResolvedValue(cookieLoginResult());
     mocks.logoutApi.mockResolvedValue(undefined);
+    mocks.oidcHandoffApi.mockResolvedValue(cookieLoginResult());
   });
 
   it('uses one login request while authentication is in flight', async () => {
@@ -201,5 +205,21 @@ describe('authentication session generation', () => {
 
     expect(mocks.loginApi).toHaveBeenCalledTimes(2);
     expect(useUserStore().userInfo?.username).toBe('retry');
+  });
+
+  it('establishes the same guarded session after an oidc handoff', async () => {
+    mocks.getUserInfoApi.mockResolvedValue(userInfo('federated'));
+    mocks.getAccessCodesApi.mockResolvedValue(['merchant:view']);
+    const authStore = useAuthStore();
+
+    const result = await authStore.redeemOidcHandoff(
+      'one-time-handoff',
+      () => undefined,
+    );
+
+    expect(mocks.oidcHandoffApi).toHaveBeenCalledWith('one-time-handoff');
+    expect(result.userInfo?.username).toBe('federated');
+    expect(useAccessStore().accessToken).toBe(COOKIE_SESSION_MARKER);
+    expect(useAccessStore().accessCodes).toEqual(['merchant:view']);
   });
 });

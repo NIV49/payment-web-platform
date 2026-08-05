@@ -3,6 +3,7 @@ import { join, relative, resolve, sep } from 'node:path';
 
 const root = resolve(process.argv[2] ?? '.');
 const commonViews = [
+  'src/views/_core/authentication/oidc-callback.vue',
   'src/views/_core/fallback/forbidden.vue',
   'src/views/_core/fallback/not-found.vue',
   'src/views/_core/profile/index.vue',
@@ -157,6 +158,9 @@ for (const [deployment, policy] of Object.entries(deployments)) {
     throw new Error(
       `${deployment} artifact is missing its namespace or same-origin API`,
     );
+  }
+  if (text.includes('current-password')) {
+    throw new Error(`${deployment} artifact contains the local password form`);
   }
 }
 

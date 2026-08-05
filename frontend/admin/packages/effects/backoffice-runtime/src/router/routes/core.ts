@@ -56,6 +56,15 @@ const coreRoutes: RouteRecordRaw[] = [
           title: $t('page.auth.login'),
         },
       },
+      {
+        name: 'OidcCallback',
+        path: 'oidc/callback',
+        component: () =>
+          import('../../views/_core/authentication/oidc-callback.vue'),
+        meta: {
+          title: $t('page.auth.oidcCallback'),
+        },
+      },
     ],
   },
 ];

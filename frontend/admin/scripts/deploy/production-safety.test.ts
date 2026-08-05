@@ -38,6 +38,7 @@ const artifactPolicies = {
 } as const;
 
 const commonArtifactViews = [
+  'src/views/_core/authentication/oidc-callback.vue',
   'src/views/_core/fallback/forbidden.vue',
   'src/views/_core/fallback/not-found.vue',
   'src/views/_core/profile/index.vue',
@@ -150,6 +151,7 @@ describe('independent backoffice production safety', () => {
 
       expect(environment).toMatch(/^VITE_GLOB_API_URL=\/api$/m);
       expect(environment).toMatch(/^VITE_ARCHIVER=false$/m);
+      expect(environment).toMatch(/^VITE_ROUTER_HISTORY=history$/m);
       expect(environment).not.toContain('mock-napi.vben.pro');
     },
   );
@@ -253,6 +255,8 @@ describe('independent backoffice production safety', () => {
     );
 
     expect(loginView).toContain('if (import.meta.env.DEV)');
+    expect(loginView).toContain('if (productionOidc) return [];');
+    expect(loginView).toContain('authStore.startOidcLogin()');
     expect(loginView).not.toContain('resolveLoginDefaults();');
     expect(loginDefaults).not.toContain('import.meta.env');
     expect(requestClient).not.toContain(
@@ -261,6 +265,7 @@ describe('independent backoffice production safety', () => {
     expect(coreRoutes).not.toMatch(
       /path: '(?:code-login|forget-password|qrcode-login|register)'/,
     );
+    expect(coreRoutes).toContain("name: 'OidcCallback'");
     expect(loginView).toContain(':show-code-login="false"');
     expect(loginView).toContain([':show-forget-pass', 'word="false"'].join(''));
     expect(loginView).toContain(':show-qrcode-login="false"');

@@ -10,7 +10,7 @@ import {
   resetSessionRequestProof,
 } from '../request';
 import { COOKIE_SESSION_MARKER } from '../session';
-import { loginApi, logoutApi } from './auth';
+import { loginApi, logoutApi, oidcHandoffApi } from './auth';
 
 const mocks = vi.hoisted(() => ({
   logout: vi.fn(),
@@ -117,6 +117,27 @@ describe('authentication request client', () => {
       'a'.repeat(43),
     );
     expect(mocks.logout).not.toHaveBeenCalled();
+  });
+
+  it('redeems an opaque oidc handoff without a pre-existing request proof', async () => {
+    const result = loginResult();
+    adapter.mockImplementationOnce(async (config) => ({
+      config,
+      data: { code: 0, data: result },
+      headers: {},
+      status: 200,
+      statusText: 'OK',
+    }));
+
+    await expect(oidcHandoffApi('handoff-value')).resolves.toEqual(result);
+
+    expect(adapter.mock.calls[0]?.[0]).toMatchObject({
+      data: JSON.stringify({ handoff: 'handoff-value' }),
+      url: '/auth/oidc/handoff',
+    });
+    expect(
+      adapter.mock.calls[0]?.[0]?.headers?.['X-CSRF-Token'],
+    ).toBeUndefined();
   });
 
   it('single-flights the session proof and attaches it to browser mutations', async () => {

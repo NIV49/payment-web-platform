@@ -1,3 +1,5 @@
+import type { AuthApi } from '@payment/backoffice-runtime/api';
+
 import type { Recordable, UserInfo } from '@vben/types';
 
 import { ref } from 'vue';
@@ -13,7 +15,12 @@ import {
   LOGIN_CREDENTIAL_FIELD,
   loginApi,
   logoutApi,
+  oidcHandoffApi,
 } from '@payment/backoffice-runtime/api';
+import {
+  OIDC_START_PATH,
+  resolveRealmLogoutUrl,
+} from '@payment/backoffice-runtime/api/core/oidc-navigation';
 import { COOKIE_SESSION_MARKER } from '@payment/backoffice-runtime/api/session';
 import { $t } from '@payment/backoffice-runtime/locales';
 import {
@@ -48,31 +55,24 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * 异步处理登录操作
-   * Asynchronously handle the login process
-   * @param params 登录表单数据
+   * Establish frontend state after either local login or OIDC handoff.
    */
-  async function performAuthLogin(
-    params: Recordable<any>,
+  async function establishAuthenticatedSession(
+    authenticationAttempt: Promise<AuthApi.LoginResult>,
+    sessionGeneration: number,
     onSuccess?: () => Promise<void> | void,
   ): Promise<AuthLoginResult> {
-    // 异步处理用户登录操作并获取 accessToken
     let userInfo: null | UserInfo = null;
-    const sessionGeneration = clearAuthenticatedRouteState();
     try {
       loginLoading.value = true;
-      const loginRequest = loginApi({
-        [LOGIN_CREDENTIAL_FIELD]: String(params.password ?? ''),
-        username: String(params.username ?? ''),
-      });
-      const loginResponse = loginRequest.then(
+      const loginResponse = authenticationAttempt.then(
         () => undefined,
         () => undefined,
       );
       pendingLoginResponse = loginResponse;
       let loginResult;
       try {
-        loginResult = await loginRequest;
+        loginResult = await authenticationAttempt;
       } finally {
         if (pendingLoginResponse === loginResponse) {
           pendingLoginResponse = null;
@@ -130,6 +130,42 @@ export const useAuthStore = defineStore('auth', () => {
     };
   }
 
+  function performAuthLogin(
+    params: Recordable<any>,
+    onSuccess?: () => Promise<void> | void,
+  ): Promise<AuthLoginResult> {
+    const sessionGeneration = clearAuthenticatedRouteState();
+    return establishAuthenticatedSession(
+      loginApi({
+        [LOGIN_CREDENTIAL_FIELD]: String(params.password ?? ''),
+        username: String(params.username ?? ''),
+      }),
+      sessionGeneration,
+      onSuccess,
+    );
+  }
+
+  function performOidcHandoff(
+    handoff: string,
+    onSuccess?: () => Promise<void> | void,
+  ): Promise<AuthLoginResult> {
+    const sessionGeneration = clearAuthenticatedRouteState();
+    return establishAuthenticatedSession(
+      oidcHandoffApi(handoff),
+      sessionGeneration,
+      onSuccess,
+    );
+  }
+
+  function trackLogin(login: Promise<AuthLoginResult>) {
+    pendingLogin = login;
+    const clearPendingLogin = () => {
+      if (pendingLogin === login) pendingLogin = null;
+    };
+    login.then(clearPendingLogin, clearPendingLogin);
+    return login;
+  }
+
   function authLogin(
     params: Recordable<any>,
     onSuccess?: () => Promise<void> | void,
@@ -143,15 +179,28 @@ export const useAuthStore = defineStore('auth', () => {
     if (pendingLogin) {
       return pendingLogin;
     }
-    const login = performAuthLogin(params, onSuccess);
-    pendingLogin = login;
-    const clearPendingLogin = () => {
-      if (pendingLogin === login) {
-        pendingLogin = null;
-      }
-    };
-    login.then(clearPendingLogin, clearPendingLogin);
-    return login;
+    return trackLogin(performAuthLogin(params, onSuccess));
+  }
+
+  function redeemOidcHandoff(
+    handoff: string,
+    onSuccess?: () => Promise<void> | void,
+  ): Promise<AuthLoginResult> {
+    if (pendingLogout) {
+      return pendingLogout.then(
+        () => redeemOidcHandoff(handoff, onSuccess),
+        () => redeemOidcHandoff(handoff, onSuccess),
+      );
+    }
+    if (pendingLogin) return pendingLogin;
+    return trackLogin(performOidcHandoff(handoff, onSuccess));
+  }
+
+  function startOidcLogin() {
+    if (loginLoading.value || pendingLogin || pendingLogout) return;
+    clearAuthenticatedRouteState();
+    loginLoading.value = true;
+    window.location.assign(OIDC_START_PATH);
   }
 
   const isLoggingOut = ref(false);
@@ -162,8 +211,15 @@ export const useAuthStore = defineStore('auth', () => {
     loginResponse: null | Promise<void>,
   ) {
     await loginResponse;
+    let realmLogoutUrl: string | undefined;
     try {
-      await logoutApi();
+      const result = await logoutApi();
+      if (result?.logoutUrl) {
+        realmLogoutUrl = resolveRealmLogoutUrl(
+          result.logoutUrl,
+          window.location.origin,
+        );
+      }
     } catch {
       // 不做任何处理
     } finally {
@@ -174,6 +230,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     if (!isProductSessionGenerationCurrent(sessionGeneration)) {
+      return;
+    }
+
+    if (realmLogoutUrl) {
+      window.location.assign(realmLogoutUrl);
       return;
     }
 
@@ -228,5 +289,7 @@ export const useAuthStore = defineStore('auth', () => {
     fetchUserInfo,
     loginLoading,
     logout,
+    redeemOidcHandoff,
+    startOidcLogin,
   };
 });

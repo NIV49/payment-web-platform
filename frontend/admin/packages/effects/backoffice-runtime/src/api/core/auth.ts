@@ -21,6 +21,10 @@ export namespace AuthApi {
     accessToken: typeof COOKIE_SESSION_MARKER;
   }
 
+  export interface LogoutResult {
+    logoutUrl: string;
+  }
+
   export interface RefreshTokenResult {
     data: string;
     status: number;
@@ -38,6 +42,14 @@ export async function loginApi(data: AuthApi.LoginParams) {
   });
 }
 
+export async function oidcHandoffApi(handoff: string) {
+  resetSessionRequestProof();
+  return authenticationRequestClient.post<AuthApi.LoginResult>(
+    '/auth/oidc/handoff',
+    { handoff },
+  );
+}
+
 /**
  * 刷新accessToken
  */
@@ -53,7 +65,10 @@ export async function refreshTokenApi() {
  */
 export async function logoutApi() {
   try {
-    return await authenticationRequestClient.post('/auth/logout', null);
+    return await authenticationRequestClient.post<AuthApi.LogoutResult | null>(
+      '/auth/logout',
+      null,
+    );
   } finally {
     resetSessionRequestProof();
   }

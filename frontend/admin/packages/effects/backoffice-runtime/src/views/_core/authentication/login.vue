@@ -16,6 +16,7 @@ import {
 defineOptions({ name: 'Login' });
 
 const authStore = useAuthStore();
+const productionOidc = import.meta.env.PROD;
 const rememberMeNamespace = import.meta.env.VITE_APP_NAMESPACE;
 let loginDefaults = resolveLoginDefaults({ dev: false });
 if (import.meta.env.DEV) {
@@ -27,6 +28,7 @@ if (import.meta.env.DEV) {
 }
 
 const formSchema = computed((): VbenFormSchema[] => {
+  if (productionOidc) return [];
   return [
     {
       component: 'VbenInput',
@@ -52,6 +54,14 @@ const formSchema = computed((): VbenFormSchema[] => {
     },
   ];
 });
+
+function submit(values: Record<string, unknown>) {
+  if (productionOidc) {
+    authStore.startOidcLogin();
+    return;
+  }
+  return authStore.authLogin(values);
+}
 </script>
 
 <template>
@@ -63,7 +73,9 @@ const formSchema = computed((): VbenFormSchema[] => {
     :show-forget-password="false"
     :show-qrcode-login="false"
     :show-register="false"
+    :show-remember-me="!productionOidc"
     :show-third-party-login="false"
-    @submit="authStore.authLogin"
+    :submit-button-text="productionOidc ? $t('page.auth.continue') : undefined"
+    @submit="submit"
   />
 </template>

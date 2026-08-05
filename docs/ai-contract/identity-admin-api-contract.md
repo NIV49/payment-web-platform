@@ -11,7 +11,7 @@
 2. **Target Prototype Contract**：本轮原型认可的边界和不变量；
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
-当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 数据基础；三端已实施 Session-bound CSRF 和逐请求 identityVersion，PLATFORM 已实现默认关闭的 OIDC BFF、精确映射、Host 复核和签名 back-channel logout。MERCHANT/AGENT OIDC、真实 Keycloak、生命周期 relay、MFA/step-up 和恢复编排仍未完成，因此整体仍是生产 NO-GO。
+当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V23 已落地 IAM-002 数据基础；三端已实施 Session-bound CSRF、逐请求 identityVersion、各自独立的 OIDC BFF、精确映射、Host 复核和签名 back-channel logout。三套生产前端已切换为 OIDC 跳转与一次性 handoff 兑换，本地开发仍保留账密验收入口。真实 Keycloak、生命周期 relay、MFA/step-up 和恢复编排仍未完成，因此整体仍是生产 NO-GO。
 
 ## IAM-001 已实现边界
 
@@ -54,7 +54,7 @@ platform-admin | merchant-admin | agent-admin
 - 本地 bootstrap 管理员的首选首页为 `/dashboard`；`/user/info` 只返回当前安全菜单树中存在的首选路径，否则回退到第一个可访问叶子，无业务菜单时回退到本地 `/profile`；
 - PLATFORM 保留系统管理 API；MERCHANT/AGENT 只暴露认证、导航、权限码和健康检查，未知及隐藏 API 默认拒绝；
 - Testcontainers/MockMvc 契约和独立三进程黑盒覆盖账号域登录矩阵、Cookie/cache 复用、状态/版本撤权和并发撤权。
-- 三端登录页只注册用户名/密码入口；验证码、二维码、注册、忘记密码和第三方登录路由及可见控件不进入本切片产物。记住用户名的 localStorage key 同时包含账号域 namespace 与 `location.host`，不能在三个入口间复用。
+- 三套生产登录页只提供 OIDC 跳转，不渲染用户名、密码、记住用户名、注册或忘记密码控件；固定 history 路由 `/auth/oidc/callback` 兑换受 Host 绑定的一次性 handoff。本地开发模式才注册用户名/密码表单，其预填 localStorage key 同时包含账号域 namespace 与 `location.host`，不能在三个入口间复用。
 
 ## 1.2 Base URL、CORS 与可信 Origin
 
@@ -907,7 +907,7 @@ V23__attach_account_domain_username_constraint.sql
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、递归拒绝全部核心/fallback/local canonical 冲突、退出/换用户清旧路由、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
 | Flyway | V1→V23 fresh/upgrade 可运行；V21-V23 覆盖身份基础、跨域原子约束、事件不可变和用户名 expand | 旧 username 约束 contract、生产 migration Job/审批和备份恢复演练未完成；V22 非事务失败需检查 invalid index |
-| 三后台 OIDC BFF | PLATFORM、MERCHANT、AGENT 三个独立组合根均已显式装配各自 client credential/config、Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout 和账号域 Session 索引，默认关闭 | 尚未完成真实 Keycloak、生命周期 relay、前端 OIDC 切换、配置即代码和三 Realm 联调，不得开放生产流量 |
+| 三后台 OIDC BFF 与前端 | PLATFORM、MERCHANT、AGENT 三个独立组合根均已显式装配各自 client credential/config、Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout 和账号域 Session 索引，默认关闭；三套生产前端只提供 OIDC 跳转和 handoff 兑换 | 尚未完成真实 Keycloak、生命周期 relay、step-up/MFA 恢复、配置即代码和三 Realm 联调，不得开放生产流量 |
 
 ## 2.3 三后台 OIDC BFF 契约
 

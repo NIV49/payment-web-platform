@@ -34,6 +34,10 @@
       "types": "./src/api/error-contract.ts",
       "default": "./src/api/error-contract.ts"
     },
+    "./api/core/oidc-navigation": {
+      "types": "./src/api/core/oidc-navigation.ts",
+      "default": "./src/api/core/oidc-navigation.ts"
+    },
     "./api/menu-contract": {
       "types": "./src/api/menu-contract.ts",
       "default": "./src/api/menu-contract.ts"

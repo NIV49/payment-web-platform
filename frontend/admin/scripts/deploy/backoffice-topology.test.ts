@@ -66,6 +66,7 @@ describe('independent backoffice application topology', () => {
         `VITE_APP_NAMESPACE=${application.namespace}`,
       );
       expect(environment).toMatch(/^VITE_GLOB_API_URL=\/api$/m);
+      expect(environment).toMatch(/^VITE_ROUTER_HISTORY=history$/m);
       expect(viteConfig).toContain(`'${application.apiTarget}'`);
       expect(viteConfig).not.toContain('resolveDeployment');
       expect(main).toContain("from '@payment/backoffice-runtime'");
