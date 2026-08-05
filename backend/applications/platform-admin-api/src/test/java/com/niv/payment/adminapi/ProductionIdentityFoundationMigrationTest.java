@@ -2,7 +2,10 @@ package com.niv.payment.adminapi;
 
 import com.niv.payment.identity.oidc.JooqOidcIdentityRepository;
 import com.niv.payment.identity.oidc.JooqTrustedEntryResolver;
+import com.niv.payment.identity.lifecycle.JooqMfaRecoveryRepository;
+import com.niv.payment.identity.lifecycle.MfaRecoveryStep;
 import com.niv.payment.permission.domain.AccountDomain;
+import com.niv.payment.permission.domain.AuthorizationSubject;
 import org.flywaydb.core.Flyway;
 import org.jooq.SQLDialect;
 import org.jooq.impl.DSL;
@@ -17,6 +20,9 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -43,7 +49,7 @@ class ProductionIdentityFoundationMigrationTest {
     void freshSchemaCreatesProductionIdentityFoundationWithoutContractingUsername() throws Exception {
         flyway(null).migrate();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("23");
+        assertThat(currentSuccessfulVersion()).isEqualTo("24");
         assertThat(singleLong("""
             SELECT count(*) FROM information_schema.columns
              WHERE table_schema='public' AND table_name='iam_user'
@@ -67,8 +73,9 @@ class ProductionIdentityFoundationMigrationTest {
              WHERE table_schema='public'
                AND table_name IN ('iam_tenant_entry_host',
                                   'iam_identity_lifecycle_outbox',
-                                  'iam_identity_lifecycle_relay_state')
-            """)).isEqualTo(3L);
+                                  'iam_identity_lifecycle_relay_state',
+                                  'iam_mfa_recovery')
+            """)).isEqualTo(4L);
         assertThat(singleLong("""
             SELECT count(*) FROM information_schema.columns
              WHERE table_schema='public' AND table_name='iam_identity_lifecycle_outbox'
@@ -180,6 +187,153 @@ class ProductionIdentityFoundationMigrationTest {
             )
             """))
             .hasStackTraceContaining("fk_iam_identity_outbox_user_realm");
+    }
+
+    @Test
+    void mfaRecoveryRequiresDistinctSameTenantActorAndAllFourRevocations() throws Exception {
+        flyway(null).migrate();
+        execute("""
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain)
+            VALUES(22501,'merchant-22501','Merchant 22501','DIRECT_MERCHANT','ACTIVE','MERCHANT');
+            INSERT INTO iam_user(
+                id,idp_issuer,idp_subject,display_name,status,account_domain,idp_provisioning_status
+            ) VALUES
+              (22502,'https://idp.example.test/realms/MERCHANT','subject-22502',
+               'Recovery Target','ACTIVE','MERCHANT','RECOVERY_PENDING'),
+              (22503,'https://idp.example.test/realms/MERCHANT','subject-22503',
+               'Recovery Actor','ACTIVE','MERCHANT','PROVISIONED');
+            INSERT INTO iam_membership(id,tenant_id,user_id,status,account_domain) VALUES
+              (22504,22501,22502,'ACTIVE','MERCHANT'),
+              (22505,22501,22503,'ACTIVE','MERCHANT');
+            INSERT INTO iam_identity_lifecycle_outbox(
+                id,user_id,tenant_id,realm,operation_type,idempotency_key
+            ) VALUES(
+                22506,22502,22501,'MERCHANT','MFA_RECOVERY',
+                'e74042d8-f211-463f-8548-74b3a963938c'
+            );
+            INSERT INTO iam_mfa_recovery(
+                id,user_id,tenant_id,target_membership_id,requested_by_membership_id,
+                account_domain,idempotency_key,lifecycle_event_record_id
+            ) VALUES(
+                22507,22502,22501,22504,22505,'MERCHANT',
+                'e74042d8-f211-463f-8548-74b3a963938c',22506
+            );
+            """);
+
+        assertThat(singleString("SELECT status FROM iam_mfa_recovery WHERE id=22507"))
+            .isEqualTo("RECOVERY_PENDING");
+        assertThatThrownBy(() -> execute("""
+            UPDATE iam_mfa_recovery
+               SET status='COMPLETED', completed_at=now()
+             WHERE id=22507
+            """))
+            .hasStackTraceContaining("ck_iam_mfa_recovery_completion");
+        assertThatThrownBy(() -> execute("""
+            INSERT INTO iam_identity_lifecycle_outbox(
+                id,user_id,tenant_id,realm,operation_type,idempotency_key
+            ) VALUES(
+                22508,22502,22501,'MERCHANT','MFA_RECOVERY',
+                '7026a736-9ce7-4dbc-a0bb-905304f1fa74'
+            );
+            INSERT INTO iam_mfa_recovery(
+                user_id,tenant_id,target_membership_id,requested_by_membership_id,
+                account_domain,idempotency_key,lifecycle_event_record_id
+            ) VALUES(
+                22502,22501,22504,22504,'MERCHANT',
+                '7026a736-9ce7-4dbc-a0bb-905304f1fa74',22508
+            )
+            """))
+            .hasStackTraceContaining("ck_iam_mfa_recovery_distinct_actor");
+
+        execute("""
+            UPDATE iam_mfa_recovery
+               SET mfa_credentials_revoked_at=now(),
+                   recovery_codes_revoked_at=now(),
+                   keycloak_sessions_revoked_at=now(),
+                   application_sessions_revoked_at=now(),
+                   status='COMPLETED', completed_at=now()
+             WHERE id=22507
+            """);
+        assertThat(singleString("SELECT status FROM iam_mfa_recovery WHERE id=22507"))
+            .isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void mfaRecoveryRepositoryBlocksLoginAndCompletesOnlyAfterOrderedRevocation() throws Exception {
+        flyway(null).migrate();
+        execute("""
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain)
+            VALUES(22601,'merchant-22601','Merchant 22601','DIRECT_MERCHANT','ACTIVE','MERCHANT');
+            INSERT INTO iam_user(
+                id,idp_issuer,idp_subject,display_name,status,account_domain,idp_provisioning_status
+            ) VALUES
+              (22602,'https://idp.example.test/realms/MERCHANT','subject-22602',
+               'Recovery Target','ACTIVE','MERCHANT','PROVISIONED'),
+              (22603,'https://idp.example.test/realms/MERCHANT','subject-22603',
+               'Recovery Actor','ACTIVE','MERCHANT','PROVISIONED');
+            INSERT INTO iam_authentication_credential(
+                user_id,username,password_hash,status,account_domain
+            ) VALUES
+              (22602,'recovery-target',NULL,'ACTIVE','MERCHANT'),
+              (22603,'recovery-actor',NULL,'ACTIVE','MERCHANT');
+            INSERT INTO iam_membership(id,tenant_id,user_id,status,account_domain) VALUES
+              (22604,22601,22602,'ACTIVE','MERCHANT'),
+              (22605,22601,22603,'ACTIVE','MERCHANT');
+            INSERT INTO iam_role(
+                id,tenant_id,role_code,role_name,applicable_tenant_type,
+                assignable,system_role,status
+            ) VALUES(
+                22606,22601,'tenant-system-admin','Tenant System Administrator',
+                'DIRECT_MERCHANT',false,true,'ACTIVE'
+            );
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(22601,22605,22606,22605);
+            """);
+
+        UUID key = UUID.fromString("6e9057e7-aeb8-49f8-b09d-f4661e00d0d5");
+        AuthorizationSubject actor = new AuthorizationSubject(22603, 22605, 22601,
+            null, 0, 0, true);
+        try (Connection connection = connection()) {
+            var dsl = DSL.using(connection, SQLDialect.POSTGRES);
+            var recoveries = new JooqMfaRecoveryRepository(dsl, () -> "trace-mfa-recovery");
+
+            var requested = recoveries.request(AccountDomain.MERCHANT, actor, 22604, key);
+            assertThat(recoveries.request(AccountDomain.MERCHANT, actor, 22604, key))
+                .isEqualTo(requested);
+            assertThat(singleString("SELECT idp_provisioning_status FROM iam_user WHERE id=22602"))
+                .isEqualTo("RECOVERY_PENDING");
+            assertThat(singleString("SELECT status FROM iam_authentication_credential WHERE user_id=22602"))
+                .isEqualTo("DISABLED");
+            assertThat(singleLong("SELECT identity_version FROM iam_user WHERE id=22602")).isOne();
+            assertThat(singleLong("SELECT session_version FROM iam_membership WHERE id=22604")).isOne();
+
+            Instant clock = Instant.parse("2030-08-05T10:00:00Z");
+            for (MfaRecoveryStep expected : MfaRecoveryStep.values()) {
+                var task = recoveries.claimNext(AccountDomain.MERCHANT, clock, Duration.ofSeconds(30))
+                    .orElseThrow();
+                assertThat(task.nextStep()).isEqualTo(expected);
+                assertThat(task.issuer()).isEqualTo("https://idp.example.test/realms/MERCHANT");
+                assertThat(task.subject()).isEqualTo("subject-22602");
+                recoveries.completeStep(task.recoveryId(), expected, clock.plusSeconds(1));
+                clock = clock.plusSeconds(2);
+            }
+
+            assertThat(singleString("SELECT status FROM iam_mfa_recovery WHERE id="
+                + requested.recoveryId())).isEqualTo("COMPLETED");
+            assertThat(singleString("SELECT status FROM iam_identity_lifecycle_relay_state"))
+                .isEqualTo("PUBLISHED");
+            assertThat(singleString("SELECT idp_provisioning_status FROM iam_user WHERE id=22602"))
+                .isEqualTo("PROVISIONED");
+            assertThat(singleString("SELECT status FROM iam_authentication_credential WHERE user_id=22602"))
+                .isEqualTo("ACTIVE");
+            assertThat(singleLong("SELECT identity_version FROM iam_user WHERE id=22602"))
+                .isEqualTo(2L);
+            assertThat(singleLong("SELECT session_version FROM iam_membership WHERE id=22604"))
+                .isEqualTo(2L);
+            assertThat(singleLong("SELECT count(*) FROM iam_audit_event "
+                + "WHERE action_code IN ('MFA_RECOVERY_REQUEST','MFA_RECOVERY_COMPLETE')"))
+                .isEqualTo(2L);
+        }
     }
 
     @Test

@@ -11,6 +11,7 @@ import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityL
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMenu;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermissionChangeRelayState;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleGrant;
@@ -45,9 +46,11 @@ public class Indexes {
     public static final Index IDX_IAM_MEMBERSHIP_USER = Internal.createIndex(DSL.name("idx_iam_membership_user"), IamMembership.IAM_MEMBERSHIP, new OrderField[] { IamMembership.IAM_MEMBERSHIP.USER_ID }, false);
     public static final Index IDX_IAM_MENU_PARENT = Internal.createIndex(DSL.name("idx_iam_menu_parent"), IamMenu.IAM_MENU, new OrderField[] { IamMenu.IAM_MENU.TENANT_ID, IamMenu.IAM_MENU.PARENT_ID, IamMenu.IAM_MENU.SORT_ORDER }, false);
     public static final Index IDX_IAM_MENU_TENANT_LIVE = Internal.createIndex(DSL.name("idx_iam_menu_tenant_live"), IamMenu.IAM_MENU, new OrderField[] { IamMenu.IAM_MENU.TENANT_ID, IamMenu.IAM_MENU.ID }, false);
+    public static final Index IDX_IAM_MFA_RECOVERY_READY = Internal.createIndex(DSL.name("idx_iam_mfa_recovery_ready"), IamMfaRecovery.IAM_MFA_RECOVERY, new OrderField[] { IamMfaRecovery.IAM_MFA_RECOVERY.ACCOUNT_DOMAIN, IamMfaRecovery.IAM_MFA_RECOVERY.STATUS, IamMfaRecovery.IAM_MFA_RECOVERY.AVAILABLE_AT, IamMfaRecovery.IAM_MFA_RECOVERY.ID }, false);
     public static final Index IDX_IAM_PERMISSION_RELAY_PENDING = Internal.createIndex(DSL.name("idx_iam_permission_relay_pending"), IamPermissionChangeRelayState.IAM_PERMISSION_CHANGE_RELAY_STATE, new OrderField[] { IamPermissionChangeRelayState.IAM_PERMISSION_CHANGE_RELAY_STATE.STATUS, IamPermissionChangeRelayState.IAM_PERMISSION_CHANGE_RELAY_STATE.AVAILABLE_AT, IamPermissionChangeRelayState.IAM_PERMISSION_CHANGE_RELAY_STATE.EVENT_RECORD_ID }, false);
     public static final Index IDX_IAM_ROLE_GRANT_ROLE_PERMISSION = Internal.createIndex(DSL.name("idx_iam_role_grant_role_permission"), IamRoleGrant.IAM_ROLE_GRANT, new OrderField[] { IamRoleGrant.IAM_ROLE_GRANT.ROLE_ID, IamRoleGrant.IAM_ROLE_GRANT.PERMISSION_ID }, false);
     public static final Index IDX_IAM_ROLE_GRANT_TENANT_PERMISSION = Internal.createIndex(DSL.name("idx_iam_role_grant_tenant_permission"), IamRoleGrant.IAM_ROLE_GRANT, new OrderField[] { IamRoleGrant.IAM_ROLE_GRANT.TENANT_ID, IamRoleGrant.IAM_ROLE_GRANT.PERMISSION_ID, IamRoleGrant.IAM_ROLE_GRANT.ROLE_ID }, false);
     public static final Index IDX_IAM_ROLE_TENANT_LIVE = Internal.createIndex(DSL.name("idx_iam_role_tenant_live"), IamRole.IAM_ROLE, new OrderField[] { IamRole.IAM_ROLE.TENANT_ID, IamRole.IAM_ROLE.ID }, false);
+    public static final Index UK_IAM_MFA_RECOVERY_ACTIVE_USER = Internal.createIndex(DSL.name("uk_iam_mfa_recovery_active_user"), IamMfaRecovery.IAM_MFA_RECOVERY, new OrderField[] { IamMfaRecovery.IAM_MFA_RECOVERY.ACCOUNT_DOMAIN, IamMfaRecovery.IAM_MFA_RECOVERY.USER_ID }, true);
     public static final Index UK_IAM_ROLE_NAME = Internal.createIndex(DSL.name("uk_iam_role_name"), IamRole.IAM_ROLE, new OrderField[] { IamRole.IAM_ROLE.TENANT_ID, IamRole.IAM_ROLE.ROLE_NAME }, true);
 }

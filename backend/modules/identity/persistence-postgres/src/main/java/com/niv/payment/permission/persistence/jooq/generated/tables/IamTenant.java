@@ -12,6 +12,7 @@ import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityL
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership.IamMembershipPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole.IamMembershipRolePath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMenu.IamMenuPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery.IamMfaRecoveryPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermissionChangeOutbox.IamPermissionChangeOutboxPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRole.IamRolePath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleGrant.IamRoleGrantPath;
@@ -230,6 +231,19 @@ public class IamTenant extends TableImpl<IamTenantRecord> {
             _fkIamMembershipTenantDomain = new IamMembershipPath(this, null, Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_TENANT_DOMAIN.getInverseKey());
 
         return _fkIamMembershipTenantDomain;
+    }
+
+    private transient IamMfaRecoveryPath _iamMfaRecovery;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_mfa_recovery</code> table
+     */
+    public IamMfaRecoveryPath iamMfaRecovery() {
+        if (_iamMfaRecovery == null)
+            _iamMfaRecovery = new IamMfaRecoveryPath(this, null, Keys.IAM_MFA_RECOVERY__FK_IAM_MFA_RECOVERY_TENANT_DOMAIN.getInverseKey());
+
+        return _iamMfaRecovery;
     }
 
     private transient IamAuditEventPath _iamAuditEvent;

@@ -14,6 +14,7 @@ import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityL
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMenu;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermission;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermissionChangeOutbox;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermissionChangeRelayState;
@@ -83,6 +84,12 @@ public class Tables {
      * The table <code>public.iam_menu</code>.
      */
     public static final IamMenu IAM_MENU = IamMenu.IAM_MENU;
+
+    /**
+     * Retryable MFA recovery state; completion requires all Keycloak and
+     * application revocations
+     */
+    public static final IamMfaRecovery IAM_MFA_RECOVERY = IamMfaRecovery.IAM_MFA_RECOVERY;
 
     /**
      * Global permission catalog. Tenant, administrator, role, grant, and menu

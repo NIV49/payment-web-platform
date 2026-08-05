@@ -10,6 +10,7 @@ import com.niv.payment.permission.persistence.jooq.generated.Public;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuditEvent.IamAuditEventPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamDepartment.IamDepartmentPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole.IamMembershipRolePath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery.IamMfaRecoveryPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleGrant.IamRoleGrantPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamTenant.IamTenantPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamUser.IamUserPath;
@@ -312,6 +313,62 @@ public class IamMembership extends TableImpl<IamMembershipRecord> {
             _fkIamMembershipRoleMembership = new IamMembershipRolePath(this, null, Keys.IAM_MEMBERSHIP_ROLE__FK_IAM_MEMBERSHIP_ROLE_MEMBERSHIP.getInverseKey());
 
         return _fkIamMembershipRoleMembership;
+    }
+
+    private transient IamMfaRecoveryPath _fkIamMfaRecoveryActorDomain;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_mfa_recovery</code> table, via the
+     * <code>fk_iam_mfa_recovery_actor_domain</code> key
+     */
+    public IamMfaRecoveryPath fkIamMfaRecoveryActorDomain() {
+        if (_fkIamMfaRecoveryActorDomain == null)
+            _fkIamMfaRecoveryActorDomain = new IamMfaRecoveryPath(this, null, Keys.IAM_MFA_RECOVERY__FK_IAM_MFA_RECOVERY_ACTOR_DOMAIN.getInverseKey());
+
+        return _fkIamMfaRecoveryActorDomain;
+    }
+
+    private transient IamMfaRecoveryPath _fkIamMfaRecoveryActorTenant;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_mfa_recovery</code> table, via the
+     * <code>fk_iam_mfa_recovery_actor_tenant</code> key
+     */
+    public IamMfaRecoveryPath fkIamMfaRecoveryActorTenant() {
+        if (_fkIamMfaRecoveryActorTenant == null)
+            _fkIamMfaRecoveryActorTenant = new IamMfaRecoveryPath(this, null, Keys.IAM_MFA_RECOVERY__FK_IAM_MFA_RECOVERY_ACTOR_TENANT.getInverseKey());
+
+        return _fkIamMfaRecoveryActorTenant;
+    }
+
+    private transient IamMfaRecoveryPath _fkIamMfaRecoveryTargetDomain;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_mfa_recovery</code> table, via the
+     * <code>fk_iam_mfa_recovery_target_domain</code> key
+     */
+    public IamMfaRecoveryPath fkIamMfaRecoveryTargetDomain() {
+        if (_fkIamMfaRecoveryTargetDomain == null)
+            _fkIamMfaRecoveryTargetDomain = new IamMfaRecoveryPath(this, null, Keys.IAM_MFA_RECOVERY__FK_IAM_MFA_RECOVERY_TARGET_DOMAIN.getInverseKey());
+
+        return _fkIamMfaRecoveryTargetDomain;
+    }
+
+    private transient IamMfaRecoveryPath _fkIamMfaRecoveryTargetTenant;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_mfa_recovery</code> table, via the
+     * <code>fk_iam_mfa_recovery_target_tenant</code> key
+     */
+    public IamMfaRecoveryPath fkIamMfaRecoveryTargetTenant() {
+        if (_fkIamMfaRecoveryTargetTenant == null)
+            _fkIamMfaRecoveryTargetTenant = new IamMfaRecoveryPath(this, null, Keys.IAM_MFA_RECOVERY__FK_IAM_MFA_RECOVERY_TARGET_TENANT.getInverseKey());
+
+        return _fkIamMfaRecoveryTargetTenant;
     }
 
     private transient IamRoleGrantPath _fkIamRoleGrantCreator;

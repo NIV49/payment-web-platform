@@ -9,6 +9,7 @@ import com.niv.payment.permission.persistence.jooq.generated.Public;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuthenticationCredential.IamAuthenticationCredentialPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleOutbox.IamIdentityLifecycleOutboxPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership.IamMembershipPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery.IamMfaRecoveryPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamTenant.IamTenantPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.records.IamUserRecord;
 
@@ -250,6 +251,19 @@ public class IamUser extends TableImpl<IamUserRecord> {
         return _fkIamMembershipUserDomain;
     }
 
+    private transient IamMfaRecoveryPath _iamMfaRecovery;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_mfa_recovery</code> table
+     */
+    public IamMfaRecoveryPath iamMfaRecovery() {
+        if (_iamMfaRecovery == null)
+            _iamMfaRecovery = new IamMfaRecoveryPath(this, null, Keys.IAM_MFA_RECOVERY__FK_IAM_MFA_RECOVERY_USER_DOMAIN.getInverseKey());
+
+        return _iamMfaRecovery;
+    }
+
     private transient IamAuthenticationCredentialPath _iamAuthenticationCredentialUserIdFkey;
 
     /**
@@ -291,7 +305,7 @@ public class IamUser extends TableImpl<IamUserRecord> {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("ck_iam_user_account_domain"), "(((account_domain)::text = ANY ((ARRAY['PLATFORM'::character varying, 'MERCHANT'::character varying, 'AGENT'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_user_identity_version"), "((identity_version >= 0))", true),
-            Internal.createCheck(this, DSL.name("ck_iam_user_idp_provisioning_status"), "(((idp_provisioning_status)::text = ANY ((ARRAY['LOCAL_ONLY'::character varying, 'PROVISION_PENDING'::character varying, 'PROVISIONED'::character varying, 'DEPROVISION_PENDING'::character varying, 'DEPROVISIONED'::character varying, 'FAILED'::character varying])::text[])))", true),
+            Internal.createCheck(this, DSL.name("ck_iam_user_idp_provisioning_status"), "(((idp_provisioning_status)::text = ANY ((ARRAY['LOCAL_ONLY'::character varying, 'PROVISION_PENDING'::character varying, 'PROVISIONED'::character varying, 'RECOVERY_PENDING'::character varying, 'DEPROVISION_PENDING'::character varying, 'DEPROVISIONED'::character varying, 'FAILED'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_user_status"), "(((status)::text = ANY ((ARRAY['PENDING_ACTIVATION'::character varying, 'ACTIVE'::character varying, 'DISABLED'::character varying, 'LOCKED'::character varying])::text[])))", true)
         );
     }

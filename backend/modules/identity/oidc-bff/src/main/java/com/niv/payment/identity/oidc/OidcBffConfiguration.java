@@ -24,7 +24,7 @@ import java.time.Duration;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "payment.oidc", name = "enabled", havingValue = "true")
-@Import({OidcBffController.class, OidcBffExceptionHandler.class})
+@Import({OidcBffController.class, OidcBffExceptionHandler.class, MfaRecoveryConfiguration.class})
 public class OidcBffConfiguration {
     @Bean
     OidcClientSettings oidcClientSettings(

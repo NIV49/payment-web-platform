@@ -14,6 +14,7 @@ import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityL
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMenu;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermission;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermissionChangeOutbox;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermissionChangeRelayState;
@@ -101,6 +102,12 @@ public class Public extends SchemaImpl {
     public final IamMenu IAM_MENU = IamMenu.IAM_MENU;
 
     /**
+     * Retryable MFA recovery state; completion requires all Keycloak and
+     * application revocations
+     */
+    public final IamMfaRecovery IAM_MFA_RECOVERY = IamMfaRecovery.IAM_MFA_RECOVERY;
+
+    /**
      * Global permission catalog. Tenant, administrator, role, grant, and menu
      * fixtures are local-profile data only
      */
@@ -181,6 +188,7 @@ public class Public extends SchemaImpl {
             IamMembership.IAM_MEMBERSHIP,
             IamMembershipRole.IAM_MEMBERSHIP_ROLE,
             IamMenu.IAM_MENU,
+            IamMfaRecovery.IAM_MFA_RECOVERY,
             IamPermission.IAM_PERMISSION,
             IamPermissionChangeOutbox.IAM_PERMISSION_CHANGE_OUTBOX,
             IamPermissionChangeRelayState.IAM_PERMISSION_CHANGE_RELAY_STATE,

@@ -82,6 +82,7 @@ public final class AdminApiPermissionPolicy {
 
     private static boolean sessionOnly(String method, String path) {
         return ("POST".equals(method) && "/api/auth/logout".equals(path))
+            || ("POST".equals(method) && "/api/identity/mfa-recoveries".equals(path))
             || ("GET".equals(method) && ("/api/auth/csrf".equals(path)
                 || "/api/user/info".equals(path)
                 || "/api/auth/codes".equals(path) || "/api/menu/all".equals(path)));

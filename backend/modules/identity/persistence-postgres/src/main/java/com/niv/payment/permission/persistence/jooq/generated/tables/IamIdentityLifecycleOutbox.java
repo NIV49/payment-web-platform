@@ -7,6 +7,7 @@ package com.niv.payment.permission.persistence.jooq.generated.tables;
 import com.niv.payment.permission.persistence.jooq.generated.Keys;
 import com.niv.payment.permission.persistence.jooq.generated.Public;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleRelayState.IamIdentityLifecycleRelayStatePath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery.IamMfaRecoveryPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamTenant.IamTenantPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamUser.IamUserPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.records.IamIdentityLifecycleOutboxRecord;
@@ -208,6 +209,19 @@ public class IamIdentityLifecycleOutbox extends TableImpl<IamIdentityLifecycleOu
             _iamUser = new IamUserPath(this, Keys.IAM_IDENTITY_LIFECYCLE_OUTBOX__FK_IAM_IDENTITY_OUTBOX_USER_REALM, null);
 
         return _iamUser;
+    }
+
+    private transient IamMfaRecoveryPath _iamMfaRecovery;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_mfa_recovery</code> table
+     */
+    public IamMfaRecoveryPath iamMfaRecovery() {
+        if (_iamMfaRecovery == null)
+            _iamMfaRecovery = new IamMfaRecoveryPath(this, null, Keys.IAM_MFA_RECOVERY__FK_IAM_MFA_RECOVERY_LIFECYCLE_EVENT.getInverseKey());
+
+        return _iamMfaRecovery;
     }
 
     private transient IamIdentityLifecycleRelayStatePath _iamIdentityLifecycleRelayState;

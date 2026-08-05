@@ -6,6 +6,7 @@ import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.identity.oidc.OidcBffConfiguration;
 import com.niv.payment.identity.oidc.OidcClientCredential;
 import com.niv.payment.identity.oidc.OidcRequestTrace;
+import com.niv.payment.identity.oidc.KeycloakAdminClientCredential;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -33,6 +34,13 @@ public class MerchantAdminApiApplication {
     OidcClientCredential merchantOidcClientCredential(Environment environment) {
         return new OidcClientCredential(environment.getRequiredProperty(
             "PAYMENT_MERCHANT_OIDC_CLIENT_" + "SECRET"));
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "payment.identity.lifecycle", name = "enabled", havingValue = "true")
+    KeycloakAdminClientCredential merchantKeycloakAdminClientCredential(Environment environment) {
+        return new KeycloakAdminClientCredential(environment.getRequiredProperty(
+            "PAYMENT_MERCHANT_KEYCLOAK_ADMIN_CLIENT_SECRET"));
     }
 
     public static void main(String[] args) {

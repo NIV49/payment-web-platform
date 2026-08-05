@@ -44,6 +44,20 @@ public record OidcClientSettings(URI issuer,
         }
     }
 
+    @Override
+    public String toString() {
+        return "OidcClientSettings[issuer=" + issuer
+            + ", authorizationUri=" + authorizationUri
+            + ", tokenUri=" + tokenUri
+            + ", jwkSetUri=" + jwkSetUri
+            + ", endSessionUri=" + endSessionUri
+            + ", clientId=" + clientId
+            + ", clientCredential=[REDACTED]"
+            + ", redirectUri=" + redirectUri
+            + ", postLogoutRedirectUri=" + postLogoutRedirectUri
+            + ", requiredAcr=" + requiredAcr + "]";
+    }
+
     private static URI requireAbsoluteHttpUri(URI value, String name) {
         Objects.requireNonNull(value, name);
         if (!value.isAbsolute() || value.getHost() == null

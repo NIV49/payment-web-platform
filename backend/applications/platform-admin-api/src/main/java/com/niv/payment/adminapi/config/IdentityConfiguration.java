@@ -34,6 +34,7 @@ import com.niv.payment.permission.service.RoleConfigurationAdministrationService
 import com.niv.payment.identity.oidc.OidcBffConfiguration;
 import com.niv.payment.identity.oidc.OidcClientCredential;
 import com.niv.payment.identity.oidc.OidcRequestTrace;
+import com.niv.payment.identity.oidc.KeycloakAdminClientCredential;
 import org.jooq.DSLContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -74,6 +75,13 @@ public class IdentityConfiguration {
     OidcClientCredential oidcClientCredential(Environment environment) {
         return new OidcClientCredential(environment.getRequiredProperty(
             "PAYMENT_PLATFORM_OIDC_CLIENT_" + "SECRET"));
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "payment.identity.lifecycle", name = "enabled", havingValue = "true")
+    KeycloakAdminClientCredential keycloakAdminClientCredential(Environment environment) {
+        return new KeycloakAdminClientCredential(environment.getRequiredProperty(
+            "PAYMENT_PLATFORM_KEYCLOAK_ADMIN_CLIENT_SECRET"));
     }
 
     @Bean

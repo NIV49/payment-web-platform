@@ -49,6 +49,12 @@ payment:
   identity:
     login-type: agent-admin
     local-login-enabled: false
+    lifecycle:
+      enabled: ${PAYMENT_AGENT_IDENTITY_LIFECYCLE_ENABLED:false}
+      admin-client-id: ${PAYMENT_AGENT_KEYCLOAK_ADMIN_CLIENT_ID:}
+      poll-delay: PT5S
+      lease-duration: PT30S
+      retry-delay: PT15S
   oidc:
     enabled: ${PAYMENT_AGENT_OIDC_ENABLED:false}
     issuer: ${PAYMENT_AGENT_OIDC_ISSUER}
