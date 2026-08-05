@@ -15,15 +15,27 @@ import org.jooq.DSLContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.time.Duration;
 
-@Import({BackofficeAuthController.class, BackofficeApiExceptionHandler.class,
+@Import({BackofficeAuthController.class, BackofficeLocalAuthController.class,
+    BackofficeApiExceptionHandler.class,
     BackofficeSecurityConfiguration.class, BackofficeSchemaReadinessConfiguration.class})
 public class BackofficeWebConfiguration {
+    @Bean
+    BackofficeAuthenticationModeGuard backofficeAuthenticationModeGuard(
+        Environment environment,
+        @Value("${payment.identity.local-login-enabled:false}") boolean localLoginEnabled,
+        @Value("${payment.oidc.enabled:false}") boolean oidcEnabled) {
+        return new BackofficeAuthenticationModeGuard(
+            environment.acceptsProfiles(Profiles.of("local")), localLoginEnabled, oidcEnabled);
+    }
+
     @Bean
     BackofficeDeploymentProperties backofficeDeploymentProperties(
         AccountDomain accountDomain,
@@ -74,11 +86,18 @@ public class BackofficeWebConfiguration {
     @Bean
     AuthenticationService backofficeAuthenticationService(
         BackofficeDeploymentProperties properties, JooqCredentialRepository credentials,
-        BCryptPasswordEncoder encoder, StringRedisTemplate redis, StpLogic stpLogic) {
+        BCryptPasswordEncoder encoder, StringRedisTemplate redis,
+        SaTokenSessionIssuer sessionIssuer) {
         return new AuthenticationService(properties.accountDomain(), credentials, encoder::matches,
             new RedisLoginAttemptLimiter(properties.accountDomain(), redis, 30, 5, Duration.ofMinutes(15)),
-            new SaTokenSessionIssuer(stpLogic, properties.accountDomain()),
+            sessionIssuer,
             encoder.encode("dummy-password-not-used"));
+    }
+
+    @Bean
+    SaTokenSessionIssuer backofficeSessionIssuer(BackofficeDeploymentProperties properties,
+                                                 StpLogic stpLogic) {
+        return new SaTokenSessionIssuer(stpLogic, properties.accountDomain());
     }
 
     @Bean

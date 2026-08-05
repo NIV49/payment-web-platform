@@ -94,11 +94,13 @@ class ThreeBackofficeBoundaryIntegrationTest {
 
         start(merchant,
             "applications/merchant-admin-api/target/merchant-admin-api-0.1.0-SNAPSHOT.jar",
-            Map.of("PAYMENT_MERCHANT_PORT", Integer.toString(merchant.port()),
+            Map.of("SPRING_PROFILES_ACTIVE", "local",
+                "PAYMENT_MERCHANT_PORT", Integer.toString(merchant.port()),
                 "PAYMENT_MERCHANT_ALLOWED_ORIGIN", merchant.origin()));
         start(agent,
             "applications/agent-admin-api/target/agent-admin-api-0.1.0-SNAPSHOT.jar",
-            Map.of("PAYMENT_AGENT_PORT", Integer.toString(agent.port()),
+            Map.of("SPRING_PROFILES_ACTIVE", "local",
+                "PAYMENT_AGENT_PORT", Integer.toString(agent.port()),
                 "PAYMENT_AGENT_ALLOWED_ORIGIN", agent.origin()));
         waitUntilReady(merchant);
         waitUntilReady(agent);

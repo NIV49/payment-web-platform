@@ -1,0 +1,9 @@
+payment:
+  identity:
+    local-login-enabled: true
+  oidc:
+    enabled: false
+
+sa-token:
+  cookie:
+    secure: ${PAYMENT_COOKIE_SECURE:false}

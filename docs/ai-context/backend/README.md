@@ -94,7 +94,7 @@ Admin CRUD 的 HTTP PEP 已接入 `DefaultAuthorizationService` 和版本化 Gra
 ### Composition roots
 
 - `AdminApiApplication`、`MerchantAdminApiApplication`、`AgentAdminApiApplication`：三个独立 Spring Boot main，分别固定 PLATFORM、MERCHANT、AGENT 账号域。
-- `IdentityConfiguration`：jOOQ repository、Identity services、BCrypt、Redis 登录限流、Sa-Token bridge 和 PLATFORM OIDC BFF/back-channel logout 组装；RoleGrant 全量替换受默认关闭的 `payment.permissions.legacy-administration-cutover-complete` 控制；Sa-Token 安全属性由 Boot auto-configuration 在 ApplicationContext 创建期绑定，不使用启服后 `ApplicationRunner`。
+- `IdentityConfiguration`、`MerchantAdminApiApplication`、`AgentAdminApiApplication`：三个组合根分别固定账号域并显式装配自己的 OIDC client credential、trace bridge、Sa-Token realm 和共享 OIDC BFF adapter；共享 adapter 不选择 Realm，也不持有任何环境的 client credential。RoleGrant 全量替换受默认关闭的 `payment.permissions.legacy-administration-cutover-complete` 控制；Sa-Token 安全属性由 Boot auto-configuration 在 ApplicationContext 创建期绑定，不使用启服后 `ApplicationRunner`。
 - `LocalIdentityFixtureBootstrap`：仅在 `local` profile、Flyway 完成后事务性装载开发身份和 BCrypt 密码。
 - `SecurityConfiguration`：Cookie 会话校验、可信 Origin、URL 到权限码映射、CORS 与安全响应头。
 - `application.yml`：生产默认 fail-closed 的 DB、Redis、Flyway、jOOQ 和安全配置。
@@ -102,9 +102,9 @@ Admin CRUD 的 HTTP PEP 已接入 `DefaultAuthorizationService` 和版本化 Gra
 
 ### HTTP 层
 
-- `LocalAuthController`：只在 `local` profile 且 `payment.identity.local-login-enabled=true` 时注册 `/api/auth/login|logout`；非 local profile 禁止开启。
+- `LocalAuthController`、`BackofficeLocalAuthController`：只在 `local` profile 且 `payment.identity.local-login-enabled=true` 时注册 `/api/auth/login|logout`；非 local profile 禁止开启。每个组合根必须在 local password 与 OIDC 两种模式中恰好启用一种，否则启动失败。
 - `AuthUserMenuController`：当前用户、权限码、运行时菜单和健康检查；`/user/info` 的 Web DTO 补齐空 `desc` 和固定非秘密 `cookie-session` marker，不把这些展示/适配字段下沉到 Core。
-- `OidcBffController`：仅 `payment.oidc.enabled=true` 时注册 PLATFORM 的 `/api/auth/oidc/start|callback|handoff|backchannel-logout` 与生产 logout；协议失败统一且不泄露身份存在性。
+- `OidcBffController`：仅 `payment.oidc.enabled=true` 时在当前 PLATFORM、MERCHANT 或 AGENT 组合根注册 `/api/auth/oidc/start|callback|handoff|backchannel-logout` 与生产 logout；协议失败统一且不泄露身份存在性。
 - `SessionSecurityController`：为有效 Cookie Session 返回服务端绑定的请求凭据；不接受客户端选择 Session 或账号域。
 - `SystemAdministrationController`：`/api/system/user|role|dept|menu` 管理接口。
 - `ApiResponse`：`{ code, data, error, message, traceId }`。
@@ -140,7 +140,7 @@ Sa-Token 配置：PLATFORM/MERCHANT/AGENT 分别使用 `platform-admin`/`merchan
 
 服务默认使用 `PAYMENT_FORWARD_HEADERS_STRATEGY=NONE`，不会把调用方自行提供的 `Forwarded`、`X-Forwarded-For` 等头当成客户端地址。这也是登录失败限流正确性的组成部分。只有当请求必经可信反向代理，且该代理会先剥离外部请求携带的全部 `Forwarded`/`X-Forwarded-*` 再写入自己的值时，部署方才可显式启用 forwarded-header 处理；不能仅因“部署在代理后”就打开。
 
-PLATFORM 已增加默认关闭的生产 OIDC 流：登记 Host -> Authorization Code + S256 PKCE -> callback 单次消费 state -> 服务端 token exchange -> RS256/JWKS 及 issuer/audience/azp/nonce/ACR/time/sid 校验 -> 60 秒 Host-bound handoff -> `issuer + subject` 精确映射 -> Sa-Token Cookie。外部 Session 逐请求复核 Host、映射和 identityVersion。签名 back-channel logout 使用 issuer+sid 优先、无 sid 时 issuer+subject 的 Redis 索引撤销应用 Session，并以带所有者的短租约和完成标记处理并发及重放；OIDC callback/back-channel 均不依赖 Origin。真实 Keycloak 与 MERCHANT/AGENT 尚未接入，不能据此宣称三 Realm 撤销链路完成。
+三个组合根都已增加默认关闭且必须显式配置的生产 OIDC 流：登记 Host -> Authorization Code + S256 PKCE -> callback 单次消费 state -> 服务端 token exchange -> RS256/JWKS 及 issuer/audience/azp/nonce/ACR/time/sid 校验 -> 60 秒 Host-bound handoff -> `issuer + subject` 精确映射 -> Sa-Token Cookie。各服务使用独立环境变量、client credential、Cookie/login type 和账号域 Redis namespace；外部 Session 逐请求复核 Host、映射和 identityVersion。签名 back-channel logout 使用 issuer+sid 优先、无 sid 时 issuer+subject 的 Redis 索引撤销应用 Session，并以带所有者的短租约和完成标记处理并发及重放；OIDC callback/back-channel 均不依赖 Origin，browser handoff 仍要求可信 Origin，Cookie logout 还要求独立 CSRF。真实 Keycloak 三 Realm 联调尚未完成，不能据此宣称撤销链路已生产闭环。
 
 ### 请求鉴权
 

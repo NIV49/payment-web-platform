@@ -907,11 +907,11 @@ V23__attach_account_domain_username_constraint.sql
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、递归拒绝全部核心/fallback/local canonical 冲突、退出/换用户清旧路由、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
 | Flyway | V1→V23 fresh/upgrade 可运行；V21-V23 覆盖身份基础、跨域原子约束、事件不可变和用户名 expand | 旧 username 约束 contract、生产 migration Job/审批和备份恢复演练未完成；V22 非事务失败需检查 invalid index |
-| PLATFORM OIDC BFF | Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout 和应用 Session 索引已实现，默认关闭 | 尚未完成真实 Keycloak、生命周期 relay、MERCHANT/AGENT OIDC、配置即代码和三 Realm 联调，不得开放生产流量 |
+| 三后台 OIDC BFF | PLATFORM、MERCHANT、AGENT 三个独立组合根均已显式装配各自 client credential/config、Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout 和账号域 Session 索引，默认关闭 | 尚未完成真实 Keycloak、生命周期 relay、前端 OIDC 切换、配置即代码和三 Realm 联调，不得开放生产流量 |
 
-## 2.3 PLATFORM OIDC BFF 契约
+## 2.3 三后台 OIDC BFF 契约
 
-生产 profile 必须满足 `payment.identity.local-login-enabled=false` 且 `payment.oidc.enabled=true`；`local` profile 必须恰好相反。两种认证模式同时开启、同时关闭，或在非 `local` profile 开启密码入口时，应用启动失败。`POST /api/auth/login` 只由 `local` profile 注册。
+PLATFORM、MERCHANT、AGENT 三个组合根分别固定自己的 AccountDomain、Realm issuer、confidential client、回调地址、client credential 环境变量和 Session/Redis namespace，不允许通过请求参数选择。生产 profile 必须满足 `payment.identity.local-login-enabled=false` 且 `payment.oidc.enabled=true`；`local` profile 必须恰好相反。两种认证模式同时开启、同时关闭，或在非 `local` profile 开启密码入口时，应用启动失败。`POST /api/auth/login` 只由 `local` profile 注册。
 
 ### GET `/auth/oidc/start`
 
@@ -946,7 +946,7 @@ V23__attach_account_domain_username_constraint.sql
 ```json
 {
   "code": 0,
-  "data": { "logoutUrl": "https://idp.example/realms/PLATFORM/protocol/openid-connect/logout?..." }
+  "data": { "logoutUrl": "https://idp.example/realms/{fixed-realm}/protocol/openid-connect/logout?..." }
 }
 ```
 
@@ -964,7 +964,7 @@ OIDC 认证失败统一返回 HTTP 401、code `40103`、error `OIDC_LOGIN_REJECT
 
 ## 2.4 当前尚未实现
 
-- MERCHANT/AGENT OIDC 组合根、真实 Keycloak 三 Realm 联调和配置即代码；
+- 真实 Keycloak 三 Realm 联调和 Realm/client/认证流配置即代码；
 - 生命周期 relay 对 identityVersion 的可靠推进及跨系统撤销确认；
 - MFA、step-up、MFA 重置审批；
 - 生产级的新建用户密码激活、邀请、首次改密、忘记密码和管理员重置；

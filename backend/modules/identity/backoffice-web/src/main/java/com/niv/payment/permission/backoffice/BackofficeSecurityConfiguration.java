@@ -16,15 +16,26 @@ import java.util.Set;
 
 final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
     private static final String REQUEST_PROOF_HEADER = "X-CSRF-Token";
-    private static final Map<String, Set<String>> ROUTES = Map.of(
-        "/api/auth/login", Set.of("POST"),
-        "/api/auth/logout", Set.of("POST"),
-        "/api/auth/csrf", Set.of("GET"),
-        "/api/user/info", Set.of("GET"),
-        "/api/auth/codes", Set.of("GET"),
-        "/api/menu/all", Set.of("GET"),
-        "/api/health", Set.of("GET"));
-    private static final Set<String> PUBLIC = Set.of("POST /api/auth/login", "GET /api/health");
+    private static final String BACKCHANNEL_LOGOUT_PATH = "/api/auth/oidc/backchannel-logout";
+    private static final Map<String, Set<String>> ROUTES = Map.ofEntries(
+        Map.entry("/api/auth/login", Set.of("POST")),
+        Map.entry("/api/auth/logout", Set.of("POST")),
+        Map.entry("/api/auth/csrf", Set.of("GET")),
+        Map.entry("/api/auth/oidc/start", Set.of("GET")),
+        Map.entry("/api/auth/oidc/callback", Set.of("GET")),
+        Map.entry("/api/auth/oidc/handoff", Set.of("POST")),
+        Map.entry(BACKCHANNEL_LOGOUT_PATH, Set.of("POST")),
+        Map.entry("/api/user/info", Set.of("GET")),
+        Map.entry("/api/auth/codes", Set.of("GET")),
+        Map.entry("/api/menu/all", Set.of("GET")),
+        Map.entry("/api/health", Set.of("GET")));
+    private static final Set<String> PUBLIC = Set.of(
+        "POST /api/auth/login",
+        "GET /api/auth/oidc/start",
+        "GET /api/auth/oidc/callback",
+        "POST /api/auth/oidc/handoff",
+        "POST " + BACKCHANNEL_LOGOUT_PATH,
+        "GET /api/health");
 
     private final SaTokenSessionBridge sessions;
     private final String allowedOrigin;
@@ -79,7 +90,7 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
         return bean;
     }
 
-    private final class BoundaryInterceptor implements HandlerInterceptor {
+    final class BoundaryInterceptor implements HandlerInterceptor {
         @Override
         public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
             if ("OPTIONS".equals(request.getMethod())) {
@@ -87,6 +98,9 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
             }
             if (!ROUTES.getOrDefault(request.getRequestURI(), Set.of()).contains(request.getMethod())) {
                 throw new BackofficeAccessDeniedException();
+            }
+            if (isBackchannelLogout(request)) {
+                return true;
             }
             if (!Set.of("GET", "HEAD").contains(request.getMethod())
                 && !allowedOrigin.equals(request.getHeader("Origin"))) {
@@ -103,6 +117,11 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
                 }
             }
             return true;
+        }
+
+        private boolean isBackchannelLogout(HttpServletRequest request) {
+            return "POST".equals(request.getMethod())
+                && BACKCHANNEL_LOGOUT_PATH.equals(request.getRequestURI());
         }
     }
 }

@@ -15,7 +15,8 @@ The enforced baseline is Java 25, Spring Boot 4.1, jOOQ 3.21, Flyway 12.4, Postg
 - list predicates use parameter values plus server-owned column whitelists;
 - Redis keys are versioned and decoded snapshots are identity-checked;
 - Sa-Token is behind a narrow session facade rather than becoming the business truth source.
-- the Admin API provides local credential login, cookie sessions, explicit permission-policy admission and the Vben user/menu/system-management contract;
+- all three backoffice APIs have explicit account-domain OIDC client composition, cookie sessions, back-channel logout, identity-version checks and independent CSRF; local credential login is restricted to the `local` profile;
+- the platform Admin API provides explicit permission-policy admission and the Vben user/menu/system-management contract;
 - PostgreSQL migrations and Redis-backed login throttling are wired into the runnable application.
 
 ## Current module boundaries
