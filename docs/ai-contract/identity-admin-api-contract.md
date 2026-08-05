@@ -2,7 +2,7 @@
 
 > 状态：已实现的本地原型契约，非生产认证与资金权限方案<br>
 > 适用应用：`frontend/admin/apps/web-antdv-next` 的 PLATFORM/MERCHANT/AGENT 独立产物，以及三个对应后端组合根<br>
-> 复核日期：2026-08-04
+> 复核日期：2026-08-05
 > 事实优先级：已接受 ADR / 已批准契约 > 实现；集成测试证明实现现状，但无权把偶然实现升级为架构决策
 
 本文分三层记录：
@@ -16,6 +16,17 @@
 ## IAM-001 已实现边界
 
 [ADR-0008](../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 已关闭 `IAM-GLOBAL-USER-MULTI-TENANT`：PLATFORM、MERCHANT、AGENT 是独立应用账号域，同一个应用 User 不跨域；同域多 Membership 仍允许。V18 为 Tenant/User/Credential/Membership 增加并约束 `account_domain`，迁移遇到跨域或无法归属数据时原子失败。V19 新增三个服务端专用入口 Permission，并为历史及新建角色维护 canonical `system-backoffice-access` Grant；V20 前向收敛 V17 合法存在的同名普通 Grant，保留其授权语义并写入审计、角色/成员版本和 Outbox。三个服务端入口固定账号域和会话边界，严格登录 DTO 只接受 `username` 与 `password`；可信入口无法唯一解析 ACTIVE Membership 时统一认证失败。ACTIVE Membership 还必须经角色取得本端 `backoffice:{platform|merchant|agent}-access` RoleGrant，入口权限不从部门、导航或 Membership 状态推导，也不属于 18 项租户授权编辑面。进程级黑盒通过外部 HTTP、SQL 和 Redis 验证跨端 Cookie/token/cache 复用以及三端 login/logout 的 missing、wrong、cross-root Origin 均失败关闭；12 个 semantic mutant 分别覆盖平台与共享后台 Origin 守卫及其余账号/会话边界。本地技术验证不等于 Rule Card 已获受信 reviewer 正式签署。
+
+## IAM-002 已接受目标、尚未实现
+
+[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 接受三套独立前端应用、三套独立后端服务和生产 OIDC 身份边界；IAM-002 当前仍是 candidate Rule，只登记决策契约 Judge，不能据此宣称生产实现已经通过。目标契约包含六条不可降级不变量：
+
+1. 三个 Keycloak Realm 只提供逻辑隔离；共享集群仍有共同管理、存储、升级、容量和可用性故障域，不能描述为完整基础设施隔离。
+2. 本地应用 Session 同时接入经过验证的 Keycloak back-channel logout 和逐请求身份版本撤销；任一信号都必须使旧 Session 失效。
+3. Origin 校验只用于适合的浏览器请求。OIDC callback 依赖 state、nonce、PKCE、issuer、audience、code、过期和防重放；server-to-server logout 依赖签名 Logout Token，二者都不依赖 Origin。
+4. 所有改变状态的 Cookie 认证浏览器请求使用与 Session 绑定的独立 CSRF token；SameSite 和 Origin 仅是纵深防御，不能替代 CSRF token。
+5. 应用 User 的唯一身份映射键严格为 canonical `issuer + subject`；email、username、Realm 展示名和 account domain 都不是身份键。
+6. MFA 恢复在成功前必须撤销受影响的 Keycloak Credential、全部 Recovery Code、全部 Keycloak Session 和全部应用 Session；部分失败保持用户阻断、进入可幂等重试的 `RECOVERY_PENDING`，不得报告成功。
 
 ---
 
