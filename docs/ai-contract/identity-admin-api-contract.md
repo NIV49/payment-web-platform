@@ -37,7 +37,7 @@
 ```text
 platform-admin | merchant-admin | agent-admin
   -> /api（withCredentials=true, same origin）
-  -> admin-api | merchant-admin-api | agent-admin-api
+  -> platform-admin-api | merchant-admin-api | agent-admin-api
   -> method/path permission registry
   -> DefaultAuthorizationService
   -> versioned GrantSnapshot in Redis / PostgreSQL fallback
@@ -47,8 +47,8 @@ platform-admin | merchant-admin | agent-admin
 
 当前事实：
 
-- 三个可启动 composition root 分别是 `admin-api`、`merchant-admin-api`、`agent-admin-api`，本地默认端口为 `8080`、`8082`、`8083`；
-- 三个前端构建模式分别输出到 `dist/platform`、`dist/merchant`、`dist/agent`；单变体构建只清理自己的输出目录，各产物只包含本账号域允许且被 Vite manifest 引用的页面 component 与 JS/CSS；
+- 三个可启动 composition root 分别是 `platform-admin-api`、`merchant-admin-api`、`agent-admin-api`，本地默认端口为 `8080`、`8082`、`8083`；
+- 三个前端应用分别输出到各自的 `dist`；单应用构建只清理自己的输出目录，各产物只包含本账号域允许且被 Vite manifest 引用的页面 component 与 JS/CSS；
 - `platform-admin` 拥有用户、角色、菜单、部门页面和对应 API；`merchant-admin`、`agent-admin` 当前只有隔离入口与共享工作台，不包含 PLATFORM 系统管理页面；
 - 产品路由模式已由应用常量固定为 `mixed`，登录后使用 `/menu/all` 生成业务路由，本地只合并隐藏的 `Profile`；所有部署都递归拒绝与 Root、Authentication、Login、FallbackNotFound、Profile 的 canonical name/path 冲突，同一前端实例 single-flight login 并串行 login/logout，退出和换用户会清空旧身份、权限码和动态路由，同时使在途 session/route generation 失效；登录/退出使用不安装全局 session-recovery 拦截器的专用请求客户端，登录 401 只终止本次登录，不得递归等待 logout；缓存偏好不决定路由模式；
 - 本地 bootstrap 管理员的首选首页为 `/dashboard`；`/user/info` 只返回当前安全菜单树中存在的首选路径，否则回退到第一个可访问叶子，无业务菜单时回退到本地 `/profile`；
@@ -1036,7 +1036,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 
 # 6. Current acceptance checklist
 
-- `admin-api`、`merchant-admin-api`、`agent-admin-api` 可以作为三个独立 Spring Boot 应用启动；
+- `platform-admin-api`、`merchant-admin-api`、`agent-admin-api` 可以作为三个独立 Spring Boot 应用启动；
 - 前端四个系统管理模块已迁入 `platform-admin`；
 - 三个前端模式生成独立 PLATFORM/MERCHANT/AGENT 产物，并使用独立 title、storage namespace、component allowlist；
 - 三端登录设置各自的 `PAYMENT_*_SESSION` HttpOnly、SameSite=Strict Cookie 和独立 login type；

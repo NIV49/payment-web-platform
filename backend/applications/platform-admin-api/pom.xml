@@ -11,9 +11,9 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
-    <artifactId>admin-api</artifactId>
-    <name>admin-api</name>
-    <description>Executable administration API composition root</description>
+    <artifactId>platform-admin-api</artifactId>
+    <name>platform-admin-api</name>
+    <description>Executable platform administration API composition root</description>
 
     <dependencies>
         <dependency>

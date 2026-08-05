@@ -14,7 +14,7 @@
 
     <modules>
         <module>modules/identity</module>
-        <module>applications/admin-api</module>
+        <module>applications/platform-admin-api</module>
         <module>applications/merchant-admin-api</module>
         <module>applications/agent-admin-api</module>
         <module>tests/iam001-blackbox</module>

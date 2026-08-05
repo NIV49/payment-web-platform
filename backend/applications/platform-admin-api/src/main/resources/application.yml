@@ -1,6 +1,6 @@
 server:
-  address: ${PAYMENT_ADMIN_BIND_ADDRESS}
-  port: ${PAYMENT_ADMIN_PORT:8080}
+  address: ${PAYMENT_PLATFORM_BIND_ADDRESS}
+  port: ${PAYMENT_PLATFORM_PORT:8080}
   # Forwarded/X-Forwarded-* values are untrusted unless a boundary proxy strips
   # client-supplied headers first. Keep them disabled by default so login
   # throttling cannot be bypassed by spoofing the apparent client address.
@@ -8,7 +8,7 @@ server:
 
 spring:
   application:
-    name: payment-admin-api
+    name: payment-platform-admin-api
   datasource:
     url: ${PAYMENT_DB_URL}
     username: ${PAYMENT_DB_USERNAME}
@@ -55,7 +55,7 @@ payment:
     # Keep disabled while any N-1 client depends on legacy menu:manage or department:manage grants.
     legacy-administration-cutover-complete: ${PAYMENT_LEGACY_ADMINISTRATION_CUTOVER_COMPLETE:false}
   menu:
-    # Keep in sync with deliberate route pages under web-antdv-next/src/views.
+    # Keep in sync with deliberate route pages under platform-admin/src/views.
     allowed-page-components: /dashboard/analytics/index,/dashboard/workspace/index,/demos/antd/index,/system/dept/list,/system/menu/list,/system/role/list,/system/user/list
   security:
     allowed-origins: ${PAYMENT_PLATFORM_ALLOWED_ORIGIN:http://127.0.0.1:5999}

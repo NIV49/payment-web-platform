@@ -1,5 +1,5 @@
 server:
-  address: ${PAYMENT_ADMIN_BIND_ADDRESS:127.0.0.1}
+  address: ${PAYMENT_PLATFORM_BIND_ADDRESS:127.0.0.1}
 
 spring:
   datasource:

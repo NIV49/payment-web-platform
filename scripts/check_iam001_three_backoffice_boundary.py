@@ -90,11 +90,11 @@ MAVEN = ("./mvnw", "-s", "maven-settings.xml")
 MUTATIONS = (
     Mutation(
         "PLATFORM_MUTATION_ORIGIN_GUARD",
-        "backend/applications/admin-api/src/main/java/com/niv/payment/adminapi/config/SecurityConfiguration.java",
+        "backend/applications/platform-admin-api/src/main/java/com/niv/payment/adminapi/config/SecurityConfiguration.java",
         "            requireTrustedOriginForMutation(request);\n",
         "",
         Command("backend", MAVEN + (
-            "-pl", "applications/admin-api,applications/merchant-admin-api,applications/agent-admin-api,tests/iam001-blackbox",
+            "-pl", "applications/platform-admin-api,applications/merchant-admin-api,applications/agent-admin-api,tests/iam001-blackbox",
             "-am",
             "-Dit.test=ThreeBackofficeBoundaryIntegrationTest#untrustedOriginsCannotCreateOrTerminateSessions",
             "-Dfailsafe.failIfNoSpecifiedTests=false", "verify",
@@ -112,7 +112,7 @@ MUTATIONS = (
         "            }\n",
         "",
         Command("backend", MAVEN + (
-            "-pl", "applications/admin-api,applications/merchant-admin-api,applications/agent-admin-api,tests/iam001-blackbox",
+            "-pl", "applications/platform-admin-api,applications/merchant-admin-api,applications/agent-admin-api,tests/iam001-blackbox",
             "-am",
             "-Dit.test=ThreeBackofficeBoundaryIntegrationTest#untrustedOriginsCannotCreateOrTerminateSessions",
             "-Dfailsafe.failIfNoSpecifiedTests=false", "verify",
@@ -141,11 +141,11 @@ MUTATIONS = (
         ".and(membershipScope)\n                .and(explicitPortalAccess))",
         ".and(membershipScope))",
         Command("backend", MAVEN + (
-            "-pl", "applications/admin-api", "-am",
+            "-pl", "applications/platform-admin-api", "-am",
             "-Dit.test=LocalIdentityFixtureBootstrapIntegrationTest#activeMembershipWithoutAnExplicitPortalGrantCannotAuthenticate",
             "-Dfailsafe.failIfNoSpecifiedTests=false", "verify",
         )),
-        "backend/applications/admin-api/target/failsafe-reports/TEST-*.xml",
+        "backend/applications/platform-admin-api/target/failsafe-reports/TEST-*.xml",
         "com.niv.payment.adminapi.config.LocalIdentityFixtureBootstrapIntegrationTest",
         "activeMembershipWithoutAnExplicitPortalGrantCannotAuthenticate",
     ),
@@ -239,7 +239,7 @@ MUTATIONS = (
         "record LoginRequest(@NotBlank @Size(max = 100) String username,\n                        @NotBlank @Size(max = 256) String password) { }",
         "record LoginRequest(@NotBlank @Size(max = 100) String username,\n                        @NotBlank @Size(max = 256) String password, Long tenantId) { }",
         Command("backend", MAVEN + (
-            "-pl", "applications/admin-api,applications/merchant-admin-api,applications/agent-admin-api,tests/iam001-blackbox",
+            "-pl", "applications/platform-admin-api,applications/merchant-admin-api,applications/agent-admin-api,tests/iam001-blackbox",
             "-am",
             "-Dit.test=ThreeBackofficeBoundaryIntegrationTest#tenantIdCannotSelectAWorkspace",
             "-Dfailsafe.failIfNoSpecifiedTests=false", "verify",
@@ -250,15 +250,15 @@ MUTATIONS = (
     ),
     Mutation(
         "UNKNOWN_API_DEFAULT_DENY",
-        "backend/applications/admin-api/src/main/java/com/niv/payment/adminapi/config/AdminApiPermissionPolicy.java",
+        "backend/applications/platform-admin-api/src/main/java/com/niv/payment/adminapi/config/AdminApiPermissionPolicy.java",
         "        throw new AccessDeniedException();\n    }\n\n    private static boolean sessionOnly",
         "        return List.of();\n    }\n\n    private static boolean sessionOnly",
         Command("backend", MAVEN + (
-            "-pl", "applications/admin-api", "-am",
+            "-pl", "applications/platform-admin-api", "-am",
             "-Dtest=AdminApiPermissionPolicyTest#deniesUnknownRoutesMethodsAndPrefixLookalikes",
             "-Dsurefire.failIfNoSpecifiedTests=false", "test",
         )),
-        "backend/applications/admin-api/target/surefire-reports/TEST-*.xml",
+        "backend/applications/platform-admin-api/target/surefire-reports/TEST-*.xml",
         "com.niv.payment.adminapi.config.AdminApiPermissionPolicyTest",
         "deniesUnknownRoutesMethodsAndPrefixLookalikes",
     ),

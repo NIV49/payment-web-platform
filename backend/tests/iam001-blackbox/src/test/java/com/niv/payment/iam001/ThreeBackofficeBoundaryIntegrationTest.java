@@ -79,10 +79,10 @@ class ThreeBackofficeBoundaryIntegrationTest {
             "agent-admin", "PAYMENT_AGENT_SESSION", 3100L, "agent-admin");
         roots = List.of(platform, merchant, agent);
 
-        start(platform, "applications/admin-api/target/admin-api-0.1.0-SNAPSHOT.jar", Map.of(
+        start(platform, "applications/platform-admin-api/target/platform-admin-api-0.1.0-SNAPSHOT.jar", Map.of(
             "SPRING_PROFILES_ACTIVE", "local",
-            "PAYMENT_ADMIN_BIND_ADDRESS", "127.0.0.1",
-            "PAYMENT_ADMIN_PORT", Integer.toString(platform.port()),
+            "PAYMENT_PLATFORM_BIND_ADDRESS", "127.0.0.1",
+            "PAYMENT_PLATFORM_PORT", Integer.toString(platform.port()),
             "PAYMENT_PLATFORM_ALLOWED_ORIGIN", platform.origin(),
             "PAYMENT_FLYWAY_ENABLED", "true",
             "PAYMENT_BOOTSTRAP_PASSWORD", LOGIN_TEST_VALUE));

@@ -19,7 +19,7 @@
 
 ```text
 backend
-├── applications/admin-api                 PLATFORM 管理 API，默认 8080
+├── applications/platform-admin-api                 PLATFORM 管理 API，默认 8080
 ├── applications/merchant-admin-api        MERCHANT 最小后台 API，默认 8082
 ├── applications/agent-admin-api           AGENT 最小后台 API，默认 8083
 ├── modules/identity                       Identity 业务上下文及所属适配器
@@ -32,7 +32,7 @@ backend
 
 | 模块 | 职责 | 可以依赖 | 不应承载 |
 | --- | --- | --- | --- |
-| `applications/admin-api` | Spring Boot 启动、Bean 组合、HTTP/CORS/安全拦截、DTO、异常 envelope、本地 fixture 入口 | identity 的 core 与 adapters | 领域规则、jOOQ 查询细节 |
+| `applications/platform-admin-api` | Spring Boot 启动、Bean 组合、HTTP/CORS/安全拦截、DTO、异常 envelope、本地 fixture 入口 | identity 的 core 与 adapters | 领域规则、jOOQ 查询细节 |
 | `identity/core` | 身份、授权、数据范围模型；应用服务；外部端口 | JDK 和内部领域代码 | Spring、jOOQ、Redis、Sa-Token |
 | `identity/persistence-postgres` | jOOQ repository、生成表模型、Identity 表和 Flyway | identity-core、jOOQ | 其他业务上下文的表 |
 | `identity/cache-redis` | 权限快照缓存、登录失败限流 | identity-core、Redis 抽象/adapter | 业务真相、会话真相 |
@@ -41,7 +41,7 @@ backend
 依赖方向：
 
 ```text
-admin-api composition root
+platform-admin-api composition root
   -> identity adapters
   -> identity core ports/model
 ```
@@ -247,7 +247,7 @@ Role、Department、Menu 的管理读模型显式返回 `rowVersion`；PUT/PATCH
 
 以前向迁移移除 V2/V3 遗留的固定 Tenant、Admin、Department、Membership、Credential、Role、Grant 和 Menu，同时保留必需的 14 条全局 Permission Catalog。判断范围只覆盖预留 ID、自然键以及与该 fixture/tenant `1` 直接关联的行；其他租户、用户、审计、Outbox 和扩展权限不会阻止迁移，也不会被删除。预留键碰撞、固定数据被修改、必需权限被篡改或缺失、tenant `1` 出现额外依赖关系时，V8 在同一事务中回滚并要求人工分类，禁止用 `ON CONFLICT` 静默拼接真实主体。
 
-本地开发数据不再属于 Flyway 生产路径。`admin-api/src/main/resources/db/local/iam-local-bootstrap.sql` 只由 `local` profile 的 `LocalIdentityFixtureBootstrap` 在 Flyway 后执行。
+本地开发数据不再属于 Flyway 生产路径。`platform-admin-api/src/main/resources/db/local/iam-local-bootstrap.sql` 只由 `local` profile 的 `LocalIdentityFixtureBootstrap` 在 Flyway 后执行。
 精确匹配的预置部门允许 `row_version` 自然递增到任意非负值；ID、租户、父级、编码、名称、状态、备注和预留键碰撞仍按原规则失败关闭。
 Local bootstrap 的 fixture 归属只由预留 ID、预留自然键/authCode、预置主体和预置主体自身关系确定。`assigned_by/created_by/updated_by` 只是审计来源，菜单 `parent_id` 只是树关系，二者都不能把管理员后续创建的数据扩大为 fixture。因而管理员创建的额外部门、用户、Membership、普通角色、Grant、菜单，以及普通角色对预置或新增菜单的合法展示关系会在重启后保留；直接修改预置行，或给预置 Membership/Role 增加非预置授权关系仍失败关闭。MERCHANT/AGENT 预置系统角色还必须保持 ACTIVE、未墓碑，并各自只有一条符合登录查询条件的 canonical 入口 Grant；有效期、额外维度、Target 或其他活动 portal Grant 任一漂移都会使整个 bootstrap 事务回滚。
 
@@ -328,12 +328,12 @@ Flyway 只负责 schema 前向升级，不会轮换已有 `payment-web-platform-
 ```bash
 cd backend
 ./mvnw -s maven-settings.xml clean verify
-./mvnw -s maven-settings.xml -pl applications/admin-api -am package -DskipTests
+./mvnw -s maven-settings.xml -pl applications/platform-admin-api -am package -DskipTests
 printf 'Local bootstrap password: '
 read -r -s PAYMENT_BOOTSTRAP_PASSWORD
 printf '\n'
 export PAYMENT_BOOTSTRAP_PASSWORD
-java -jar applications/admin-api/target/admin-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=local
+java -jar applications/platform-admin-api/target/platform-admin-api-0.1.0-SNAPSHOT.jar --spring.profiles.active=local
 unset PAYMENT_BOOTSTRAP_PASSWORD
 ```
 
@@ -385,8 +385,8 @@ cd backend
 ## 12. 证据索引
 
 - 聚合与版本：`backend/pom.xml`、各模块 `pom.xml`。
-- 启动与组装：`applications/admin-api/src/main/java/.../AdminApiApplication.java`、`config/*`。
-- HTTP 与契约：`applications/admin-api/src/main/java/.../web/*`。
+- 启动与组装：`applications/platform-admin-api/src/main/java/.../AdminApiApplication.java`、`config/*`。
+- HTTP 与契约：`applications/platform-admin-api/src/main/java/.../web/*`。
 - Core：`modules/identity/core/src/main/java/.../{domain,application,datascope,service,port}`。
 - PostgreSQL：`modules/identity/persistence-postgres/src/main/java`、`src/main/resources/db/migration`。
 - Redis：`modules/identity/cache-redis/src/main/java`。

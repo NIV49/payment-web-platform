@@ -43,7 +43,7 @@ payment-web-platform/
 
 ### `backend`
 
-Maven reactor。`applications/admin-api`、`applications/merchant-admin-api`、`applications/agent-admin-api` 是三个独立启动单元，分别固定 PLATFORM、MERCHANT、AGENT 账号域；`modules/identity` 拥有共享 Identity core 与 PostgreSQL、Redis、Sa-Token adapters。未来新增支付业务上下文时延续 `modules/<context>`，只有确实需要独立部署时才新增 `applications/<app>`。
+Maven reactor。`applications/platform-admin-api`、`applications/merchant-admin-api`、`applications/agent-admin-api` 是三个独立启动单元，分别固定 PLATFORM、MERCHANT、AGENT 账号域；`modules/identity` 拥有共享 Identity core 与 PostgreSQL、Redis、Sa-Token adapters。未来新增支付业务上下文时延续 `modules/<context>`，只有确实需要独立部署时才新增 `applications/<app>`。
 
 详细内容见 [后端工程上下文](./backend/README.md)。
 
@@ -82,7 +82,7 @@ Maven reactor。`applications/admin-api`、`applications/merchant-admin-api`、`
 
 ```mermaid
 flowchart LR
-  PLATFORM["platform-admin"] -->|"/api"| PLATFORM_API["admin-api"]
+  PLATFORM["platform-admin"] -->|"/api"| PLATFORM_API["platform-admin-api"]
   MERCHANT["merchant-admin"] -->|"/api"| MERCHANT_API["merchant-admin-api"]
   AGENT["agent-admin"] -->|"/api"| AGENT_API["agent-admin-api"]
   PLATFORM_API --> IAM["backend modules/identity"]

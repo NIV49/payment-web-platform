@@ -25,10 +25,12 @@ payment-web-platform/
 ```bash
 cd frontend/admin
 pnpm install
-pnpm dev:antdv-next
+pnpm run dev:platform
+pnpm run dev:merchant
+pnpm run dev:agent
 ```
 
-前端工作区要求 Node.js `>=24.11.0 <25`，`.node-version` 与产品构建镜像固定 24.16.0；pnpm 固定 11.7.0。当前 Admin 工程基于 Vben 5.7.0、Vue 3.5.38 和 Antdv Next 1.3.6。
+前端工作区要求 Node.js `>=24.11.0 <25`，`.node-version` 与产品构建镜像固定 24.16.0；pnpm 固定 11.7.0。当前 Admin 工程基于 Vben 5.7.0、Vue 3.5.40 和 Antdv Next 1.4.5。
 
 Playground 和 Mock 服务仍位于前端工程中：
 
@@ -57,12 +59,12 @@ docker compose -f infra/docker-compose.local.yml up -d
 
 ```bash
 cd backend
-./mvnw -s maven-settings.xml -pl applications/admin-api -am package -DskipTests
+./mvnw -s maven-settings.xml -pl applications/platform-admin-api -am package -DskipTests
 printf 'Local bootstrap password: '
 read -r -s PAYMENT_BOOTSTRAP_PASSWORD
 printf '\n'
 export PAYMENT_BOOTSTRAP_PASSWORD
-java -jar applications/admin-api/target/admin-api-0.1.0-SNAPSHOT.jar \
+java -jar applications/platform-admin-api/target/platform-admin-api-0.1.0-SNAPSHOT.jar \
   --spring.profiles.active=local
 unset PAYMENT_BOOTSTRAP_PASSWORD
 ```

@@ -153,7 +153,7 @@ V17 墓碑写入属于前向状态：旧二进制会把墓碑误当普通 DISABL
 
 ## 11. 当前原型的定位
 
-`backend/applications/admin-api` 已是可启动的本地管理应用，当前已经验证：
+`backend/applications/platform-admin-api` 已是可启动的本地管理应用，当前已经验证：
 
 - RoleGrant 原子授权；
 - 多维范围；
