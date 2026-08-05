@@ -1,7 +1,7 @@
 # Identity Admin API Contract
 
 > 状态：已实现的本地原型契约，非生产认证与资金权限方案<br>
-> 适用应用：`frontend/admin/apps/web-antdv-next` 的 PLATFORM/MERCHANT/AGENT 独立产物，以及三个对应后端组合根<br>
+> 适用应用：`frontend/admin/apps/platform-admin`、`merchant-admin`、`agent-admin` 三个独立应用，以及三个对应后端组合根<br>
 > 复核日期：2026-08-05
 > 事实优先级：已接受 ADR / 已批准契约 > 实现；集成测试证明实现现状，但无权把偶然实现升级为架构决策
 
@@ -35,7 +35,7 @@
 ## 1.1 已实现拓扑
 
 ```text
-web-antdv-next (platform | merchant | agent artifact)
+platform-admin | merchant-admin | agent-admin
   -> /api（withCredentials=true, same origin）
   -> admin-api | merchant-admin-api | agent-admin-api
   -> method/path permission registry
@@ -49,7 +49,7 @@ web-antdv-next (platform | merchant | agent artifact)
 
 - 三个可启动 composition root 分别是 `admin-api`、`merchant-admin-api`、`agent-admin-api`，本地默认端口为 `8080`、`8082`、`8083`；
 - 三个前端构建模式分别输出到 `dist/platform`、`dist/merchant`、`dist/agent`；单变体构建只清理自己的输出目录，各产物只包含本账号域允许且被 Vite manifest 引用的页面 component 与 JS/CSS；
-- `web-antdv-next` 已迁入用户、角色、菜单、部门页面和对应 API；
+- `platform-admin` 拥有用户、角色、菜单、部门页面和对应 API；`merchant-admin`、`agent-admin` 当前只有隔离入口与共享工作台，不包含 PLATFORM 系统管理页面；
 - 产品路由模式已由应用常量固定为 `mixed`，登录后使用 `/menu/all` 生成业务路由，本地只合并隐藏的 `Profile`；所有部署都递归拒绝与 Root、Authentication、Login、FallbackNotFound、Profile 的 canonical name/path 冲突，同一前端实例 single-flight login 并串行 login/logout，退出和换用户会清空旧身份、权限码和动态路由，同时使在途 session/route generation 失效；登录/退出使用不安装全局 session-recovery 拦截器的专用请求客户端，登录 401 只终止本次登录，不得递归等待 logout；缓存偏好不决定路由模式；
 - 本地 bootstrap 管理员的首选首页为 `/dashboard`；`/user/info` 只返回当前安全菜单树中存在的首选路径，否则回退到第一个可访问叶子，无业务菜单时回退到本地 `/profile`；
 - PLATFORM 保留系统管理 API；MERCHANT/AGENT 只暴露认证、导航、权限码和健康检查，未知及隐藏 API 默认拒绝；
@@ -345,7 +345,7 @@ Response data：
 
 ### GET `/menu/all`
 
-返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。该 Profile 仅只读展示 `/user/info` 已校验的姓名、登录账号、用户 ID 和角色；密码修改、MFA、手机号、邮箱和通知偏好尚无后端契约，页面不得展示演示状态或伪成功操作。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。存储的 redirect 只有在目标仍存在于本次安全菜单树时才保留，否则父节点改为重定向到第一个可访问子节点；没有可访问子节点则不返回 redirect。后端路由若与静态核心、fallback 或本地动态路由的 canonical name/path 冲突，所有部署都在合并前 fail closed；新的登录尝试和退出先使旧 session/route generation 失效并清空旧身份、权限码和动态路由，延迟返回的 `/user/info`、`/auth/codes` 或菜单不能再写 store/Router，`/auth/login` 始终解析到原始核心 Login。
+返回当前 Membership 的有效 Role 对应菜单树。`platform-admin` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。该 Profile 仅只读展示 `/user/info` 已校验的姓名、登录账号、用户 ID 和角色；密码修改、MFA、手机号、邮箱和通知偏好尚无后端契约，页面不得展示演示状态或伪成功操作。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。存储的 redirect 只有在目标仍存在于本次安全菜单树时才保留，否则父节点改为重定向到第一个可访问子节点；没有可访问子节点则不返回 redirect。后端路由若与静态核心、fallback 或本地动态路由的 canonical name/path 冲突，所有部署都在合并前 fail closed；新的登录尝试和退出先使旧 session/route generation 失效并清空旧身份、权限码和动态路由，延迟返回的 `/user/info`、`/auth/codes` 或菜单不能再写 store/Router，`/auth/login` 始终解析到原始核心 Login。
 
 当前动态菜单来源是 Role -> role_menu -> Menu；按钮权限仍由 `/auth/codes` 决定。菜单展示关系不等于业务授权。
 
@@ -919,7 +919,7 @@ V20__converge_reserved_backoffice_grant_keys.sql
 
 # 3. Compatibility Plan
 
-## 3.1 已完成的 Playground -> web-antdv-next 迁移
+## 3.1 已完成的 Playground -> platform-admin 迁移
 
 已完成：
 
@@ -1037,7 +1037,7 @@ RoleGrant(permissionCode + dimensions + constraints)
 # 6. Current acceptance checklist
 
 - `admin-api`、`merchant-admin-api`、`agent-admin-api` 可以作为三个独立 Spring Boot 应用启动；
-- 前端四个系统管理模块已迁入 `web-antdv-next`；
+- 前端四个系统管理模块已迁入 `platform-admin`；
 - 三个前端模式生成独立 PLATFORM/MERCHANT/AGENT 产物，并使用独立 title、storage namespace、component allowlist；
 - 三端登录设置各自的 `PAYMENT_*_SESSION` HttpOnly、SameSite=Strict Cookie 和独立 login type；
 - 登录严格只接受 username/password，拒绝 `tenantId`；跨账号域账号和跨端 Cookie/cache 复用失败关闭；

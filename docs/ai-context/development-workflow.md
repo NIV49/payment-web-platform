@@ -13,7 +13,7 @@
 
 ### 前端
 
-- 业务页面放在 `frontend/admin/apps/web-antdv-next/src/views`，应用专属 API、路由、语言包和适配器留在应用内。
+- 业务页面放在对应的 `frontend/admin/apps/{platform-admin,merchant-admin,agent-admin}/src/views`；应用专属 API、路由清单和部署配置留在应用内。三个后台都需要且接口稳定的启动、认证、请求和布局能力才进入 `packages/effects/backoffice-runtime`。
 - 只有两个以上应用确实复用且接口稳定时，才考虑修改 `packages`；不能为了少写几行就污染框架公共包。
 - 页面优先复用 Vben 的 `Page`、`VbenForm`、`VbenVxeTable`、`VbenModal`、`VbenDrawer` 等深层组件，底层控件使用 `antdv-next`，并通过应用适配器注册。
 - 先确认语言包里是否已有 key。菜单和路由标题使用 i18n key，不写展示文案。
@@ -48,8 +48,8 @@
 
 | 改动 | 最低验证 |
 | --- | --- |
-| Admin 前端业务代码 | `pnpm -F @vben/web-antdv-next run typecheck`，相关 Vitest，必要时 `pnpm build:antdv-next` |
-| Admin 生产配置或部署脚本 | `pnpm run test:production-safety`，`pnpm build:antdv-next` |
+| Admin 前端业务代码 | 受影响应用与 `@payment/backoffice-runtime` typecheck、相关 Vitest，必要时 `pnpm run build:backoffices` |
+| Admin 生产配置或部署脚本 | `pnpm run test:production-safety`、`pnpm run build:backoffices`、`node scripts/deploy/verify-three-artifacts.mjs .` |
 | Vben 公共包 | 受影响包 typecheck、相关单测、Admin 构建 |
 | Playground | `pnpm -F @vben/playground run typecheck`，必要时 Playwright |
 | 后端 Core | `./mvnw -s maven-settings.xml -pl modules/identity/core -am test` |

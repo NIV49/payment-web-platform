@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 
-const root = resolve(process.argv[2] ?? 'apps/web-antdv-next/dist');
+const root = resolve(process.argv[2] ?? '.');
 const commonViews = [
   'src/views/_core/fallback/forbidden.vue',
   'src/views/_core/fallback/not-found.vue',
@@ -9,16 +9,19 @@ const commonViews = [
 ];
 const deployments = {
   agent: {
+    directory: 'agent-admin',
     namespace: 'payment-agent-admin',
     title: 'Payment Agent Admin',
     views: [...commonViews, 'src/views/dashboard/workspace/index.vue'],
   },
   merchant: {
+    directory: 'merchant-admin',
     namespace: 'payment-merchant-admin',
     title: 'Payment Merchant Admin',
     views: [...commonViews, 'src/views/dashboard/workspace/index.vue'],
   },
   platform: {
+    directory: 'platform-admin',
     namespace: 'payment-platform-admin',
     title: 'Payment Operations',
     views: [
@@ -38,6 +41,9 @@ async function files(directory) {
   const result = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`Artifact contains symbolic link: ${path}`);
+    }
     if (entry.isDirectory()) result.push(...(await files(path)));
     else result.push(path);
   }
@@ -46,6 +52,13 @@ async function files(directory) {
 
 function artifactPath(directory, path) {
   return relative(directory, path).split(sep).join('/');
+}
+
+function normalizedViewPath(path) {
+  const normalized = path.split('\\').join('/');
+  const marker = 'src/views/';
+  const markerIndex = normalized.lastIndexOf(marker);
+  return markerIndex === -1 ? undefined : normalized.slice(markerIndex);
 }
 
 function referencedCodeAssets(manifestEntries) {
@@ -79,31 +92,27 @@ function referencedHtmlCodeAssets(html) {
   return referenced;
 }
 
-const rootEntries = await readdir(root, { withFileTypes: true });
-const actual = rootEntries
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name)
-  .toSorted();
-const expected = Object.keys(deployments).toSorted();
-if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-  throw new Error(
-    `Expected exactly ${expected.join(', ')}, received ${actual.join(', ')}`,
-  );
-}
-
-for (const [variant, policy] of Object.entries(deployments)) {
-  const directory = join(root, variant);
+for (const [deployment, policy] of Object.entries(deployments)) {
+  const directory = join(root, 'apps', policy.directory, 'dist');
   const paths = await files(directory);
   const manifest = paths.find((path) => path.endsWith('/.vite/manifest.json'));
-  if (!manifest) throw new Error(`${variant} artifact has no Vite manifest`);
+  if (!manifest) throw new Error(`${deployment} artifact has no Vite manifest`);
   const manifestEntries = JSON.parse(await readFile(manifest, 'utf8'));
   const actualViews = Object.keys(manifestEntries)
-    .filter((path) => path.startsWith('src/views/') && path.endsWith('.vue'))
-    .toSorted();
-  const expectedViews = policy.views.toSorted();
+    .map((path) => normalizedViewPath(path))
+    .filter((path) => path?.endsWith('.vue'))
+    .toSorted((left, right) => left.localeCompare(right));
+  if (new Set(actualViews).size !== actualViews.length) {
+    throw new Error(
+      `${deployment} artifact contains duplicate normalized views`,
+    );
+  }
+  const expectedViews = policy.views.toSorted((left, right) =>
+    left.localeCompare(right),
+  );
   if (JSON.stringify(actualViews) !== JSON.stringify(expectedViews)) {
     throw new Error(
-      `${variant} artifact view boundary mismatch: expected ${expectedViews.join(', ')}, received ${actualViews.join(', ')}`,
+      `${deployment} artifact view boundary mismatch: expected ${expectedViews.join(', ')}, received ${actualViews.join(', ')}`,
     );
   }
 
@@ -122,7 +131,7 @@ for (const [variant, policy] of Object.entries(deployments)) {
     .toSorted((left, right) => left.localeCompare(right));
   if (missingAssets.length > 0) {
     throw new Error(
-      `${variant} artifact is missing referenced assets: ${missingAssets.join(', ')}`,
+      `${deployment} artifact is missing referenced assets: ${missingAssets.join(', ')}`,
     );
   }
   const orphanAssets = [...actualAssets]
@@ -130,12 +139,12 @@ for (const [variant, policy] of Object.entries(deployments)) {
     .toSorted((left, right) => left.localeCompare(right));
   if (orphanAssets.length > 0) {
     throw new Error(
-      `${variant} artifact contains unreferenced JavaScript or CSS: ${orphanAssets.join(', ')}`,
+      `${deployment} artifact contains unreferenced JavaScript or CSS: ${orphanAssets.join(', ')}`,
     );
   }
 
   if (!index.includes(`<title>${policy.title}</title>`)) {
-    throw new Error(`${variant} artifact has the wrong title`);
+    throw new Error(`${deployment} artifact has the wrong title`);
   }
 
   const contents = await Promise.all(
@@ -146,9 +155,11 @@ for (const [variant, policy] of Object.entries(deployments)) {
   const text = contents.join('\n');
   if (!text.includes(policy.namespace) || !text.includes('/api')) {
     throw new Error(
-      `${variant} artifact is missing its namespace or same-origin API`,
+      `${deployment} artifact is missing its namespace or same-origin API`,
     );
   }
 }
 
-console.log(`Verified independent artifacts: ${expected.join(', ')}`);
+console.log(
+  `Verified independent applications: ${Object.keys(deployments).join(', ')}`,
+);

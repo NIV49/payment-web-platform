@@ -1,0 +1,11 @@
+import type { BackofficeDeployment } from '@payment/backoffice-runtime';
+
+import { COMMON_BACKOFFICE_PAGE_MAP } from '@payment/backoffice-runtime';
+
+export const deployment: BackofficeDeployment = {
+  accountDomain: 'AGENT',
+  menuPageComponents: ['/dashboard/workspace/index'],
+  pageMap: COMMON_BACKOFFICE_PAGE_MAP,
+  routeNames: ['AgentDashboard', 'AgentWorkspace'],
+  routePaths: ['/dashboard', '/dashboard/workspace'],
+};

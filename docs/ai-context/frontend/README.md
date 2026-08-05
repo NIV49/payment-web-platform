@@ -7,12 +7,13 @@
 
 ## 1. 工程定位
 
-`frontend/admin` 是独立 pnpm + Turborepo monorepo。一个产品源码应用通过 PLATFORM、MERCHANT、AGENT 三个构建策略生成相互隔离的后台产物；它另保留 Mock 应用、Playground、Vben 共享包与工程工具。`frontend/portal` 是未来 Nuxt 4 多应用 monorepo 的占位目录，不是后台入口。
+`frontend/admin` 是独立 pnpm + Turborepo monorepo。PLATFORM、MERCHANT、AGENT 分别由三个可独立构建和部署的应用承载；三者只复用不含应用专属页面的 `backoffice-runtime`。工作区另保留 Mock 应用、Playground、Vben 共享包与工程工具。`frontend/portal` 是未来 Nuxt 4 多应用 monorepo 的占位目录，不是后台入口。
 
 运行时主要依赖方向：
 
 ```text
-apps/web-antdv-next
+apps/platform-admin | apps/merchant-admin | apps/agent-admin
+  -> packages/effects/backoffice-runtime
   -> packages/effects/*        组合后的业务框架能力
   -> packages/*                locale/store/preferences/types/utils
   -> packages/@core/*          无业务或低耦合核心
@@ -25,11 +26,14 @@ apps/web-antdv-next
 
 | 目录/文件 | 职责 | 修改原则 |
 | --- | --- | --- |
-| `apps/web-antdv-next` | 产品 Admin 应用 | 业务页面、API、路由、locale、应用适配放这里 |
+| `apps/platform-admin` | 运维后台应用 | PLATFORM 专属页面、API、路由清单和部署配置 |
+| `apps/merchant-admin` | 商户后台应用 | MERCHANT 专属页面、API、路由清单和部署配置 |
+| `apps/agent-admin` | 代理商后台应用 | AGENT 专属页面、API、路由清单和部署配置 |
 | `apps/backend-mock` | Nitro Mock 服务 | 仅本地演示/隔离开发，不是生产后端 |
 | `playground` | Vben 完整演示应用与 E2E | 查用法、提取模式；不承载产品功能 |
 | `packages/@core` | 设计、基础工具、类型、偏好和 UI 内核 | 框架层；非通用需求不改 |
-| `packages/effects` | access、request、layouts、common-ui、plugins | 跨应用集成层；改动影响面大 |
+| `packages/effects/backoffice-runtime` | 三后台共享启动、认证、请求、布局、locale 和基础页面 | 不能导入或隐式注册任一应用专属页面/API |
+| `packages/effects` 其他包 | access、request、layouts、common-ui、plugins | 跨应用集成层；改动影响面大 |
 | `packages/*` | 常量、图标、locale、store、style、type、utils 等公共门面 | 保持通用、稳定、无应用业务 |
 | `internal/lint-configs` | Oxfmt/Oxlint/ESLint/Stylelint/Commitlint 配置 | 代码规范基础设施 |
 | `internal/node-utils` | 工程脚本共用的 Node 工具 | 只服务构建/脚本 |
@@ -38,7 +42,7 @@ apps/web-antdv-next
 | `internal/vite-config` | `defineConfig`、插件和默认 Loading | 应用 Vite 配置的统一入口 |
 | `scripts/turbo-run` | 交互选择并运行 turbo task | 工程命令 |
 | `scripts/vsh` | 循环依赖、依赖、lint、发布检查 CLI | 工程质量门禁 |
-| `scripts/deploy` | 产品 Admin 容器/Nginx 构建与生产安全回归测试 | 只构建、复制 `web-antdv-next`，禁止部署 Playground |
+| `scripts/deploy` | 三后台容器/Nginx 构建与生产安全回归测试 | `APP_NAME` 只允许三个产品应用，禁止部署 Playground |
 | `.changeset` | 上游包版本变更 | 当前业务仓库暂不发布 Vben 包 |
 | 仓库根目录 `.vscode` | 全仓统一编辑器配置 | Admin 工具路径必须带 `frontend/admin/` 前缀；子工程不再维护嵌套配置 |
 | `pnpm-workspace.yaml` | workspace 范围和依赖 catalog | 增删 package 必须同步 |
@@ -88,7 +92,9 @@ apps/web-antdv-next
 - `types`：公共类型门面；
 - `utils`：路由生成、tree、window、loading 等工具门面。
 
-## 4. `web-antdv-next/src` 模块地图
+## 4. 共享运行时与应用模块地图
+
+下表除 `api/system`、`views/system`、Analytics 和 Demo 外均位于 `packages/effects/backoffice-runtime/src`；平台专属模块只位于 `apps/platform-admin/src`。MERCHANT/AGENT 当前只有各自入口和部署清单，不包含 PLATFORM 页面。
 
 | 目录/文件 | 职责 | 关键入口 |
 | --- | --- | --- |
@@ -181,22 +187,22 @@ views/system/*/list.vue
 
 ```bash
 pnpm install
-pnpm -F @vben/web-antdv-next run dev:platform  # 127.0.0.1:5999
-pnpm -F @vben/web-antdv-next run dev:merchant  # 127.0.0.1:6002
-pnpm -F @vben/web-antdv-next run dev:agent     # 127.0.0.1:6001
+pnpm run dev:platform  # 127.0.0.1:5999
+pnpm run dev:merchant  # 127.0.0.1:6002
+pnpm run dev:agent     # 127.0.0.1:6001
 pnpm run lint
-pnpm -F @vben/web-antdv-next run typecheck
+pnpm --filter @payment/backoffice-runtime --filter '@payment/*-admin' --parallel run typecheck
 pnpm run test:production-safety
-pnpm -F @vben/web-antdv-next run build:all
-node scripts/deploy/verify-three-artifacts.mjs
+pnpm run build:backoffices
+node scripts/deploy/verify-three-artifacts.mjs .
 pnpm test:unit
 ```
 
 ### 生产部署边界
 
-- `.env.platform`、`.env.merchant`、`.env.agent` 固定使用同源 `/api`；生产入口网关必须把每个产物的 `/api` 转发到匹配的账号域 API 根，产品构建不得连接 Vben 公网 Mock。
+- 三应用各自的 `.env.production` 固定账号域、存储命名空间并使用同源 `/api`；生产入口网关必须把每个应用的 `/api` 转发到匹配的账号域 API 根，产品构建不得连接 Vben 公网 Mock。
 - 产品入口默认不加载第三方统计脚本。确需接入分析服务时必须单独完成数据合规、安全评审和显式配置，不能在 HTML 中硬编码。
-- `scripts/deploy/Dockerfile` 只接受 PLATFORM/MERCHANT/AGENT allowlist 变体并只复制对应 `dist/<variant>`；每次单变体构建只清理自身 `dist/<variant>`，保留 sibling 变体。`verify-three-artifacts.mjs` 校验三个产物集合、manifest、namespace、API、禁止 component，并拒绝 manifest 未引用的残留 JS/CSS。Playground 仅用于本地示例，禁止进入产品镜像。
+- `scripts/deploy/Dockerfile` 的 `APP_NAME` 只接受 `platform-admin`、`merchant-admin`、`agent-admin`，并只构建、复制对应应用的 `dist`。`verify-three-artifacts.mjs` 校验三个独立应用的 manifest、namespace、API 和页面边界，并拒绝 manifest 未引用的残留 JS/CSS。Playground 仅用于本地示例，禁止进入产品镜像。
 - 依赖安装 lifecycle 不使用 `npx`/`pnpm dlx`；原 `preinstall: npx only-allow pnpm` 已删除，`production-safety.test.ts` 会扫描 lifecycle 脚本防止回归。手动 `update:deps`/`catalog` 命令不是安装 lifecycle，不得在未评审情况下自动触发。
 - `scripts/deploy/production-safety.test.ts` 守护上述边界；业务 CI 在前端变更时执行 frozen install、全量 lint、产品 app typecheck、单测、production-safety、三产物构建和产物隔离验证。
 
@@ -227,11 +233,9 @@ pnpm -F @vben/playground run test:e2e
 
 - 版本与依赖：`frontend/admin/package.json`、`pnpm-workspace.yaml`。
 - 编辑器配置：仓库根目录 `.vscode`。
-- 应用依赖：`apps/web-antdv-next/package.json`。
-- 启动链：`src/main.ts`、`src/bootstrap.ts`、`src/app.vue`。
-- 路由权限：`src/router/access.ts`、`guard.ts`、`packages/effects/access/src/accessible.ts`。
+- 应用依赖：`apps/{platform-admin,merchant-admin,agent-admin}/package.json`、`packages/effects/backoffice-runtime/package.json`。
+- 启动链：各应用 `src/main.ts` 与 `src/deployment.ts`，共享运行时 `src/start.ts`、`bootstrap.ts`、`app.vue`。
+- 路由权限：共享运行时 `src/router/access.ts`、`guard.ts`、`packages/effects/access/src/accessible.ts`。
 - component 转换：`packages/utils/src/helpers/generate-routes-backend.ts`。
-- i18n：`src/locales/index.ts`、`src/locales/langs/**`。
-- 组件适配：`src/adapter/component/index.ts`、`form.ts`、`vxe-table.ts`。
-- 请求与登录：`src/api/request.ts`、`src/api/error-contract.ts`、`src/store/auth.ts`。
+- i18n、组件适配、请求与登录：`packages/effects/backoffice-runtime/src/{locales,adapter,api,store}`。
 - 示例：`frontend/admin/playground`、`docs/ai-context/playground`。

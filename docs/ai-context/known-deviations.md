@@ -89,7 +89,7 @@ Core `DimensionScope` 只接受批准矩阵，V10 在 `iam_grant_dimension` 以�
 ### 证据
 
 - 前端语言包已经定义 `system.title`、`system.user.title`、`system.role.title`、`system.menu.title`、`system.dept.title`。
-- 前端静态路由 `apps/web-antdv-next/src/router/routes/modules/system.ts` 使用这些 key。
+- 前端静态路由 `apps/platform-admin/src/router/routes/modules/system.ts` 使用这些 key。
 - 当前应用是 `accessMode: 'backend'`，实际菜单来自 `/api/menu/all`。
 - `V2__iam_admin_api.sql` 却把 `meta_json.title` 写成 `System Management`、`User Management` 等英文展示值。
 - `V3__dashboard_menu.sql` 已经采用正确的 `page.dashboard.*` key，说明系统菜单属于实现不一致。
@@ -142,7 +142,7 @@ Spring MVC 的 `NoResourceFoundException` 原先落入兜底异常处理，导�
 
 ## 已解决：前端 lifecycle 脚本可通过 `npx` 脱离锁文件
 
-根 `package.json` 已删除 `preinstall: npx only-allow pnpm`。生产安全测试会扫描 npm lifecycle 脚本并禁止其调用 `npx` 或 `pnpm dlx`；手动维护脚本不等于依赖安装 lifecycle。根目录前端 GitHub Actions 现在依次执行 frozen install、全量 lint、产品 app typecheck、unit tests、production-safety 和 `web-antdv-next` product build。
+根 `package.json` 已删除 `preinstall: npx only-allow pnpm`。生产安全测试会扫描 npm lifecycle 脚本并禁止其调用 `npx` 或 `pnpm dlx`；手动维护脚本不等于依赖安装 lifecycle。根目录前端 GitHub Actions 现在依次执行 frozen install、全量 lint、产品 app typecheck、unit tests、production-safety 和 `platform-admin` product build。
 
 ## P1：细粒度资源范围尚未接入查询链路
 
@@ -170,6 +170,6 @@ MERCHANT/AGENT 第一阶段仅开放登录、退出、当前用户、动态菜�
 
 ## 已定版、未实现：生产 OIDC 与身份撤销边界
 
-[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 已接受三套独立前端应用、三套独立后端服务及生产 OIDC 目标，但当前源码仍是一个 `web-antdv-next` 生成三套产物，且尚无 OIDC BFF、独立 CSRF token、Keycloak back-channel logout、身份版本撤销或 MFA 恢复状态机。IAM-002 仍为 candidate，只能证明六条决策不变量已被 ADR、Rule Card 和决策契约 Judge 同时登记，不能证明运行时行为。
+[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 已接受三套独立前端应用、三套独立后端服务及生产 OIDC 目标。前端现已拆为 `platform-admin`、`merchant-admin`、`agent-admin` 三个独立构建和部署单元，并只复用不含应用专属页面的 `backoffice-runtime`；OIDC BFF、独立 CSRF token、Keycloak back-channel logout、身份版本撤销和 MFA 恢复状态机仍未实现。IAM-002 仍为 candidate；现有决策 Judge 和前端拓扑测试不能证明这些待实现的运行时安全行为。
 
 六条目标边界是：共享 Keycloak 的三 Realm 只构成逻辑隔离；本地 Session 必须同时响应 back-channel logout 与身份版本；OIDC callback 和 server-to-server logout 不依赖 Origin；Cookie 写请求必须使用独立 CSRF token；User 只按精确 `issuer + subject` 映射；MFA 恢复只有在 Credential、Recovery Code、Keycloak Session 和应用 Session 全部撤销后才能完成。任何部分恢复失败保持 `RECOVERY_PENDING` 和登录阻断，通过幂等重试继续收敛。
