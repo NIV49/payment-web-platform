@@ -235,7 +235,7 @@ MUTATIONS = (
     ),
     Mutation(
         "CLIENT_TENANT_SELECTION",
-        "backend/modules/identity/backoffice-web/src/main/java/com/niv/payment/permission/backoffice/BackofficeAuthController.java",
+        "backend/modules/identity/backoffice-web/src/main/java/com/niv/payment/permission/backoffice/BackofficeLocalAuthController.java",
         "record LoginRequest(@NotBlank @Size(max = 100) String username,\n                        @NotBlank @Size(max = 256) String password) { }",
         "record LoginRequest(@NotBlank @Size(max = 100) String username,\n                        @NotBlank @Size(max = 256) String password, Long tenantId) { }",
         Command("backend", MAVEN + (
