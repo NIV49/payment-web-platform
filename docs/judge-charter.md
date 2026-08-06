@@ -73,6 +73,7 @@ Agent 声称“完成”不构成完成。只有指定版本通过 Judge，任�
 - 三端登录入口、接口和缓存必须阻止缺少当前后台授权工作区 ACTIVE TenantMembership 或显式后台授权的跨后台访问；
 - 授权工作区 Tenant 与资源归属 Tenant 必须分开：代理商在自身工作区执行 `RELATED_PARTY_READ` 不要求加入商户 Tenant，而要求显式 Grant、可信代理关系和真实资源归属证据，见 [ADR-0001](adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md)；
 - PLATFORM、MERCHANT、AGENT 使用独立应用 User、可信服务端工作区入口、Cookie、session realm/login type 和缓存命名空间；同域多 Membership 不被禁止，但客户端不得用 `tenantId` 或等价输入选择工作区，服务端无法唯一解析时失败关闭，见 [ADR-0008](adr/0008-isolate-three-backoffice-account-domains-and-sessions.md)；
+- 生产目标使用三套独立前端应用和三套独立后端服务；共享 Keycloak 的三 Realm 只属于逻辑隔离。Cookie 写请求的 CSRF、OIDC callback、back-channel logout、身份版本、`issuer + subject` 映射及 MFA 恢复全撤销边界见 [ADR-0009](adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md)。IAM-002 当前仍是 candidate，运行时实现和正式签名 gate 尚未关闭；
 - 用户、部门、角色、菜单、权限码和数据范围闭环；
 - 部门只负责组织归属和数据范围，不直接分配菜单或权限；
 - 菜单、权限码和完整授权始终通过角色分配；

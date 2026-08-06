@@ -1,0 +1,154 @@
+{
+  "realm": "PLATFORM",
+  "enabled": true,
+  "displayName": "Payment Platform Operations",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "rememberMe": false,
+  "verifyEmail": true,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+  "sslRequired": "external",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 28800,
+  "offlineSessionMaxLifespanEnabled": false,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "passwordPolicy": "length(14) and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1) and notUsername(undefined)",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA256",
+  "otpPolicyDigits": 6,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyPeriod": 30,
+  "eventsEnabled": true,
+  "eventsExpiration": 7776000,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+  "eventsListeners": ["jboss-logging"],
+  "smtpServer": {
+    "host": "${PAYMENT_KEYCLOAK_SMTP_HOST}",
+    "port": "${PAYMENT_KEYCLOAK_SMTP_PORT}",
+    "from": "${PAYMENT_KEYCLOAK_SMTP_FROM}",
+    "fromDisplayName": "Payment Platform",
+    "auth": "false",
+    "starttls": "false",
+    "ssl": "false"
+  },
+  "requiredActions": [
+    {"alias": "VERIFY_PROFILE", "name": "Verify Profile", "providerId": "VERIFY_PROFILE", "enabled": true, "defaultAction": false, "priority": 10},
+    {"alias": "UPDATE_PASSWORD", "name": "Update Password", "providerId": "UPDATE_PASSWORD", "enabled": true, "defaultAction": false, "priority": 20},
+    {"alias": "CONFIGURE_TOTP", "name": "Configure OTP", "providerId": "CONFIGURE_TOTP", "enabled": true, "defaultAction": true, "priority": 30},
+    {"alias": "UPDATE_PROFILE", "name": "Update Profile", "providerId": "UPDATE_PROFILE", "enabled": true, "defaultAction": false, "priority": 40},
+    {"alias": "VERIFY_EMAIL", "name": "Verify Email", "providerId": "VERIFY_EMAIL", "enabled": true, "defaultAction": true, "priority": 50},
+    {"alias": "RECOVERY_AUTHN_CODES", "name": "Recovery Authentication Codes", "providerId": "RECOVERY_AUTHN_CODES", "enabled": true, "defaultAction": true, "priority": 60}
+  ],
+  "authenticatorConfig": [
+    {"alias": "iam-loa-1", "config": {"loa-condition-level": "1", "loa-max-age": "36000"}},
+    {"alias": "iam-loa-2", "config": {"loa-condition-level": "2", "loa-max-age": "0"}}
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "iam-browser-loa2",
+      "description": "IAM-002 browser flow with explicit LoA 1 and LoA 2",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {"authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 10, "userSetupAllowed": false},
+        {"flowAlias": "iam-authentication", "requirement": "ALTERNATIVE", "priority": 20, "userSetupAllowed": false}
+      ]
+    },
+    {
+      "alias": "iam-authentication",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {"flowAlias": "iam-loa1-flow", "requirement": "CONDITIONAL", "priority": 10, "userSetupAllowed": false},
+        {"flowAlias": "iam-loa2-flow", "requirement": "CONDITIONAL", "priority": 20, "userSetupAllowed": false}
+      ]
+    },
+    {
+      "alias": "iam-loa1-flow",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {"authenticator": "conditional-level-of-authentication", "authenticatorConfig": "iam-loa-1", "requirement": "REQUIRED", "priority": 10, "userSetupAllowed": false},
+        {"authenticator": "auth-username-password-form", "requirement": "REQUIRED", "priority": 20, "userSetupAllowed": false}
+      ]
+    },
+    {
+      "alias": "iam-loa2-flow",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {"authenticator": "conditional-level-of-authentication", "authenticatorConfig": "iam-loa-2", "requirement": "REQUIRED", "priority": 10, "userSetupAllowed": false},
+        {"authenticator": "auth-otp-form", "requirement": "ALTERNATIVE", "priority": 20, "userSetupAllowed": false},
+        {"authenticator": "auth-recovery-authn-code-form", "requirement": "ALTERNATIVE", "priority": 30, "userSetupAllowed": false}
+      ]
+    }
+  ],
+  "browserFlow": "iam-browser-loa2",
+  "clients": [
+    {
+      "clientId": "platform-admin-api",
+      "name": "Platform Administration BFF",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${PAYMENT_PLATFORM_OIDC_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": ["${PAYMENT_PLATFORM_OIDC_REDIRECT_URI}"],
+      "webOrigins": ["${PAYMENT_PLATFORM_WEB_ORIGIN}"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "backchannel.logout.url": "${PAYMENT_PLATFORM_OIDC_BACKCHANNEL_LOGOUT_URI}",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "true",
+        "post.logout.redirect.uris": "${PAYMENT_PLATFORM_OIDC_POST_LOGOUT_REDIRECT_URI}"
+      },
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {"name": "platform-client-audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper", "consentRequired": false, "config": {"included.client.audience": "platform-admin-api", "id.token.claim": "true", "access.token.claim": "true"}}
+      ],
+      "defaultClientScopes": ["web-origins", "acr", "profile", "email", "roles"]
+    },
+    {
+      "clientId": "platform-identity-lifecycle",
+      "name": "Platform Identity Lifecycle Relay",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${PAYMENT_PLATFORM_KEYCLOAK_ADMIN_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-platform-identity-lifecycle",
+      "enabled": true,
+      "serviceAccountClientId": "platform-identity-lifecycle",
+      "clientRoles": {"realm-management": ["manage-users", "view-users"]}
+    }
+  ],
+  "identityProviders": []
+}

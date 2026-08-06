@@ -23,13 +23,13 @@
 - 分开判断目标事实和实现事实：已批准的产品需求、ADR 与契约决定“应该建设成什么”；当前源码、测试和配置决定“现在真实运行成什么”。两者冲突必须登记偏差并收敛，不能让已有错误实现自动覆盖项目决策。
 - 框架行为以同版本官方文档和当前源码共同核验；Playground 与开源项目只提供参考模式，不构成项目决策。
 - 当前 Admin 基线是 Node.js `24.16.0`、Vben `5.7.0`、Vue `3.5.40`、`antdv-next` `1.4.5`。
-- Playground 只用于提取模式。复制前必须确认依赖、接口、权限和 UI 组件与 `web-antdv-next` 一致。
+- Playground 只用于提取模式。复制前必须确认依赖、接口、权限和 UI 组件与目标后台应用一致。
 - 不确定的内容明确标为“待确认”，不允许编造框架行为。
 - Judge Charter 和项目 skill 只定义治理流程，不能把待确认业务规则提升为已批准 Rulebook；规则状态仍以产品基线或 accepted ADR 为准。
 
 ## 前端硬规则
 
-- 当前产品应用是 `frontend/admin/apps/web-antdv-next`；UI 控件使用 `antdv-next`，不是 `ant-design-vue`。
+- 当前产品应用是 `frontend/admin/apps/platform-admin`、`merchant-admin`、`agent-admin`；UI 控件使用 `antdv-next`，不是 `ant-design-vue`。
 - 动态菜单 `meta.title` 必须是已有语言包 key，例如 `system.title`；禁止把 `System Management`、`系统管理`这类展示文案写入路由数据。
 - 后端页面 `component` 必须是相对 `src/views`、去掉 `.vue` 的路径，例如 `/system/user/list`；特殊布局只允许前端 `layoutMap` 已注册的名称。
 - 新组件先检查 Vben 组件文档、Playground 示例和应用适配器。业务层不得绕开既有 `VbenForm`、`VbenVxeTable`、权限按钮适配而另建平行体系。

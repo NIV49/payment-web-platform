@@ -5,6 +5,7 @@
   "rulebookPaths": [
     ".agents/payment-modernization-policy.json",
     ".agents/payment-modernization/rules/IAM-001.json",
+    ".agents/payment-modernization/rules/IAM-002.json",
     ".agents/skills/payment-modernization/SKILL.md",
     ".agents/skills/payment-modernization/references/artifact-contracts.md",
     ".agents/skills/payment-modernization/references/judge-gates.md",
@@ -20,6 +21,7 @@
     "docs/adr/0006-redis-protocol-cache-product-boundary.md",
     "docs/adr/0007-separate-production-migrations-from-local-fixtures.md",
     "docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md",
+    "docs/adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md",
     "docs/ai-context/README.md",
     "docs/ai-context/backend/README.md",
     "docs/ai-context/development-workflow.md",
@@ -42,7 +44,8 @@
     "docs/permission-refactor-product-requirements.md"
   ],
   "ruleCardPaths": [
-    ".agents/payment-modernization/rules/IAM-001.json"
+    ".agents/payment-modernization/rules/IAM-001.json",
+    ".agents/payment-modernization/rules/IAM-002.json"
   ],
   "judgePaths": [
     ".agents/payment-modernization-judge-registry.json",
@@ -51,6 +54,8 @@
     ".github/workflows/documentation.yml",
     "scripts/check-doc-decisions.py",
     "scripts/check_iam001_three_backoffice_boundary.py",
+    "scripts/check_iam002_keycloak_realms.py",
+    "scripts/check_iam002_production_identity_boundary.py",
     "scripts/check_modernization_artifacts.py",
     "scripts/check_modernization_evidence.py",
     "scripts/check_project_skills.py",
@@ -63,6 +68,8 @@
     "scripts/tests/test_documentation_python_runtime_security.py",
     "scripts/tests/test_documentation_workflow_security.py",
     "scripts/tests/test_iam001_three_backoffice_boundary.py",
+    "scripts/tests/test_iam002_keycloak_realms.py",
+    "scripts/tests/test_iam002_production_identity_boundary.py",
     "scripts/tests/test_modernization_contracts.py",
     "scripts/tests/test_payment_modernization_governance.py"
   ],

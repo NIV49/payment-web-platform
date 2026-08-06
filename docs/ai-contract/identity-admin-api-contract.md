@@ -1,8 +1,8 @@
 # Identity Admin API Contract
 
 > 状态：已实现的本地原型契约，非生产认证与资金权限方案<br>
-> 适用应用：`frontend/admin/apps/web-antdv-next` 的 PLATFORM/MERCHANT/AGENT 独立产物，以及三个对应后端组合根<br>
-> 复核日期：2026-08-04
+> 适用应用：`frontend/admin/apps/platform-admin`、`merchant-admin`、`agent-admin` 三个独立应用，以及三个对应后端组合根<br>
+> 复核日期：2026-08-05
 > 事实优先级：已接受 ADR / 已批准契约 > 实现；集成测试证明实现现状，但无权把偶然实现升级为架构决策
 
 本文分三层记录：
@@ -11,11 +11,22 @@
 2. **Target Prototype Contract**：本轮原型认可的边界和不变量；
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
-当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。PLATFORM 保留现有 IAM 管理能力，MERCHANT/AGENT 第一阶段仅开放登录、退出、当前用户、动态菜单、权限码和健康检查。外部 IdP、MFA、生产用户邀请/激活/重置、支付数据范围、资金权限和正式可观测性仍未完成。
+当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V27 已落地 IAM-002 数据基础、MFA 恢复状态机、邀请和平台创建租户首位管理员；三端已实施 Session-bound CSRF、逐请求 identityVersion、各自独立的 OIDC BFF、精确映射、Host 复核、签名 back-channel logout、十分钟 LoA 2 step-up，以及 Keycloak MFA 恢复和邀请 relay。三套生产前端已切换为 OIDC 跳转与一次性 handoff 兑换，并各自拥有成员治理页面；本地开发仍保留账密验收入口。三份 Keycloak 26.7.0 Realm bootstrap 已通过全新实例导入和 service-account token 交换；但已有 Realm 声明式更新与漂移检测、真实 SMTP/TOTP/恢复码演练和正式签名 gate 仍未完成，因此 IAM-002 保持 candidate，整体仍是生产 NO-GO。
 
 ## IAM-001 已实现边界
 
 [ADR-0008](../adr/0008-isolate-three-backoffice-account-domains-and-sessions.md) 已关闭 `IAM-GLOBAL-USER-MULTI-TENANT`：PLATFORM、MERCHANT、AGENT 是独立应用账号域，同一个应用 User 不跨域；同域多 Membership 仍允许。V18 为 Tenant/User/Credential/Membership 增加并约束 `account_domain`，迁移遇到跨域或无法归属数据时原子失败。V19 新增三个服务端专用入口 Permission，并为历史及新建角色维护 canonical `system-backoffice-access` Grant；V20 前向收敛 V17 合法存在的同名普通 Grant，保留其授权语义并写入审计、角色/成员版本和 Outbox。三个服务端入口固定账号域和会话边界，严格登录 DTO 只接受 `username` 与 `password`；可信入口无法唯一解析 ACTIVE Membership 时统一认证失败。ACTIVE Membership 还必须经角色取得本端 `backoffice:{platform|merchant|agent}-access` RoleGrant，入口权限不从部门、导航或 Membership 状态推导，也不属于 18 项租户授权编辑面。进程级黑盒通过外部 HTTP、SQL 和 Redis 验证跨端 Cookie/token/cache 复用以及三端 login/logout 的 missing、wrong、cross-root Origin 均失败关闭；12 个 semantic mutant 分别覆盖平台与共享后台 Origin 守卫及其余账号/会话边界。本地技术验证不等于 Rule Card 已获受信 reviewer 正式签署。
+
+## IAM-002 已接受目标、实施中
+
+[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 接受三套独立前端应用、三套独立后端服务和生产 OIDC 身份边界；IAM-002 当前仍是 candidate Rule，已登记决策契约、Keycloak 配置和后端全量验证 Judge，但尚未形成绑定最终 commit 的 closed Capability Slice 与两份独立签名 PASS，不能据此宣称生产实现已经通过。目标契约包含六条不可降级不变量：
+
+1. 三个 Keycloak Realm 只提供逻辑隔离；共享集群仍有共同管理、存储、升级、容量和可用性故障域，不能描述为完整基础设施隔离。
+2. 本地应用 Session 同时接入经过验证的 Keycloak back-channel logout 和逐请求身份版本撤销；任一信号都必须使旧 Session 失效。
+3. Origin 校验只用于适合的浏览器请求。OIDC callback 依赖 state、nonce、PKCE、issuer、audience、code、过期和防重放；server-to-server logout 依赖签名 Logout Token，二者都不依赖 Origin。
+4. 所有改变状态的 Cookie 认证浏览器请求使用与 Session 绑定的独立 CSRF token；SameSite 和 Origin 仅是纵深防御，不能替代 CSRF token。
+5. 应用 User 的唯一身份映射键严格为 canonical `issuer + subject`；email、username、Realm 展示名和 account domain 都不是身份键。
+6. MFA 恢复在成功前必须撤销受影响的 Keycloak Credential、全部 Recovery Code、全部 Keycloak Session 和全部应用 Session；部分失败保持用户阻断、进入可幂等重试的 `RECOVERY_PENDING`，不得报告成功。
 
 ---
 
@@ -24,9 +35,9 @@
 ## 1.1 已实现拓扑
 
 ```text
-web-antdv-next (platform | merchant | agent artifact)
+platform-admin | merchant-admin | agent-admin
   -> /api（withCredentials=true, same origin）
-  -> admin-api | merchant-admin-api | agent-admin-api
+  -> platform-admin-api | merchant-admin-api | agent-admin-api
   -> method/path permission registry
   -> DefaultAuthorizationService
   -> versioned GrantSnapshot in Redis / PostgreSQL fallback
@@ -36,14 +47,14 @@ web-antdv-next (platform | merchant | agent artifact)
 
 当前事实：
 
-- 三个可启动 composition root 分别是 `admin-api`、`merchant-admin-api`、`agent-admin-api`，本地默认端口为 `8080`、`8082`、`8083`；
-- 三个前端构建模式分别输出到 `dist/platform`、`dist/merchant`、`dist/agent`；单变体构建只清理自己的输出目录，各产物只包含本账号域允许且被 Vite manifest 引用的页面 component 与 JS/CSS；
-- `web-antdv-next` 已迁入用户、角色、菜单、部门页面和对应 API；
+- 三个可启动 composition root 分别是 `platform-admin-api`、`merchant-admin-api`、`agent-admin-api`，本地默认端口为 `8080`、`8082`、`8083`；
+- 三个前端应用分别输出到各自的 `dist`；单应用构建只清理自己的输出目录，各产物只包含本账号域允许且被 Vite manifest 引用的页面 component 与 JS/CSS；
+- `platform-admin` 拥有用户、角色、菜单、部门页面和对应 API；`merchant-admin`、`agent-admin` 当前只有隔离入口与共享工作台，不包含 PLATFORM 系统管理页面；
 - 产品路由模式已由应用常量固定为 `mixed`，登录后使用 `/menu/all` 生成业务路由，本地只合并隐藏的 `Profile`；所有部署都递归拒绝与 Root、Authentication、Login、FallbackNotFound、Profile 的 canonical name/path 冲突，同一前端实例 single-flight login 并串行 login/logout，退出和换用户会清空旧身份、权限码和动态路由，同时使在途 session/route generation 失效；登录/退出使用不安装全局 session-recovery 拦截器的专用请求客户端，登录 401 只终止本次登录，不得递归等待 logout；缓存偏好不决定路由模式；
 - 本地 bootstrap 管理员的首选首页为 `/dashboard`；`/user/info` 只返回当前安全菜单树中存在的首选路径，否则回退到第一个可访问叶子，无业务菜单时回退到本地 `/profile`；
 - PLATFORM 保留系统管理 API；MERCHANT/AGENT 只暴露认证、导航、权限码和健康检查，未知及隐藏 API 默认拒绝；
 - Testcontainers/MockMvc 契约和独立三进程黑盒覆盖账号域登录矩阵、Cookie/cache 复用、状态/版本撤权和并发撤权。
-- 三端登录页只注册用户名/密码入口；验证码、二维码、注册、忘记密码和第三方登录路由及可见控件不进入本切片产物。记住用户名的 localStorage key 同时包含账号域 namespace 与 `location.host`，不能在三个入口间复用。
+- 三套生产登录页只提供 OIDC 跳转，不渲染用户名、密码、记住用户名、注册或忘记密码控件；固定 history 路由 `/auth/oidc/callback` 兑换受 Host 绑定的一次性 handoff。本地开发模式才注册用户名/密码表单，其预填 localStorage key 同时包含账号域 namespace 与 `location.host`，不能在三个入口间复用。
 
 ## 1.2 Base URL、CORS 与可信 Origin
 
@@ -67,7 +78,7 @@ Accept-Language = 当前前端语言
 - 本地精确 Origin 分别为 PLATFORM `http://127.0.0.1:5999`、MERCHANT `http://127.0.0.1:6002`、AGENT `http://127.0.0.1:6001`；`6000` 是 Chromium 禁止访问的 unsafe port，不得用于浏览器入口；
 - 允许 GET、POST、PUT、PATCH、DELETE、OPTIONS；
 - `allowCredentials=true`；
-- 允许请求头仅包含 `Content-Type`、`Accept-Language`、`X-Requested-With`；
+- 允许请求头仅包含 `Content-Type`、`Accept-Language`、`X-Requested-With`、`X-CSRF-Token`；
 - 不允许通配 Origin。
 
 所有 POST、PUT、PATCH、DELETE 请求，包括登录和退出，都必须带受信任的 `Origin`。GET、HEAD、OPTIONS 不执行 Origin 写保护。missing、任意错误值和另一后台的 cross-root Origin 都返回 403 且登录不签发 Cookie；被拒绝的跨 Origin 退出不得改变已有会话，只有携带本端精确 Origin 的退出才撤销并清 Cookie。
@@ -98,7 +109,7 @@ Sa-Token 当前配置：
 - 不从 Authorization header 读取；
 - 不从 request body 读取；
 - 不把 token 写入响应 header；
-- Session 保存服务端可信的 accountDomain、userId、membershipId、tenantId、departmentId、permissionVersion、sessionVersion。
+- Session 保存服务端可信的 accountDomain、userId、membershipId、tenantId、departmentId、permissionVersion、sessionVersion、identityVersion 和 requestProof；外部 Session 另保存 entryHost、issuer、subject、sid、authTime 与 acr。
 
 上述属性由 `application.yml` 交给 Sa-Token Boot auto-configuration，在 ApplicationContext 创建期完成绑定；不存在等 Web Server 已接受请求后再修改全局安全配置的 `ApplicationRunner`。集成测试在 context 中核对最终 `SaTokenConfig` 值并断言该 runner bean 不存在。
 
@@ -139,14 +150,15 @@ tenantId
 departmentId
 permissionVersion
 sessionVersion
-stepUpVerified
+identityVersion
+stepUpAt
 ```
 
 约束：
 
 - tenantId、membershipId、operatorId 不从浏览器 body/query/header 获取；
 - 所有管理查询都强制使用 Session tenantId；
-- Session bridge 先要求 session accountDomain 与 composition root 完全一致，再以 accountDomain + tenantId + membershipId + userId 单次精确查询当前 permissionVersion 与 sessionVersion，并校验 Tenant、User、Credential、Membership 全部 `ACTIVE`、Credential hash 受 V13 约束满足统一 BCrypt 格式/成本策略；任一域或版本失效时，包含 `/auth/codes` 在内的下一个已认证请求立即返回 401 `SESSION_INVALID`，服务端注销当前会话并清除 Cookie；Admin 写事务还会在锁后复核两个版本；
+- Session bridge 先要求 session accountDomain 与 composition root 完全一致，再以 accountDomain + tenantId + membershipId + userId 单次精确查询当前 permissionVersion、sessionVersion、identityVersion 和身份映射，并校验 Tenant、User、Credential、Membership 全部 `ACTIVE`。本地会话要求可登录 BCrypt 摘要；外部会话允许空摘要但逐请求精确匹配 issuer+subject，HTTP PEP 另复核 entryHost。任一域、映射或版本失效时，下一个已认证请求立即返回 401 `SESSION_INVALID` 并清除 Cookie；Admin 写事务仍在锁后复核 actor 版本；
 - Membership 更新、状态变化和终止会递增 Membership 的 sessionVersion 与 permissionVersion；
 - 角色更新、状态变化和删除会递增该角色成员的 permissionVersion；
 - 权限码从当前租户、当前 Membership 的有效 RoleGrant 读取。
@@ -183,7 +195,7 @@ stepUpVerified
 | 400 | 40001 | `INVALID_REQUEST` | DTO 校验、JSON、ID、时间、状态等非法 |
 | 401 | 40101 | `INVALID_CREDENTIALS` | 用户名或密码错误 |
 | 401 | 40101 | `AUTH_REQUIRED` | 无有效 Sa-Token 会话 |
-| 401 | 40102 | `SESSION_INVALID` | sessionVersion/permissionVersion 失效、actor 主体状态变化、密码不可用或 Session 不合法；服务端注销并清 Cookie |
+| 401 | 40102 | `SESSION_INVALID` | permission/session/identity version 失效、issuer+subject/Host 漂移、actor 主体状态变化、本地密码不可用或 Session 不合法；服务端注销并清 Cookie |
 | 403 | 40301 | `PERMISSION_DENIED` | 缺少动作权限、Origin 不可信或 API method/path 未登记 |
 | 404 | 40401 | `RESOURCE_NOT_FOUND` | 当前租户下目标资源不存在，或非 API 资源未命中 |
 | 409 | 40901 | `DATA_CONFLICT` | 数据依赖、业务不变量或数据库唯一约束冲突 |
@@ -265,7 +277,7 @@ offset 使用 long 计算；当 `(page - 1) * pageSize` 超过当前仓储 int o
 
 ## 1.7 已实现认证和导航接口
 
-### POST `/auth/login`
+### POST `/auth/login`（仅 local profile）
 
 Request：
 
@@ -334,7 +346,7 @@ Response data：
 
 ### GET `/menu/all`
 
-返回当前 Membership 的有效 Role 对应菜单树。`web-antdv-next` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。该 Profile 仅只读展示 `/user/info` 已校验的姓名、登录账号、用户 ID 和角色；密码修改、MFA、手机号、邮箱和通知偏好尚无后端契约，页面不得展示演示状态或伪成功操作。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。存储的 redirect 只有在目标仍存在于本次安全菜单树时才保留，否则父节点改为重定向到第一个可访问子节点；没有可访问子节点则不返回 redirect。后端路由若与静态核心、fallback 或本地动态路由的 canonical name/path 冲突，所有部署都在合并前 fail closed；新的登录尝试和退出先使旧 session/route generation 失效并清空旧身份、权限码和动态路由，延迟返回的 `/user/info`、`/auth/codes` 或菜单不能再写 store/Router，`/auth/login` 始终解析到原始核心 Login。
+返回当前 Membership 的有效 Role 对应菜单树。`platform-admin` 已使用固定 mixed 路由模式：后端拥有业务路由，本地只合并隐藏的 `Profile`。该 Profile 仅只读展示 `/user/info` 已校验的姓名、登录账号、用户 ID 和角色；密码修改、MFA、手机号、邮箱和通知偏好尚无后端契约，页面不得展示演示状态或伪成功操作。响应只包含 ACTIVE DIRECTORY/PAGE/EMBEDDED/LINK，不包含 BUTTON。直接分配的路由节点会补齐同 tenant 且 ACTIVE 的显式祖先，不带入 sibling；祖先缺失、禁用、不是可路由类型或成环时，对应直接分配分支 fail closed。存储的 redirect 只有在目标仍存在于本次安全菜单树时才保留，否则父节点改为重定向到第一个可访问子节点；没有可访问子节点则不返回 redirect。后端路由若与静态核心、fallback 或本地动态路由的 canonical name/path 冲突，所有部署都在合并前 fail closed；新的登录尝试和退出先使旧 session/route generation 失效并清空旧身份、权限码和动态路由，延迟返回的 `/user/info`、`/auth/codes` 或菜单不能再写 store/Router，`/auth/login` 始终解析到原始核心 Login。
 
 当前动态菜单来源是 Role -> role_menu -> Menu；按钮权限仍由 `/auth/codes` 决定。菜单展示关系不等于业务授权。
 
@@ -811,13 +823,17 @@ V17__add_administration_tombstones.sql
 V18__isolate_backoffice_account_domains.sql
 V19__protect_backoffice_access_grants.sql
 V20__converge_reserved_backoffice_grant_keys.sql
+V21__add_production_identity_foundation.sql
+V22__build_account_domain_username_index.sql
+V23__attach_account_domain_username_constraint.sql
+V24__add_mfa_recovery_state_machine.sql
 ```
 
 语义：
 
 - `local` profile 启用自动迁移，但不启用 `baseline-on-migrate`；
 - 已经手工执行 V1、但没有 `flyway_schema_history` 的旧开发卷不属于升级契约；需要的数据先备份，然后从空库重建；
-- 全新空库正常执行 V1 到 V20；
+- 全新空库正常执行 V1 到 V24；
 - V2/V3 的历史固定身份和菜单只为兼容旧迁移链存在；V8 只在预留 footprint 仍是精确 fixture 时删除它，其他租户、用户、审计、Outbox 和扩展权限原样保留；
 - V3 为预置平台管理员补充 Dashboard、Analytics 和 Workspace 动态路由，保证 `/dashboard` 登录首页可用；
 - V4 把系统菜单 title 修正为 i18n key，并清除一级目录旧 `BasicLayout`；
@@ -830,6 +846,9 @@ V20__converge_reserved_backoffice_grant_keys.sql
 - V18 前向增加三账号域约束。升级前必须执行 `psql "$PAYMENT_DB_URL" -v ON_ERROR_STOP=1 -f backend/scripts/iam001-account-domain-preflight.sql`，结果必须为空；任何 `NO_MEMBERSHIP`、`CROSS_ACCOUNT_DOMAIN` 或无法唯一归属的主体都由人工拆分账号后重试，不复制凭证、不猜测审计归属；
 - V19 新增三条服务端专用入口 Permission，按 Tenant 账号域给每个未删除历史角色回填唯一 `system-backoffice-access`、`TENANT/TENANT_ALL` Grant，递增受影响角色与 Membership 权限版本，并写迁移审计和 Outbox。新建角色在同一事务中得到相同 Grant；角色 Grant/configuration 替换只管理既有 18 项权限，不能删除或伪造入口 Grant；
 - V20 不回写 V18/V19：它把历史非 portal Permission 占用的保留 key 确定性改为 `legacy-backoffice-access-{grantId}`，不改变 Permission、状态、维度、Target 或有效期；受影响角色和 Membership 版本递增，并写逐 Grant 审计及权限版本 Outbox。portal 存量畸形，或同角色任意 Permission 已占用目标 key 时整次迁移回滚。升级后每个未墓碑角色恰有一个 canonical portal 保留 key；读取侧使用完整 portal inventory，并在普通 Permission 占保留 key、重复 grant key、重复 Permission 或额外 disabled portal Grant 时返回 `editable=false`，禁止 PUT 静默覆盖。V20 是前向数据迁移，失败恢复依赖迁移前备份或修正异常存量后重试，不提供逆向脚本；
+- V21 增加 `iam_user.identity_version`、IdP provisioning 状态、可信 Host 登记和独立身份生命周期 Outbox/relay state。User、Tenant 和 realm 使用组合外键保持同域；Outbox 没有 profile 或 secret payload 字段，只保存 user、tenant、realm、操作、幂等键和时间。V1 的 `(idp_issuer,idp_subject)` 唯一约束不变；
+- V22 使用 sidecar `executeInTransaction=false` 和 `CREATE UNIQUE INDEX CONCURRENTLY` 建立 `(account_domain,username)` 唯一索引，所有 Flyway 执行端必须关闭 PostgreSQL transactional advisory lock。V23 把该索引附加为约束。旧全局 username 唯一约束仍保留；旧实例清零和双版本验证通过前不得执行 contract 删除；
+- V22 失败可能留下同名 invalid index；重试前必须核验 `pg_index.indisvalid`，只删除精确无效索引，不能用 `repair` 掩盖未完成 DDL；
 - `LocalIdentityFixtureBootstrap` 只在 `local` profile、Flyway 完成后事务性执行 `db/local/iam-local-bootstrap.sql` 并写入 BCrypt 密码；最终 fixture 对预置菜单只保留预留 ID、tenant、`system_managed` 所有权和活动 authCode 歧义校验，允许字段编辑与墓碑在重启后保留。身份、系统角色、Grant、role-menu 固定关系、物理缺失、所有权漂移、密码不匹配或预留权限码第二个活动绑定仍拒绝启动；MERCHANT/AGENT 预置角色必须 ACTIVE、未墓碑，其入口 Grant 必须与真实登录查询一样是无有效期、单一 `TENANT/TENANT_ALL`、无 Target 且没有其他活动 portal Grant，否则 bootstrap 原子回滚；
 - 任何环境的迁移都不得依赖 `baseline-on-migrate=true` 自动猜测历史状态。
 
@@ -882,23 +901,157 @@ V20__converge_reserved_backoffice_grant_keys.sql
 | Capability | Prototype status | Production meaning |
 | --- | --- | --- |
 | username/password login | BCrypt + 统一 hash 格式/成本策略 + Redis 原子 client/client+username 双桶已实现 | 仅本地过渡凭证，不替代 IdP/MFA，也不代表分布式攻击防护已完成 |
-| Cookie session | Sa-Token/Redis 已实现；安全配置在 context 创建期绑定 | 尚需部署拓扑、密钥、TTL、故障和撤权演练 |
+| Cookie session | Sa-Token/Redis、逐请求 identityVersion/issuer+subject/Host 复核和独立 CSRF 已实现 | 尚需真实部署拓扑、密钥、TTL、故障和跨 Realm 撤权演练 |
 | RBAC management | 用户/角色/菜单/部门与受限 RoleGrant API 已实现 | 仅平台租户、本轮 19 个当前管理权限；V15 另保留 2 个不进入新授权面的旧码；角色授权仅支持 18 个精确目录权限 |
 | Permission load | HTTP PEP + 版本化 Redis GrantSnapshot 已接通 | RoleGrant 写入仍需正式审批、部署与恢复演练 |
 | Cross-tenant model | `SAME_TENANT_ONLY` 默认；只有受控 `READ/VIEW` action 可使用 `RELATED_PARTY_READ`，Core 与 V12 CHECK 双重约束 | 没有 Party/Relationship adapter，运行时仍 fail closed |
 | Dynamic menu | 固定 mixed mode、仅本地 Profile、递归拒绝全部核心/fallback/local canonical 冲突、退出/换用户清旧路由、排除 BUTTON、补 ACTIVE 祖先和外链协议校验已实现 | Menu 仍只是 Presentation，外部嵌入还需 CSP/域白名单评审 |
 | Audit | HTTP 与成功写审计共享 traceId | 未完成 before/after、权限拒绝、登录失败、检索和告警 |
-| Flyway | V1→V20 fresh/upgrade 可运行；V20 覆盖真实 V17 保留 key 冲突的保语义收敛及异常存量原子阻断 | 旧 manage 码的 contract 迁移、生产 migration 审批和备份恢复演练未完成；已执行迁移只能前向修复 |
+| Flyway | V1→V24 fresh/upgrade 可运行；V21-V23 覆盖身份基础、跨域原子约束、事件不可变和用户名 expand，V24 增加 fail-closed MFA 恢复状态机 | 旧 username 约束 contract、生产 migration Job/审批和备份恢复演练未完成；V22 非事务失败需检查 invalid index |
+| 三后台 OIDC BFF 与前端 | PLATFORM、MERCHANT、AGENT 三个独立组合根均已显式装配各自 client credential/config、Authorization Code + PKCE、state/nonce、精确 issuer/audience/ACR、Host 绑定一次性 handoff、RP logout、签名 back-channel logout、十分钟 step-up 和账号域 Session 索引，默认关闭；三套生产前端只提供 OIDC 跳转和 handoff 兑换 | 三 Realm bootstrap 已在全新 Keycloak 26.7.0 实例导入并通过三个 lifecycle token exchange；仍缺已有 Realm 声明式更新/漂移检测、完整浏览器登录和故障演练 |
+| MFA 恢复 | V24 + relay 按 Credential、Recovery Code、Keycloak Session、应用 Session 顺序幂等撤销；请求即推进 identity/session version 并阻断登录，四步完成前保持 `RECOVERY_PENDING` | 尚缺生产监控告警、真实 TOTP/恢复码端到端演练、邀请 UI 和 break-glass 审批，不得视为生产闭环 |
 
-## 2.3 明确不在本轮实现
+## 2.3 三后台 OIDC BFF 契约
 
-- 外部 IdP/OIDC；
-- MFA、step-up、MFA 重置审批；
-- 生产级的新建用户密码激活、邀请、首次改密、忘记密码和管理员重置；
+PLATFORM、MERCHANT、AGENT 三个组合根分别固定自己的 AccountDomain、Realm issuer、confidential client、回调地址、client credential 环境变量和 Session/Redis namespace，不允许通过请求参数选择。生产 profile 必须满足 `payment.identity.local-login-enabled=false` 且 `payment.oidc.enabled=true`；`local` profile 必须恰好相反。两种认证模式同时开启、同时关闭，或在非 `local` profile 开启密码入口时，应用启动失败。`POST /api/auth/login` 只由 `local` profile 注册。
+
+### GET `/auth/oidc/start`
+
+- 不接受 `tenantId`、realm、portal、returnHost 或 redirect URI 参数；
+- 服务端只使用请求的 canonical Host 查询 ACTIVE `iam_tenant_entry_host`，并复核 Tenant 状态和组合根账号域；
+- 成功返回 `302 Location` 到本服务固定 Keycloak Realm/client 的 authorization endpoint；
+- authorization request 固定包含 `response_type=code`、`scope=openid`、S256 PKCE、随机 state/nonce、目标 ACR 和 essential `acr/auth_time` claims；
+- state 对应的 Host、tenant、nonce 和 code verifier 只存服务端账号域 Redis namespace，默认 TTL 5 分钟。
+
+### GET `/auth/oidc/callback`
+
+- 固定参数为 `code`、`state` 或 IdP `error`；不读取也不校验 Origin，因为这是 OIDC protocol callback；
+- state 在 token exchange 前原子单次消费，失败和 IdP error 同样不能重放；
+- confidential client 在服务端 token endpoint 兑换 code，并发送原 PKCE verifier；
+- ID Token 必须通过固定 JWKS 的 RS256 签名及时间校验，并精确匹配 issuer、client audience/azp、nonce、required ACR、subject、auth_time 和 sid；
+- 成功只生成默认 60 秒、单次消费、绑定目标 Host 的 opaque handoff，并以 `303` 重定向到 `https://{entryHost}/auth/oidc/callback?handoff=...`；不签发应用 Cookie。
+
+### POST `/auth/oidc/handoff`
+
+请求严格为：
+
+```json
+{ "handoff": "opaque-value" }
+```
+
+该浏览器端点要求目标入口的可信 Origin，并再次以请求 Host 复核 handoff；错误 Host 的尝试也会消费 handoff。成功后才以 `issuer + subject + tenant entry` 精确查找已邀请、ACTIVE、`PROVISIONED` 且持有本端 canonical portal Grant 的 User/Membership，签发本端 HttpOnly Cookie，并只返回 `cookie-session` marker。邮箱和 username 不参与身份映射。
+
+### POST `/auth/oidc/step-up/start` 与 `/auth/oidc/step-up/handoff`
+
+两个端点都要求有效 Cookie Session、可信 Origin 和 `X-CSRF-Token`。start 从当前 Session 固定 User、Membership、tenant、Host、issuer、subject 与应用 Session 摘要，发起包含 `prompt=login`、`max_age=0`、PKCE、nonce 和目标 ACR 的独立事务。共用 OIDC callback 不依赖 Origin，但 step-up state 使用独立 namespace；返回身份必须与原 `issuer + subject` 完全相同，`auth_time` 不得早于事务开始容差。handoff 错 Host、错应用 Session 或任一主体字段变化都会单次消费并失败。成功只记录 `stepUpAt`，不改变 User、Membership、tenant、Host 或当前登录身份。
+
+`AuthorizationSubject.stepUpVerified` 不信任一个永久 boolean；Session bridge 在每次请求中以 UTC 时钟重算 `stepUpAt` 是否在最近 10 分钟内，过期、缺失或未来时间均为 false。
+
+### POST `/auth/logout`
+
+要求有效本端 Cookie Session、可信 Origin 和 `X-CSRF-Token`。应用先清除本地 Session，再返回标准 RP-Initiated Logout URL：
+
+```json
+{
+  "code": 0,
+  "data": { "logoutUrl": "https://idp.example/realms/{fixed-realm}/protocol/openid-connect/logout?..." }
+}
+```
+
+ID Token 只保存在服务端 Session，用于标准 `id_token_hint`，不进入 localStorage/sessionStorage。前端必须导航至返回 URL 才完成 Realm logout。
+
+### GET `/auth/csrf`
+
+要求有效 Cookie Session。成功返回 `{ requestProof }`；该值由服务端随机生成并绑定当前 Session，前端只在内存保存。所有 Cookie 认证的 POST/PUT/PATCH/DELETE 都必须在可信 Origin 之外携带精确 `X-CSRF-Token`。登录和 OIDC handoff 没有既有 Cookie 授权上下文，不要求该值；SameSite 不能替代该校验。
+
+### POST `/auth/oidc/backchannel-logout`
+
+仅接受 `application/x-www-form-urlencoded` 的 `logout_token` 字段。端点不校验 Origin 或浏览器 CSRF；它使用固定 Realm JWKS 验证 RS256 签名、精确 issuer、client audience、iat 最大时效、jti、back-channel event、可选 `typ=logout+jwt`，拒绝 nonce，并要求 subject 或 sid。sid 存在时只查 `issuer + sid`，否则查 `issuer + subject`；映射到的 membership 应用 Session 全部撤销。Redis key 只保存复合值摘要，event 使用 owner CAS 短租约和 24 小时完成标记；重放成功幂等返回 204，非法协议消息返回 400 `OIDC_LOGOUT_REJECTED`。
+
+OIDC 认证失败统一返回 HTTP 401、code `40103`、error `OIDC_LOGIN_REJECTED`，并与其他 API 一样返回 `traceId`；不披露 User、Membership、Host 注册状态或具体 token claim。
+
+### POST `/identity/mfa-recoveries`
+
+要求有效 Cookie Session、可信 Origin、`X-CSRF-Token` 和最近十分钟内的 LoA 2 step-up。请求者必须是当前可信 tenant 内 ACTIVE system role 的管理员，目标必须是同一 tenant、同一账号域的另一位 ACTIVE、`PROVISIONED` OIDC User；客户端不能提交 tenant、Realm、issuer、subject 或 Host。
+
+Request：
+
+```json
+{
+  "targetMembershipId": "22612",
+  "idempotencyKey": "8ce154cf-4f13-4aac-b0de-74922513a14f"
+}
+```
+
+成功返回 string `recoveryId` 与 `RECOVERY_PENDING` 或幂等重放所得状态。首次请求在单个 PostgreSQL 事务中写 append-only lifecycle Outbox 和恢复状态，立即把目标 User 置为 `RECOVERY_PENDING`、禁用应用 credential 状态，并推进 identityVersion 及全部未终止 Membership 的 sessionVersion。relay 以租约和 `SKIP LOCKED` 逐步执行：删除 Keycloak OTP/WebAuthn credential 并要求重新配置 TOTP、删除全部恢复码、注销 Keycloak User Session、注销全部应用 Membership Session。只有四个完成时间都落库后才可标记 `COMPLETED` 并恢复 `PROVISIONED`；部分失败只记录有界错误码并退避重试，不保存 IdP 响应体、邮箱、密码、TOTP Secret、恢复码或邀请 Token。
+
+该端点当前使用 system-role + recent step-up 的服务端策略，不虚构一个未进入权限目录的 permission code；审计 reason 为 `SYSTEM_ADMIN_STEP_UP`。
+
+## 2.4 身份邀请与租户首管契约
+
+以下接口都使用 Cookie Session。GET 要求服务端确认当前 Membership 持有当前 tenant 的 ACTIVE system role；POST 还要求可信 Origin、`X-CSRF-Token` 和最近十分钟内的 LoA 2 step-up。浏览器不能提交 `tenantId`、`accountDomain`、Realm、issuer、subject、Host 选择器或 returnHost；当前租户和账号域来自逐请求校验后的 Session，目标 Realm 由组合根或服务端 tenant type 映射确定。
+
+### GET `/identity/members`
+
+接受 `page`（从 1 开始）和 `pageSize`（1..100），返回 `items/total`。items 是当前可信 tenant 内未终止成员的最小治理视图：string `membershipId`、`displayName`、Membership status、User identity status、IdP provisioning status、`systemAdministrator` 和只用于禁止自恢复的 `currentMembership`。不返回登录邮箱、Keycloak subject、issuer、Credential、Recovery Code 或完整角色/权限明细。该列表用于同租户管理员选择 MFA 恢复目标；服务端仍在恢复事务中重新校验目标状态和“请求者与目标不是同一 User”。
+
+### GET `/identity/invitation-roles`
+
+只返回当前可信 tenant 内 `ACTIVE`、`assignable=true`、`systemRole=false` 且未删除的普通角色，ID 统一为 string。系统角色、不可委派角色和其他 tenant 的角色永不返回。
+
+### POST `/identity/invitations`
+
+Request：
+
+```json
+{
+  "email": "member@example.test",
+  "displayName": "Merchant Member",
+  "roleIds": ["22620"],
+  "idempotencyKey": "8ce154cf-4f13-4aac-b0de-74922513a14f"
+}
+```
+
+请求者必须是当前可信 tenant 的 ACTIVE system administrator。`roleIds` 非空、去重，且每项都必须是当前 tenant 的普通可委派角色；即使请求者是 system administrator，该接口也不能授予 system role。服务端先在 PostgreSQL 中以幂等键保留已校验的 tenant、actor 和角色边界，再在组合根固定 Realm 中精确解析身份：同 Realm 邮箱尚不存在时创建 disabled Keycloak User；恰好命中一个既有 ACTIVE Keycloak User 时复用其 `issuer + subject` 以保留同域多 Membership；歧义、禁用或跨 Realm 命中均失败关闭。邮箱只用于 Keycloak 侧查找和投递，不是应用身份键。应用 User 仍只以 canonical `issuer + subject` 建立映射；新身份 username 使用不含邮箱的 opaque 邀请标识，既有身份沿用其当前 opaque username。
+
+登录邮箱只在当前请求内存和发往 Keycloak 的管理请求中短暂存在。应用数据库、Outbox、relay 状态、日志和审计不得保存邮箱明文、邀请 Token、密码、TOTP Secret 或 Recovery Code。Keycloak 保存邮箱、生成 action Token，并发送包含 `VERIFY_EMAIL`、`UPDATE_PASSWORD`、`CONFIGURE_TOTP` 的验证邮件。通用 identity lifecycle Outbox 仍只保存 user、tenant、Realm、操作类型、幂等键和时间。
+
+数据库预留、Keycloak 身份解析、本地 User/Membership 绑定及 lifecycle relay 均可按同一幂等键重试。新身份的 relay 成功启用 Keycloak User 并提交 action email 后，才把应用 User、Credential 和 Membership 推进到可登录状态；既有 ACTIVE 身份不重置密码或 MFA，也不重复执行身份验证 action，只激活新增 Membership。任一步失败都保持新增 Membership 未激活并退避重试。成功返回 string `invitationId`、string `membershipId` 和 `PROVISION_PENDING` 或幂等重放所得状态。
+
+### POST `/identity/tenant-bootstraps`
+
+该端点只存在于 PLATFORM API。请求者必须是 PLATFORM tenant 的 ACTIVE system administrator，并完成 recent LoA 2 step-up。
+
+Request：
+
+```json
+{
+  "tenantCode": "merchant-acme",
+  "tenantName": "Acme Merchant",
+  "tenantType": "DIRECT_MERCHANT",
+  "entryHost": "acme.merchant.example.test",
+  "firstAdministrator": {
+    "email": "admin@example.test",
+    "displayName": "Acme Administrator"
+  },
+  "idempotencyKey": "8ce154cf-4f13-4aac-b0de-74922513a14f"
+}
+```
+
+`tenantType` 只允许 `AGENT`、`DIRECT_MERCHANT`、`INDIRECT_MERCHANT`，服务端据此固定 AGENT 或 MERCHANT 账号域和 Realm；客户端不能另传账号域。单个事务以 `DISABLED` 状态创建 tenant 和唯一 entry Host，同时创建一个不可委派 system role、一个普通可委派 member role、两者的 canonical `system-backoffice-access` Grant，以及首位管理员邀请预留。首位管理员只能由该平台端点取得 system role；普通 `/identity/invitations` 永远不能授予该角色。后续 Keycloak provisioning 使用目标 Realm 的独立 confidential admin client，并沿用上述 disabled-first、可重试、无明文邮箱持久化流程；首管 relay 完成后才原子激活 tenant 和 entry Host。
+
+首管或普通成员的 MFA 丢失继续使用 `/identity/mfa-recoveries`：必须由另一位同 tenant、同账号域管理员 recent step-up 后发起。当前单运维人员条件下，最后管理员和应急恢复接口保持禁用；不得把同一操作者、自动任务或 Codex 伪装成第二批准人。未来启用 break-glass 必须另行批准双人审批、审计和演练契约。
+
+## 2.5 当前尚未实现
+
+- 已存在 Realm 的声明式更新、漂移检测、生产密钥轮换和完整三 Realm 浏览器联调；bootstrap import 对已有 Realm 使用 `IGNORE_EXISTING`，不能承担配置更新；
+- ENABLE/DISABLE/DEPROVISION 生命周期 relay，以及邀请/首管流程的生产告警和真实邮件演练；
+- MFA 恢复的生产告警、TOTP/恢复码端到端演练和 break-glass 审批；
+- 忘记密码、管理员密码重置和最后管理员 break-glass；新建身份的密码设置、邮箱验证和 TOTP 注册由 Keycloak action email 承担；
 - 超出本文精确目录、数据维度或审批规则的通用 RoleGrant 管理；
 - 商户、市场、渠道、销售客户关系和历史代理关系数据范围 Provider；
 - 可信审批 workflow evidence、资源指纹、金额/币种绑定、过期和防重放；
-- Outbox relay、投递、重试、Inbox、重放和告警；
+- 除 MFA 恢复专用 relay 外的通用 Outbox relay、投递、重试、Inbox、重放和告警；
 - 订单、导出、资金查看或资金写权限；
 - Payment/Ledger 状态机、金额精度、幂等、账本分录、调账/对账与 API/事件可执行规格；
 - payout、withdrawal、refund、ledger 等任何资金权限；
@@ -908,7 +1061,7 @@ V20__converge_reserved_backoffice_grant_keys.sql
 
 # 3. Compatibility Plan
 
-## 3.1 已完成的 Playground -> web-antdv-next 迁移
+## 3.1 已完成的 Playground -> platform-admin 迁移
 
 已完成：
 
@@ -984,8 +1137,8 @@ RoleGrant(permissionCode + dimensions + constraints)
 
 以下任一项未完成，不得把当前原型标记为生产身份与支付权限系统：
 
-1. 外部 IdP/OIDC、密码策略和身份生命周期未定版；
-2. MFA、step-up、MFA 重置、激活会话和旧会话撤销流程未实现；
+1. 三 Realm bootstrap 只在全新 Keycloak 26.7.0 验证实例完成导入和 service-account token 交换；真实用户浏览器流、已有 Realm 更新/漂移、生产数据库拓扑、密钥轮换和故障恢复尚未联调和演练；
+2. MFA 恢复四步编排已实现并由数据库/relay 测试覆盖，但真实 TOTP/恢复码、告警与 break-glass 演练未完成；
 3. 新建用户没有生产可用的密码激活、邀请、首次改密或管理员重置流程；本地统一口令及重置能力不得用于生产；
 4. Cookie Secure 的生产强制、代理拓扑、TTL、Redis 故障和会话撤权未演练；
 5. CSRF/Origin/CORS 策略尚未经过真实部署安全测试；
@@ -1025,8 +1178,8 @@ RoleGrant(permissionCode + dimensions + constraints)
 
 # 6. Current acceptance checklist
 
-- `admin-api`、`merchant-admin-api`、`agent-admin-api` 可以作为三个独立 Spring Boot 应用启动；
-- 前端四个系统管理模块已迁入 `web-antdv-next`；
+- `platform-admin-api`、`merchant-admin-api`、`agent-admin-api` 可以作为三个独立 Spring Boot 应用启动；
+- 前端四个系统管理模块已迁入 `platform-admin`；
 - 三个前端模式生成独立 PLATFORM/MERCHANT/AGENT 产物，并使用独立 title、storage namespace、component allowlist；
 - 三端登录设置各自的 `PAYMENT_*_SESSION` HttpOnly、SameSite=Strict Cookie 和独立 login type；
 - 登录严格只接受 username/password，拒绝 `tenantId`；跨账号域账号和跨端 Cookie/cache 复用失败关闭；

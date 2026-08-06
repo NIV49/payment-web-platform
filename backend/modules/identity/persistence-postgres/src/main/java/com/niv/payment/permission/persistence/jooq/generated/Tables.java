@@ -9,9 +9,14 @@ import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuthentic
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamDepartment;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamGrantDimension;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamGrantTarget;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitation;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitationRole;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleOutbox;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleRelayState;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMenu;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermission;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermissionChangeOutbox;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermissionChangeRelayState;
@@ -19,6 +24,7 @@ import com.niv.payment.permission.persistence.jooq.generated.tables.IamRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleGrant;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleMenu;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamTenant;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamTenantEntryHost;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamUser;
 
 
@@ -56,6 +62,29 @@ public class Tables {
     public static final IamGrantTarget IAM_GRANT_TARGET = IamGrantTarget.IAM_GRANT_TARGET;
 
     /**
+     * Durable invitation orchestration without login email, invitation token,
+     * password, TOTP secret, or recovery code
+     */
+    public static final IamIdentityInvitation IAM_IDENTITY_INVITATION = IamIdentityInvitation.IAM_IDENTITY_INVITATION;
+
+    /**
+     * Roles frozen at invitation reservation; MEMBER invitations may reference
+     * only ordinary assignable roles
+     */
+    public static final IamIdentityInvitationRole IAM_IDENTITY_INVITATION_ROLE = IamIdentityInvitationRole.IAM_IDENTITY_INVITATION_ROLE;
+
+    /**
+     * Append-only identity lifecycle commands; never stores profile data or
+     * authentication secrets
+     */
+    public static final IamIdentityLifecycleOutbox IAM_IDENTITY_LIFECYCLE_OUTBOX = IamIdentityLifecycleOutbox.IAM_IDENTITY_LIFECYCLE_OUTBOX;
+
+    /**
+     * Mutable retry and publication state for identity lifecycle commands
+     */
+    public static final IamIdentityLifecycleRelayState IAM_IDENTITY_LIFECYCLE_RELAY_STATE = IamIdentityLifecycleRelayState.IAM_IDENTITY_LIFECYCLE_RELAY_STATE;
+
+    /**
      * The table <code>public.iam_membership</code>.
      */
     public static final IamMembership IAM_MEMBERSHIP = IamMembership.IAM_MEMBERSHIP;
@@ -69,6 +98,12 @@ public class Tables {
      * The table <code>public.iam_menu</code>.
      */
     public static final IamMenu IAM_MENU = IamMenu.IAM_MENU;
+
+    /**
+     * Retryable MFA recovery state; completion requires all Keycloak and
+     * application revocations
+     */
+    public static final IamMfaRecovery IAM_MFA_RECOVERY = IamMfaRecovery.IAM_MFA_RECOVERY;
 
     /**
      * Global permission catalog. Tenant, administrator, role, grant, and menu
@@ -107,6 +142,11 @@ public class Tables {
      * The table <code>public.iam_tenant</code>.
      */
     public static final IamTenant IAM_TENANT = IamTenant.IAM_TENANT;
+
+    /**
+     * Server-controlled canonical Host to account-domain and tenant mapping
+     */
+    public static final IamTenantEntryHost IAM_TENANT_ENTRY_HOST = IamTenantEntryHost.IAM_TENANT_ENTRY_HOST;
 
     /**
      * The table <code>public.iam_user</code>.

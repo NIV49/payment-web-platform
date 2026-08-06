@@ -37,6 +37,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -49,6 +51,8 @@ class ThreeBackofficeBoundaryIntegrationTest {
         "valkey/valkey:7.2.13-alpine@sha256:ac32d5e70f29e2be83384f5173180911b666c79a0e91ac0d074de5771638ed91";
     private static final String VALKEY_AUTH_VALUE = "iam001-valkey";
     private static final String LOGIN_TEST_VALUE = "Iam001-Initial-Password-2026";
+    private static final Pattern REQUEST_PROOF_PATTERN = Pattern.compile(
+        "\\\"requestProof\\\"\\s*:\\s*\\\"([A-Za-z0-9_-]{43})\\\"");
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -79,10 +83,10 @@ class ThreeBackofficeBoundaryIntegrationTest {
             "agent-admin", "PAYMENT_AGENT_SESSION", 3100L, "agent-admin");
         roots = List.of(platform, merchant, agent);
 
-        start(platform, "applications/admin-api/target/admin-api-0.1.0-SNAPSHOT.jar", Map.of(
+        start(platform, "applications/platform-admin-api/target/platform-admin-api-0.1.0-SNAPSHOT.jar", Map.of(
             "SPRING_PROFILES_ACTIVE", "local",
-            "PAYMENT_ADMIN_BIND_ADDRESS", "127.0.0.1",
-            "PAYMENT_ADMIN_PORT", Integer.toString(platform.port()),
+            "PAYMENT_PLATFORM_BIND_ADDRESS", "127.0.0.1",
+            "PAYMENT_PLATFORM_PORT", Integer.toString(platform.port()),
             "PAYMENT_PLATFORM_ALLOWED_ORIGIN", platform.origin(),
             "PAYMENT_FLYWAY_ENABLED", "true",
             "PAYMENT_BOOTSTRAP_PASSWORD", LOGIN_TEST_VALUE));
@@ -90,11 +94,13 @@ class ThreeBackofficeBoundaryIntegrationTest {
 
         start(merchant,
             "applications/merchant-admin-api/target/merchant-admin-api-0.1.0-SNAPSHOT.jar",
-            Map.of("PAYMENT_MERCHANT_PORT", Integer.toString(merchant.port()),
+            Map.of("SPRING_PROFILES_ACTIVE", "local",
+                "PAYMENT_MERCHANT_PORT", Integer.toString(merchant.port()),
                 "PAYMENT_MERCHANT_ALLOWED_ORIGIN", merchant.origin()));
         start(agent,
             "applications/agent-admin-api/target/agent-admin-api-0.1.0-SNAPSHOT.jar",
-            Map.of("PAYMENT_AGENT_PORT", Integer.toString(agent.port()),
+            Map.of("SPRING_PROFILES_ACTIVE", "local",
+                "PAYMENT_AGENT_PORT", Integer.toString(agent.port()),
                 "PAYMENT_AGENT_ALLOWED_ORIGIN", agent.origin()));
         waitUntilReady(merchant);
         waitUntilReady(agent);
@@ -152,13 +158,16 @@ class ThreeBackofficeBoundaryIntegrationTest {
                 assertThat(rejectedLogin.cookies()).isEmpty();
 
                 String cookie = login(root, root.username(), LOGIN_TEST_VALUE, null).cookie(root.cookieName());
-                Response rejectedLogout = send(root, "POST", "/api/auth/logout", cookie, requestOrigin, null);
+                String requestProof = requestProof(root, cookie);
+                Response rejectedLogout = send(root, "POST", "/api/auth/logout", cookie, requestOrigin,
+                    requestProof, null);
                 assertThat(rejectedLogout.status()).as(root.name() + " logout origin " + origin).isEqualTo(403);
                 assertThat(rejectedLogout.cookies()).isEmpty();
                 assertThat(get(root, "/api/user/info", cookie).status())
                     .as(root.name() + " rejected logout must not mutate the session").isEqualTo(200);
 
-                Response acceptedLogout = send(root, "POST", "/api/auth/logout", cookie, root.origin(), null);
+                Response acceptedLogout = send(root, "POST", "/api/auth/logout", cookie, root.origin(),
+                    requestProof, null);
                 assertThat(acceptedLogout.status()).isEqualTo(200);
                 assertThat(acceptedLogout.firstHeader("set-cookie"))
                     .contains(root.cookieName(), "Max-Age=0");
@@ -527,6 +536,11 @@ class ThreeBackofficeBoundaryIntegrationTest {
 
     private static Response send(Root root, String method, String path, String cookie,
                                  String origin, String body) throws Exception {
+        return send(root, method, path, cookie, origin, null, body);
+    }
+
+    private static Response send(Root root, String method, String path, String cookie,
+                                 String origin, String requestProof, String body) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder()
             .uri(URI.create("http://127.0.0.1:" + root.port() + path))
             .timeout(Duration.ofSeconds(5));
@@ -536,6 +550,9 @@ class ThreeBackofficeBoundaryIntegrationTest {
         if (origin != null) {
             request.header("Origin", origin);
         }
+        if (requestProof != null) {
+            request.header("X-CSRF-Token", requestProof);
+        }
         if (body == null) {
             request.method(method, HttpRequest.BodyPublishers.noBody());
         } else {
@@ -544,6 +561,14 @@ class ThreeBackofficeBoundaryIntegrationTest {
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Response(response.statusCode(), response.body(), response.headers().map());
+    }
+
+    private static String requestProof(Root root, String cookie) throws Exception {
+        Response response = get(root, "/api/auth/csrf", cookie);
+        assertThat(response.status()).as(root.name() + " CSRF request proof").isEqualTo(200);
+        Matcher matcher = REQUEST_PROOF_PATTERN.matcher(response.body());
+        assertThat(matcher.find()).as(root.name() + " CSRF response contract").isTrue();
+        return matcher.group(1);
     }
 
     private static Root root(String name) {

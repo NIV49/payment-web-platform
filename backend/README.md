@@ -1,6 +1,6 @@
 # Payment Backend
 
-The backend is a runnable Spring Boot Maven reactor. `applications/admin-api` is the current deployment unit; Identity business rules and adapters remain owned by `modules/identity`.
+The backend is a runnable Spring Boot Maven reactor with independent `platform-admin-api`, `merchant-admin-api`, and `agent-admin-api` deployment units. Identity business rules and adapters remain owned by `modules/identity`.
 
 The enforced baseline is Java 25, Spring Boot 4.1, jOOQ 3.21, Flyway 12.4, PostgreSQL 18.4, Valkey 7.2 and Sa-Token 1.45. MyBatis is not part of the runtime persistence stack.
 
@@ -15,7 +15,8 @@ The enforced baseline is Java 25, Spring Boot 4.1, jOOQ 3.21, Flyway 12.4, Postg
 - list predicates use parameter values plus server-owned column whitelists;
 - Redis keys are versioned and decoded snapshots are identity-checked;
 - Sa-Token is behind a narrow session facade rather than becoming the business truth source.
-- the Admin API provides local credential login, cookie sessions, explicit permission-policy admission and the Vben user/menu/system-management contract;
+- all three backoffice APIs have explicit account-domain OIDC client composition, cookie sessions, back-channel logout, identity-version checks and independent CSRF; local credential login is restricted to the `local` profile;
+- the platform Admin API provides explicit permission-policy admission and the Vben user/menu/system-management contract;
 - PostgreSQL migrations and Redis-backed login throttling are wired into the runnable application.
 
 ## Current module boundaries
@@ -24,7 +25,9 @@ The enforced baseline is Java 25, Spring Boot 4.1, jOOQ 3.21, Flyway 12.4, Postg
 backend/
 ├── applications/
 │   ├── README.md                 admission rules for runnable deployment units
-│   └── admin-api/                Spring Boot composition root and HTTP adapters
+│   ├── platform-admin-api/       PLATFORM composition root and HTTP adapters
+│   ├── merchant-admin-api/       MERCHANT composition root
+│   └── agent-admin-api/          AGENT composition root
 └── modules/
     └── identity/
         ├── core/                 framework-free model, use cases, and ports
@@ -58,12 +61,12 @@ The `local` profile enables Flyway for developer convenience. Spring Boot's data
 Run the current application from `backend/`:
 
 ```bash
-./mvnw -s maven-settings.xml -pl applications/admin-api -am package -DskipTests
+./mvnw -s maven-settings.xml -pl applications/platform-admin-api -am package -DskipTests
 printf 'Local bootstrap password: '
 read -r -s PAYMENT_BOOTSTRAP_PASSWORD
 printf '\n'
 export PAYMENT_BOOTSTRAP_PASSWORD
-java -jar applications/admin-api/target/admin-api-0.1.0-SNAPSHOT.jar \
+java -jar applications/platform-admin-api/target/platform-admin-api-0.1.0-SNAPSHOT.jar \
   --spring.profiles.active=local
 unset PAYMENT_BOOTSTRAP_PASSWORD
 ```
@@ -98,7 +101,7 @@ printf 'Local bootstrap password: '
 read -r -s PAYMENT_BOOTSTRAP_PASSWORD
 printf '\n'
 export PAYMENT_BOOTSTRAP_PASSWORD
-java -jar backend/applications/admin-api/target/admin-api-0.1.0-SNAPSHOT.jar \
+java -jar backend/applications/platform-admin-api/target/platform-admin-api-0.1.0-SNAPSHOT.jar \
   --spring.profiles.active=local
 unset PAYMENT_BOOTSTRAP_PASSWORD
 ```

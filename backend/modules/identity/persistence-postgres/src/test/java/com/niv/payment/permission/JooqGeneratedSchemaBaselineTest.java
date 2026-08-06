@@ -10,6 +10,8 @@ import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_A
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_DEPARTMENT;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_GRANT_DIMENSION;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_GRANT_TARGET;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_IDENTITY_INVITATION;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_IDENTITY_INVITATION_ROLE;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP_ROLE;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MENU;
@@ -38,6 +40,8 @@ class JooqGeneratedSchemaBaselineTest {
             IAM_ROLE_GRANT.getName(),
             IAM_GRANT_DIMENSION.getName(),
             IAM_GRANT_TARGET.getName(),
+            IAM_IDENTITY_INVITATION.getName(),
+            IAM_IDENTITY_INVITATION_ROLE.getName(),
             IAM_MENU.getName(),
             IAM_ROLE_MENU.getName(),
             IAM_AUDIT_EVENT.getName(),
@@ -46,7 +50,7 @@ class JooqGeneratedSchemaBaselineTest {
             IAM_AUTHENTICATION_CREDENTIAL.getName()
         );
 
-        assertEquals(16, tables.size());
+        assertEquals(18, tables.size());
         assertTrue(tables.stream().allMatch(name -> name.startsWith("iam_")));
         assertEquals("iam_id_seq", IAM_ID_SEQ.getName());
     }

@@ -23,5 +23,6 @@
         <module>cache-redis</module>
         <module>session-satoken</module>
         <module>backoffice-web</module>
+        <module>oidc-bff</module>
     </modules>
 </project>

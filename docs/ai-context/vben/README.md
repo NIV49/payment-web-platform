@@ -10,13 +10,14 @@
 
 本项目的明确选择是：
 
-- 产品 Admin：`apps/web-antdv-next`；
+- 产品 Admin：`apps/platform-admin`、`apps/merchant-admin`、`apps/agent-admin`；
+- 产品共享运行时：`packages/effects/backoffice-runtime`；
 - 本地 Mock：`apps/backend-mock`；
 - 示例知识库：`playground`；
 - UI 组件库：`antdv-next`，不是 `ant-design-vue`；
-- 产品路由模式：`src/router/product-access.ts` 固定为 `mixed`，不受缓存偏好或切换控件影响；`preferences.app.accessMode = 'backend'` 只保留按钮权限码兼容语义，不再决定路由生成；
+- 产品路由模式：共享运行时 `src/router/product-access.ts` 固定为 `mixed`，各应用通过 deployment allowlist 限制自己的页面、route name 和 path；
 - 后端路由协议：标题传 i18n key，组件传视图路径；
-- Playground 保留用于查模式，但产品功能只进入 `web-antdv-next`。
+- Playground 保留用于查模式；产品功能只进入所属应用，共享运行时不得注册应用专属页面。
 
 ## 2. 官方文档覆盖地图
 
@@ -28,7 +29,7 @@
 | --- | --- | --- |
 | 框架介绍 | [关于 Vben](https://doc.vben.pro/guide/introduction/vben.html) | Vue、Vite、TS、pnpm monorepo、动态菜单、多 UI 库 |
 | 快速开始 | [快速开始](https://doc.vben.pro/guide/introduction/quick-start.html) | Vben 最低 Node `22.18+`；本项目固定 Node `>=24.11.0 <25` |
-| 精简 | [精简版本](https://doc.vben.pro/guide/introduction/thin.html) | 只保留 web-antdv-next、backend-mock 和 playground |
+| 精简 | [精简版本](https://doc.vben.pro/guide/introduction/thin.html) | 保留三个产品应用、共享运行时、backend-mock 和 playground |
 | 基础概念 | [基础概念](https://doc.vben.pro/guide/essentials/concept.html) | app/package/subpath imports 边界 |
 | 本地开发 | [本地开发](https://doc.vben.pro/guide/essentials/development.html) | scripts、环境、静态资源、DevTools |
 | 路由菜单 | [路由和菜单](https://doc.vben.pro/guide/essentials/route.html) | core/static/dynamic、RouteMeta、页面路径 |
@@ -81,8 +82,9 @@
 
 ```mermaid
 flowchart LR
-  MAIN["main.ts"] --> PREF["initPreferences(namespace)"]
-  PREF --> BOOT["bootstrap.ts"]
+  MAIN["应用 main.ts + deployment.ts"] --> START["backoffice-runtime/start.ts"]
+  START --> PREF["initPreferences(namespace)"]
+  PREF --> BOOT["backoffice-runtime/bootstrap.ts"]
   BOOT --> ADAPTER["Antdv Next 组件/Form 适配"]
   BOOT --> I18N["setupI18n"]
   BOOT --> PINIA["initStores"]
@@ -93,12 +95,11 @@ flowchart LR
 
 源码证据：
 
-- `apps/web-antdv-next/src/main.ts`：先初始化命名空间偏好，再异步加载 bootstrap，最后移除全局 Loading。
-- `apps/web-antdv-next/src/bootstrap.ts`：注册组件适配、表单、i18n、Pinia、权限指令、Router 和 Motion。
-- `apps/web-antdv-next/src/preferences.ts`：保留 `accessMode: 'backend'`，使权限指令继续按 code 判断；它不是产品路由模式的事实来源。
-- `apps/web-antdv-next/src/router/product-access.ts`：固定产品 `mixed` 路由模式，并递归保护静态 core、fallback 与本地 `Profile` 的 canonical name/path。
-- `apps/web-antdv-next/src/router/routes/index.ts`：只注册 `modules/profile.ts`；其他模块源码仅作为参考保留。
-- `apps/web-antdv-next/src/app.vue`：Antdv Next 的 `ConfigProvider`、locale 和主题 token 入口。
+- 三个应用的 `src/main.ts`：只把本应用 `deployment.ts` 交给共享启动函数，不导入其他应用。
+- `packages/effects/backoffice-runtime/src/start.ts`：校验构建账号域与 deployment 一致，初始化命名空间偏好后加载 bootstrap。
+- `packages/effects/backoffice-runtime/src/bootstrap.ts`：注册组件适配、表单、i18n、Pinia、权限指令、Router 和 Motion。
+- `packages/effects/backoffice-runtime/src/router/product-access.ts`：固定 `mixed` 模式，保护静态路由，并按当前应用 allowlist 拒绝越界后端路由。
+- `packages/effects/backoffice-runtime/src/app.vue`：Antdv Next 的 `ConfigProvider`、locale 和主题 token 入口。
 
 顺序是约束。组件适配和 i18n 未完成前，不应提前挂载应用。
 
@@ -132,8 +133,8 @@ router guard
 
 当前系统管理 key 已定义在：
 
-- `apps/web-antdv-next/src/locales/langs/zh-CN/system.json`
-- `apps/web-antdv-next/src/locales/langs/en-US/system.json`
+- `apps/platform-admin/src/locales/langs/zh-CN/system.json`
+- `apps/platform-admin/src/locales/langs/en-US/system.json`
 
 父子路由应分别使用 `system.title`、`system.user.title`、`system.role.title`、`system.menu.title`、`system.dept.title`。
 

@@ -7,7 +7,7 @@
 ```text
 backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V1__permission_schema.sql
 ...
-backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V17__add_administration_tombstones.sql
+backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V24__add_mfa_recovery_state_machine.sql
 ```
 
 Verdict：**有条件通过作为新库基线，不允许直接在生产执行。**
@@ -20,6 +20,7 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 | --- | --- | --- |
 | iam_user | Identity & Organization | 全局身份映射 |
 | iam_tenant | Identity & Organization | 安全隔离空间 |
+| iam_tenant_entry_host | Identity & Organization | 服务端控制的 Host 到账号域、租户映射 |
 | iam_department | Identity & Organization | 租户组织树 |
 | iam_membership | Identity & Organization | 用户在租户中的身份和版本 |
 | iam_role | Authorization | 租户角色 |
@@ -33,6 +34,9 @@ Verdict：**有条件通过作为新库基线，不允许直接在生产执行�
 | iam_audit_event | Audit | 权限、会话和高风险操作审计 |
 | iam_permission_change_outbox | Authorization | append-only 权限版本和缓存失效事件事实 |
 | iam_permission_change_relay_state | Authorization Infrastructure | polling relay 的租约、重试和发布状态 |
+| iam_identity_lifecycle_outbox | Identity | append-only IdP 生命周期命令事实，不含身份资料和认证秘密 |
+| iam_identity_lifecycle_relay_state | Identity Infrastructure | IdP 生命周期命令的租约、重试和发布状态 |
+| iam_mfa_recovery | Identity | MFA 四步撤销状态、租约、重试和完成证据，不存认证秘密 |
 
 代理商、商户、销售、渠道和市场由各自业务模块拥有；IAM 通过 ID/Code 和 Provider 校验，不复制业务关系真相。
 
@@ -96,6 +100,15 @@ Core `DimensionScope` 与 V10 `ck_iam_grant_dimension_mode_compatibility` 同时
 - 当前只有 schema 与写入约束，没有 relay 进程，因此不能声称事件已经发布；
 - Payment/Ledger 必须复用这个形态，不能复制 V1 中状态与事件混表的旧设计。
 
+### 3.6 生产身份基础
+
+- `iam_user` 的唯一身份映射键是 `(idp_issuer, idp_subject)`；`identity_version` 用于身份级 Session 撤销，`idp_provisioning_status` 记录本地或 IdP provisioning 状态；
+- `iam_tenant_entry_host.entry_host` 全局唯一且必须是小写 canonical Host，`(tenant_id, account_domain)` 组合外键拒绝把入口登记到错误账号域；OIDC start、handoff 和已认证请求均按组合根账号域解析并复核 Host，未知/禁用/错域入口失败关闭；
+- `iam_identity_lifecycle_outbox` 只允许 `PROVISION/ENABLE/DISABLE/MFA_RECOVERY/DEPROVISION`，user、tenant 与 realm 通过组合外键保持同域；
+- 生命周期 Outbox 与 permission-change Outbox 独立，事件事实 append-only，relay 状态可变；V24 已实现 MFA_RECOVERY 专用 relay，通用 PROVISION/ENABLE/DISABLE/DEPROVISION worker 仍不存在；
+- `iam_mfa_recovery` 通过 user/tenant/target actor 组合外键保持同域同租户，要求另一位 Membership 发起，并以 partial unique index 保证每个 User 最多一个 pending workflow；只有 Credential、Recovery Code、Keycloak Session、应用 Session 四个完成时间全部非空才允许 `COMPLETED`；
+- `(account_domain, username)` 已建立唯一约束，但旧 `username` 全局唯一约束在 expand 阶段继续保留。跨域同名只有 contract 迁移删除旧约束后才真正可写。
+
 ## 4. 索引与查询场景
 
 | 索引 | 查询场景 | 代价 |
@@ -114,6 +127,10 @@ Core `DimensionScope` 与 V10 `ck_iam_grant_dimension_mode_compatibility` 同时
 | audit `(trace_id)` | 事故追踪 | 额外写索引 |
 | outbox `(event_id)` unique | 消息幂等 | 每事件一次唯一性检查 |
 | relay `(status,available_at,event_record_id)` partial | polling 批次领取 | mutable state 写放大，与事件事实隔离 |
+| credential `(account_domain,username)` unique | 账号域内用户名唯一 | expand 阶段还受旧全局唯一约束限制 |
+| tenant entry host `(entry_host)` unique | 可信 Host 精确定位账号域和租户 | 入口变更需审计，未知或禁用 Host 必须拒绝 |
+| identity outbox `(idempotency_key)` unique | IdP 生命周期命令幂等 | relay 失败需要重试、告警和人工恢复 |
+| MFA recovery `(account_domain,user_id) WHERE RECOVERY_PENDING` unique | 同一身份只允许一个恢复流程 | 完成前保持登录阻断，运维必须监控积压 |
 
 不预先给 `iam_audit_event` 分区。达到真实行数、保留周期和查询证据后按月分区。
 
@@ -141,7 +158,7 @@ Core `DimensionScope` 与 V10 `ck_iam_grant_dimension_mode_compatibility` 同时
 8. 影子比对新旧授权结果；
 9. 强制重新登录后灰度。
 
-升级既有库时，V9/V10 都采取拒绝式迁移：重复菜单路由和非法 dimension/mode 组合必须先由业务负责人分类并通过新的前向修复迁移处理，不能在约束迁移里自动选边或改权。V17 增加 Role/Menu/Department 墓碑和 local system-managed 标记，并把 live 角色/菜单唯一性改成 `WHERE deleted_at IS NULL` 的 partial index；迁移不删除或猜测归并历史业务行。
+升级既有库时，V9/V10 都采取拒绝式迁移：重复菜单路由和非法 dimension/mode 组合必须先由业务负责人分类并通过新的前向修复迁移处理，不能在约束迁移里自动选边或改权。V17 增加 Role/Menu/Department 墓碑和 local system-managed 标记，并把 live 角色/菜单唯一性改成 `WHERE deleted_at IS NULL` 的 partial index；迁移不删除或猜测归并历史业务行。V21-V23 采用 expand/contract：先保留旧全局用户名唯一约束，再并发建立账号域唯一索引并附加约束；旧实例清零和双版本验证前不得执行删除旧约束的 contract 迁移。
 
 ## 7. 回滚
 
@@ -149,6 +166,8 @@ Core `DimensionScope` 与 V10 `ck_iam_grant_dimension_mode_compatibility` 同时
 - 灰度后回滚只停止新会话和新授权写入，不把已产生的审计丢弃；
 - 权限变更使用事件和版本，旧应用只在兼容窗口读取旧模型；
 - 一旦 V17 后发生墓碑写入，旧二进制因不理解 `deleted_at` 不属于可写回滚路径；故障恢复只能停止新写、保留审计并前向修复或恢复整库快照；
+- V21-V23 是兼容旧实例的只增阶段；V22 非事务失败可能留下精确同名的 invalid index，恢复时必须先查 `pg_index.indisvalid`，只删除该无效索引后重试；禁止用 Flyway `repair` 把未完成 DDL 标成成功；
+- V24 增加新的状态表和 User 状态值；一旦产生 `RECOVERY_PENDING` 写入，旧二进制不是可写回滚目标，必须停止身份写入并前向修复或恢复协调快照；
 - 不通过反向修改旧系统权限表实现回滚；
 - 迁移脚本必须可重跑，并记录 source_id -> target_id 映射。
 

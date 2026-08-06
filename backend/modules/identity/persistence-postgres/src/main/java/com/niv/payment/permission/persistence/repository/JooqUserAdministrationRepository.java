@@ -122,6 +122,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
                 IAM_USER.REMARK,
                 IAM_USER.ROW_VERSION,
                 IAM_AUTHENTICATION_CREDENTIAL.USERNAME,
+                IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN,
                 IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION)
             .from(IAM_MEMBERSHIP)
             .join(IAM_USER).on(IAM_USER.ID.eq(IAM_MEMBERSHIP.USER_ID))
@@ -178,7 +179,11 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
                     throw new IdentityAdministrationService.DataConflictException(
                         "External identity username cannot be edited");
                 }
-                requireUniqueUsername(userId, target.get(IAM_USER.IDP_ISSUER), username);
+                requireUniqueUsername(
+                    userId,
+                    target.get(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN),
+                    target.get(IAM_USER.IDP_ISSUER),
+                    username);
             }
         }
         int updated = dsl.update(IAM_MEMBERSHIP)
@@ -363,10 +368,12 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         return passwordHash;
     }
 
-    private void requireUniqueUsername(long userId, String issuer, String username) {
+    private void requireUniqueUsername(long userId, String accountDomain,
+                                       String issuer, String username) {
         boolean credentialConflict = dsl.fetchExists(dsl.selectOne()
             .from(IAM_AUTHENTICATION_CREDENTIAL)
             .where(IAM_AUTHENTICATION_CREDENTIAL.USERNAME.eq(username)
+                .and(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN.eq(accountDomain))
                 .and(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.ne(userId))));
         boolean identityConflict = dsl.fetchExists(dsl.selectOne()
             .from(IAM_USER)

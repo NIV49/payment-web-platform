@@ -1,0 +1,45 @@
+{
+  "ruleId": "IAM-002",
+  "status": "candidate",
+  "statement": "Production OIDC identity, cookie sessions, revocation, CSRF, and MFA recovery must preserve the three backoffice account-domain boundaries without claiming physical isolation.",
+  "scope": [
+    "platform operations backoffice application and API",
+    "merchant backoffice application and API",
+    "agent backoffice application and API",
+    "Keycloak OIDC, local sessions, CSRF, identity mapping, and MFA recovery"
+  ],
+  "given": [
+    "three independently built and deployed frontend applications and backend services",
+    "one shared Keycloak infrastructure with separate PLATFORM, MERCHANT, and AGENT realms",
+    "host-only cookie-authenticated application sessions"
+  ],
+  "when": [
+    "a principal starts or completes OIDC authentication",
+    "a browser calls a state-changing application API",
+    "Keycloak sends back-channel logout or application identity state changes",
+    "an administrator or user starts MFA recovery"
+  ],
+  "then": [
+    "PLATFORM, MERCHANT, and AGENT realms are logical security partitions inside one shared Keycloak infrastructure; they are not complete infrastructure isolation.",
+    "Every local application session must implement both validated Keycloak back-channel logout and per-request identity-version revocation; either signal invalidates the local session.",
+    "Origin validation applies only to appropriate browser-facing requests; OIDC callbacks and server-to-server back-channel logout do not depend on Origin and must use protocol-specific validation.",
+    "Every state-changing cookie-authenticated browser request must pass an independent CSRF control; SameSite cookies and Origin validation are defense in depth and cannot replace the CSRF control.",
+    "An application User is identified uniquely by the exact canonical issuer and subject pair; email, username, realm label, and account domain are not identity mapping keys.",
+    "MFA recovery must revoke the affected Keycloak credentials, every recovery code, every Keycloak session, and every application session before recovery can complete; partial failure remains fail closed and retries are idempotent."
+  ],
+  "counterexamples": [
+    "documentation or deployment evidence describes three realms in one Keycloak cluster as complete infrastructure isolation",
+    "a local session remains valid after a verified back-channel logout or after its captured identity version becomes stale",
+    "an OIDC callback is rejected only because Origin is absent or is accepted because Origin appears trusted without state, nonce, PKCE, issuer, and audience validation",
+    "a state-changing cookie-authenticated request succeeds with only SameSite or Origin enforcement and no independent CSRF token",
+    "an IdP login maps an application User by email, username, realm label, or account domain instead of the exact issuer and subject pair",
+    "MFA recovery reports success while an affected Keycloak credential, recovery code, Keycloak session, or application session remains usable"
+  ],
+  "evidence": [],
+  "confidence": "high",
+  "judgeTests": [
+    "IAM-002-DECISION-CONTRACT",
+    "IAM-002-KEYCLOAK-CONFIG",
+    "IAM-002-BACKEND-VERIFY"
+  ]
+}

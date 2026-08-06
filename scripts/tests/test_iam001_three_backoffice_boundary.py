@@ -67,7 +67,7 @@ class Iam001BoundaryCheckTest(unittest.TestCase):
     def test_mutations_clear_stale_build_outputs_without_following_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             snapshot = Path(directory, "snapshot")
-            stale_target = snapshot / "backend/applications/admin-api/target"
+            stale_target = snapshot / "backend/applications/platform-admin-api/target"
             stale_target.mkdir(parents=True)
             stale_target.joinpath("failsafe-summary.xml").write_text(
                 "stale", encoding="utf-8"
@@ -206,7 +206,7 @@ class Iam001BoundaryCheckTest(unittest.TestCase):
         self.assertEqual(2, len(origin_mutations))
         self.assertEqual(
             {
-                "backend/applications/admin-api/src/main/java/com/niv/payment/adminapi/config/SecurityConfiguration.java",
+                "backend/applications/platform-admin-api/src/main/java/com/niv/payment/adminapi/config/SecurityConfiguration.java",
                 "backend/modules/identity/backoffice-web/src/main/java/com/niv/payment/permission/backoffice/BackofficeSecurityConfiguration.java",
             },
             {mutation.path for mutation in origin_mutations},

@@ -74,6 +74,16 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.assertEqual([], scan_repository(repository, ("docs",)))
 
+    def test_accepts_the_reserved_example_email_address(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.write_artifact(
+                repository,
+                "contact: example@" + "example.com\n",
+            )
+
+            self.assertEqual([], scan_repository(repository, ("docs",)))
+
     def test_only_current_lockfile_findings_have_exact_approvals(self) -> None:
         approved_paths = {
             path
@@ -92,6 +102,18 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
         self.assertEqual({"frontend/admin/pnpm-lock.yaml"}, context_paths)
         self.assertEqual(3, len(sensitive_artifacts.APPROVED_FINDING_HASHES))
         self.assertEqual(3, len(sensitive_artifacts.APPROVED_FINDING_CONTEXTS))
+
+    def test_only_trusted_favicon_clones_have_binary_approvals(self) -> None:
+        digest = "ff35213ee7dd0334db69b47a91ba549040736f1d2fe1e0de164f2fa3ec89c169"
+
+        self.assertEqual(
+            {
+                "frontend/admin/apps/agent-admin/public/favicon.ico": digest,
+                "frontend/admin/apps/merchant-admin/public/favicon.ico": digest,
+                "frontend/admin/apps/platform-admin/public/favicon.ico": digest,
+            },
+            sensitive_artifacts.APPROVED_BINARY_BLOB_HASHES,
+        )
 
     def test_empty_secret_assignments_are_safe_but_nonempty_values_are_rejected(
         self,
@@ -1050,8 +1072,8 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
         relative_path = "frontend/admin/pnpm-lock.yaml"
         content = REPOSITORY.joinpath(relative_path).read_text(encoding="utf-8")
         lines = content.splitlines()
-        email_line_number = 7095
-        dependency_line_number = 17063
+        email_line_number = 7474
+        dependency_line_number = 17867
         email_line_index = email_line_number - 1
         dependency_line_index = dependency_line_number - 1
 
@@ -1513,6 +1535,29 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.assertTrue(any("GENERIC_SECRET_ASSIGNMENT" in error for error in errors), errors)
             self.assertNotIn("changed-secret", "\n".join(errors))
+
+    def test_immutable_diff_only_accepts_exact_trusted_favicon_clones(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.initialize_git_repository(repository)
+            self.write_artifact(repository, "safe\n", "README.md")
+            base = self.commit_all(repository, "base")
+
+            relative_path = "frontend/admin/apps/platform-admin/public/favicon.ico"
+            favicon = REPOSITORY / relative_path
+            copied = repository / relative_path
+            copied.parent.mkdir(parents=True)
+            copied.write_bytes(favicon.read_bytes())
+            approved_commit = self.commit_all(repository, "trusted favicon clone")
+
+            self.assertEqual([], scan_git_diff(repository, base, approved_commit))
+
+            copied.write_bytes(favicon.read_bytes() + b"changed")
+            changed_commit = self.commit_all(repository, "changed favicon")
+
+            errors = scan_git_diff(repository, approved_commit, changed_commit)
+
+            self.assertTrue(any("NON_UTF8" in error for error in errors), errors)
 
     def test_default_target_discovery_requires_the_exact_repository_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

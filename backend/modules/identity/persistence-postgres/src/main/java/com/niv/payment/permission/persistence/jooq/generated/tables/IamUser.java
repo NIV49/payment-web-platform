@@ -7,7 +7,10 @@ package com.niv.payment.permission.persistence.jooq.generated.tables;
 import com.niv.payment.permission.persistence.jooq.generated.Keys;
 import com.niv.payment.permission.persistence.jooq.generated.Public;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuthenticationCredential.IamAuthenticationCredentialPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitation.IamIdentityInvitationPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleOutbox.IamIdentityLifecycleOutboxPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership.IamMembershipPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery.IamMfaRecoveryPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamTenant.IamTenantPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.records.IamUserRecord;
 
@@ -121,6 +124,16 @@ public class IamUser extends TableImpl<IamUserRecord> {
      */
     public final TableField<IamUserRecord, String> ACCOUNT_DOMAIN = createField(DSL.name("account_domain"), SQLDataType.VARCHAR(16).nullable(false), this, "");
 
+    /**
+     * The column <code>public.iam_user.identity_version</code>.
+     */
+    public final TableField<IamUserRecord, Long> IDENTITY_VERSION = createField(DSL.name("identity_version"), SQLDataType.BIGINT.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.BIGINT)), this, "");
+
+    /**
+     * The column <code>public.iam_user.idp_provisioning_status</code>.
+     */
+    public final TableField<IamUserRecord, String> IDP_PROVISIONING_STATUS = createField(DSL.name("idp_provisioning_status"), SQLDataType.VARCHAR(32).nullable(false).defaultValue(DSL.field(DSL.raw("'LOCAL_ONLY'::character varying"), SQLDataType.VARCHAR)), this, "");
+
     private IamUser(Name alias, Table<IamUserRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -212,6 +225,32 @@ public class IamUser extends TableImpl<IamUserRecord> {
         return _fkIamAuthenticationUserDomain;
     }
 
+    private transient IamIdentityInvitationPath _iamIdentityInvitation;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_invitation</code> table
+     */
+    public IamIdentityInvitationPath iamIdentityInvitation() {
+        if (_iamIdentityInvitation == null)
+            _iamIdentityInvitation = new IamIdentityInvitationPath(this, null, Keys.IAM_IDENTITY_INVITATION__FK_IAM_IDENTITY_INVITATION_USER_DOMAIN.getInverseKey());
+
+        return _iamIdentityInvitation;
+    }
+
+    private transient IamIdentityLifecycleOutboxPath _iamIdentityLifecycleOutbox;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_lifecycle_outbox</code> table
+     */
+    public IamIdentityLifecycleOutboxPath iamIdentityLifecycleOutbox() {
+        if (_iamIdentityLifecycleOutbox == null)
+            _iamIdentityLifecycleOutbox = new IamIdentityLifecycleOutboxPath(this, null, Keys.IAM_IDENTITY_LIFECYCLE_OUTBOX__FK_IAM_IDENTITY_OUTBOX_USER_REALM.getInverseKey());
+
+        return _iamIdentityLifecycleOutbox;
+    }
+
     private transient IamMembershipPath _fkIamMembershipUserDomain;
 
     /**
@@ -224,6 +263,19 @@ public class IamUser extends TableImpl<IamUserRecord> {
             _fkIamMembershipUserDomain = new IamMembershipPath(this, null, Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_USER_DOMAIN.getInverseKey());
 
         return _fkIamMembershipUserDomain;
+    }
+
+    private transient IamMfaRecoveryPath _iamMfaRecovery;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_mfa_recovery</code> table
+     */
+    public IamMfaRecoveryPath iamMfaRecovery() {
+        if (_iamMfaRecovery == null)
+            _iamMfaRecovery = new IamMfaRecoveryPath(this, null, Keys.IAM_MFA_RECOVERY__FK_IAM_MFA_RECOVERY_USER_DOMAIN.getInverseKey());
+
+        return _iamMfaRecovery;
     }
 
     private transient IamAuthenticationCredentialPath _iamAuthenticationCredentialUserIdFkey;
@@ -266,6 +318,8 @@ public class IamUser extends TableImpl<IamUserRecord> {
     public List<Check<IamUserRecord>> getChecks() {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("ck_iam_user_account_domain"), "(((account_domain)::text = ANY ((ARRAY['PLATFORM'::character varying, 'MERCHANT'::character varying, 'AGENT'::character varying])::text[])))", true),
+            Internal.createCheck(this, DSL.name("ck_iam_user_identity_version"), "((identity_version >= 0))", true),
+            Internal.createCheck(this, DSL.name("ck_iam_user_idp_provisioning_status"), "(((idp_provisioning_status)::text = ANY ((ARRAY['LOCAL_ONLY'::character varying, 'PROVISION_PENDING'::character varying, 'PROVISIONED'::character varying, 'RECOVERY_PENDING'::character varying, 'DEPROVISION_PENDING'::character varying, 'DEPROVISIONED'::character varying, 'FAILED'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_iam_user_status"), "(((status)::text = ANY ((ARRAY['PENDING_ACTIVATION'::character varying, 'ACTIVE'::character varying, 'DISABLED'::character varying, 'LOCKED'::character varying])::text[])))", true)
         );
     }

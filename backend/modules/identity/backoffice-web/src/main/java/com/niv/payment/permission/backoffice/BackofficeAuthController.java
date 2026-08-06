@@ -2,15 +2,8 @@ package com.niv.payment.permission.backoffice;
 
 import com.niv.payment.permission.domain.AuthorizationSubject;
 import com.niv.payment.permission.security.SaTokenSessionBridge;
-import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityModels;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
@@ -18,31 +11,20 @@ import java.util.List;
 @RestController
 @RequestMapping("/api")
 final class BackofficeAuthController {
-    private final AuthenticationService authentication;
     private final SaTokenSessionBridge sessions;
     private final BackofficeAccessService access;
     private final VbenMenuTreeMapper menuMapper;
 
-    BackofficeAuthController(AuthenticationService authentication, SaTokenSessionBridge sessions,
-                             BackofficeAccessService access, VbenMenuTreeMapper menuMapper) {
-        this.authentication = authentication;
+    BackofficeAuthController(SaTokenSessionBridge sessions, BackofficeAccessService access,
+                             VbenMenuTreeMapper menuMapper) {
         this.sessions = sessions;
         this.access = access;
         this.menuMapper = menuMapper;
     }
 
-    @PostMapping("/auth/login")
-    BackofficeApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request,
-                                               HttpServletRequest http) {
-        authentication.login(new AuthenticationService.LoginCommand(
-            request.username(), request.password(), http.getRemoteAddr()));
-        return BackofficeApiResponse.success(new LoginResponse("cookie-session"));
-    }
-
-    @PostMapping("/auth/logout")
-    BackofficeApiResponse<Void> logout() {
-        authentication.logout();
-        return BackofficeApiResponse.success(null);
+    @GetMapping("/auth/csrf")
+    BackofficeApiResponse<RequestProofResponse> requestProof() {
+        return BackofficeApiResponse.success(new RequestProofResponse(sessions.requestProof()));
     }
 
     @GetMapping("/user/info")
@@ -75,9 +57,7 @@ final class BackofficeAuthController {
         return BackofficeApiResponse.success(new HealthResponse("UP"));
     }
 
-    record LoginRequest(@NotBlank @Size(max = 100) String username,
-                        @NotBlank @Size(max = 256) String password) { }
-    record LoginResponse(String accessToken) { }
+    record RequestProofResponse(String requestProof) { }
     record UserInfoResponse(String userId, String username, String realName, String avatar,
                             List<String> roles, String homePath, String desc, String token,
                             boolean systemAdministrator) { }

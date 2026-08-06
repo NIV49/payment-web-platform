@@ -18,6 +18,8 @@ spring:
   flyway:
     enabled: ${PAYMENT_FLYWAY_ENABLED:false}
     locations: classpath:db/migration
+    postgresql:
+      transactional-lock: false
   jooq:
     sql-dialect: POSTGRES
   jackson:
@@ -46,6 +48,32 @@ sa-token:
 payment:
   identity:
     login-type: merchant-admin
+    local-login-enabled: false
+    lifecycle:
+      enabled: ${PAYMENT_MERCHANT_IDENTITY_LIFECYCLE_ENABLED:false}
+      admin-client-id: ${PAYMENT_MERCHANT_KEYCLOAK_ADMIN_CLIENT_ID:}
+      poll-delay: PT5S
+      lease-duration: PT30S
+      retry-delay: PT15S
+  oidc:
+    enabled: ${PAYMENT_MERCHANT_OIDC_ENABLED:false}
+    issuer: ${PAYMENT_MERCHANT_OIDC_ISSUER}
+    authorization-uri: ${PAYMENT_MERCHANT_OIDC_AUTHORIZATION_URI}
+    token-uri: ${PAYMENT_MERCHANT_OIDC_TOKEN_URI}
+    jwk-set-uri: ${PAYMENT_MERCHANT_OIDC_JWK_SET_URI}
+    end-session-uri: ${PAYMENT_MERCHANT_OIDC_END_SESSION_URI}
+    client-id: ${PAYMENT_MERCHANT_OIDC_CLIENT_ID}
+    redirect-uri: ${PAYMENT_MERCHANT_OIDC_REDIRECT_URI}
+    post-logout-redirect-uri: ${PAYMENT_MERCHANT_OIDC_POST_LOGOUT_REDIRECT_URI}
+    required-acr: ${PAYMENT_MERCHANT_OIDC_REQUIRED_ACR:2}
+    public-scheme: ${PAYMENT_MERCHANT_PUBLIC_SCHEME:https}
+    frontend-callback-path: /auth/oidc/callback
+    transaction-ttl: PT5M
+    handoff-ttl: PT1M
+    application-session-index-ttl: PT9H
+    logout-event-maximum-age: PT5M
+    logout-processing-ttl: PT30S
+    logout-replay-ttl: PT24H
   security:
     allowed-origin: ${PAYMENT_MERCHANT_ALLOWED_ORIGIN:http://127.0.0.1:6002}
     max-request-body-bytes: 262144

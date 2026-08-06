@@ -49,7 +49,7 @@ class AuthenticationServiceTest {
     void successfulLoginUsesNormalizedUsernameAndClearsTheFailureBucket() {
         AtomicBoolean cleared = new AtomicBoolean();
         CredentialAccount account = new CredentialAccount(
-            1, 2, 3, 4L, 5, 6, AccountDomain.PLATFORM, SUPPORTED_DUMMY_HASH);
+            1, 2, 3, 4L, 5, 6, 7, AccountDomain.PLATFORM, SUPPORTED_DUMMY_HASH);
         AuthenticationService service = new AuthenticationService(
             AccountDomain.PLATFORM,
             (username, domain) -> {
@@ -102,7 +102,7 @@ class AuthenticationServiceTest {
     @Test
     void serverFixedAccountDomainIsPassedToCredentialLookup() {
         CredentialAccount account = new CredentialAccount(
-            1, 2, 9, 4L, 5, 6, AccountDomain.PLATFORM, SUPPORTED_DUMMY_HASH);
+            1, 2, 9, 4L, 5, 6, 7, AccountDomain.PLATFORM, SUPPORTED_DUMMY_HASH);
         AuthenticationService service = new AuthenticationService(
             AccountDomain.PLATFORM,
             (username, domain) -> {
@@ -126,7 +126,7 @@ class AuthenticationServiceTest {
 
     @Test
     void unsupportedStoredHashFailsClosedWithoutReachingTheRealHashVerifier() {
-        CredentialAccount account = new CredentialAccount(1, 2, 3, 4L, 5, 6, AccountDomain.PLATFORM,
+        CredentialAccount account = new CredentialAccount(1, 2, 3, 4L, 5, 6, 7, AccountDomain.PLATFORM,
             "$2a$99$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy");
         AtomicBoolean sessionIssued = new AtomicBoolean();
         AuthenticationService service = new AuthenticationService(
@@ -155,7 +155,7 @@ class AuthenticationServiceTest {
     @Test
     void adapterCannotReturnAnAccountFromAnotherDomain() {
         CredentialAccount merchant = new CredentialAccount(
-            1, 2, 3, 4L, 5, 6, AccountDomain.MERCHANT, SUPPORTED_DUMMY_HASH);
+            1, 2, 3, 4L, 5, 6, 7, AccountDomain.MERCHANT, SUPPORTED_DUMMY_HASH);
         AuthenticationService service = new AuthenticationService(
             AccountDomain.PLATFORM,
             (username, domain) -> Optional.of(merchant),

@@ -59,8 +59,13 @@ jobs:
       - name: Lint frontend
         run: pnpm run lint
 
-      - name: Type-check product application
-        run: pnpm -F @vben/web-antdv-next run typecheck
+      - name: Type-check shared runtime and product applications
+        run: >-
+          pnpm --filter @payment/backoffice-runtime
+          --filter @payment/platform-admin
+          --filter @payment/merchant-admin
+          --filter @payment/agent-admin
+          --parallel run typecheck
 
       - name: Run unit tests
         run: pnpm run test:unit
@@ -68,8 +73,8 @@ jobs:
       - name: Verify production safety boundaries
         run: pnpm run test:production-safety
 
-      - name: Build product application
-        run: pnpm run build:antdv-next
+      - name: Build independent backoffice applications
+        run: pnpm run build:backoffices
 
       - name: Verify independent backoffice artifacts
-        run: node scripts/deploy/verify-three-artifacts.mjs apps/web-antdv-next/dist
+        run: node scripts/deploy/verify-three-artifacts.mjs .

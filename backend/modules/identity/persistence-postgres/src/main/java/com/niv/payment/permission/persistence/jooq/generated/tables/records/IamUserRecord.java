@@ -188,6 +188,34 @@ public class IamUserRecord extends UpdatableRecordImpl<IamUserRecord> {
         return (String) get(11);
     }
 
+    /**
+     * Setter for <code>public.iam_user.identity_version</code>.
+     */
+    public void setIdentityVersion(Long value) {
+        set(12, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_user.identity_version</code>.
+     */
+    public Long getIdentityVersion() {
+        return (Long) get(12);
+    }
+
+    /**
+     * Setter for <code>public.iam_user.idp_provisioning_status</code>.
+     */
+    public void setIdpProvisioningStatus(String value) {
+        set(13, value);
+    }
+
+    /**
+     * Getter for <code>public.iam_user.idp_provisioning_status</code>.
+     */
+    public String getIdpProvisioningStatus() {
+        return (String) get(13);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -211,7 +239,7 @@ public class IamUserRecord extends UpdatableRecordImpl<IamUserRecord> {
     /**
      * Create a detached, initialised IamUserRecord
      */
-    public IamUserRecord(Long id, String idpIssuer, String idpSubject, String displayName, byte[] emailCipher, byte[] phoneCipher, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark, String accountDomain) {
+    public IamUserRecord(Long id, String idpIssuer, String idpSubject, String displayName, byte[] emailCipher, byte[] phoneCipher, String status, OffsetDateTime createdAt, OffsetDateTime updatedAt, Long rowVersion, String remark, String accountDomain, Long identityVersion, String idpProvisioningStatus) {
         super(IamUser.IAM_USER);
 
         setId(id);
@@ -226,6 +254,8 @@ public class IamUserRecord extends UpdatableRecordImpl<IamUserRecord> {
         setRowVersion(rowVersion);
         setRemark(remark);
         setAccountDomain(accountDomain);
+        setIdentityVersion(identityVersion);
+        setIdpProvisioningStatus(idpProvisioningStatus);
         resetTouchedOnNotNull();
     }
 }

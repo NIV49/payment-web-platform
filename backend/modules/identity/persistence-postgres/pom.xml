@@ -15,6 +15,10 @@
     <name>identity-persistence-postgres</name>
     <description>Identity-owned jOOQ PostgreSQL adapter with schema migrations</description>
 
+    <properties>
+        <flyway.postgresql.transactional.lock>false</flyway.postgresql.transactional.lock>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.niv.payment</groupId>

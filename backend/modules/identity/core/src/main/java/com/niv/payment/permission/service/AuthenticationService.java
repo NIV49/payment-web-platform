@@ -84,11 +84,12 @@ public final class AuthenticationService {
                                     Long departmentId,
                                     long permissionVersion,
                                     long sessionVersion,
+                                    long identityVersion,
                                     AccountDomain accountDomain,
                                     String passwordHash) {
         public CredentialAccount {
             if (userId <= 0 || membershipId <= 0 || tenantId <= 0
-                || permissionVersion < 0 || sessionVersion < 0) {
+                || permissionVersion < 0 || sessionVersion < 0 || identityVersion < 0) {
                 throw new IllegalArgumentException("Credential identity is invalid");
             }
             Objects.requireNonNull(accountDomain, "accountDomain");

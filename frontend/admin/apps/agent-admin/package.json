@@ -1,0 +1,19 @@
+{
+  "name": "@payment/agent-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build --mode production",
+    "dev": "vite --mode development --port 6001 --strictPort",
+    "preview": "vite preview --outDir dist --port 6001 --strictPort",
+    "typecheck": "vue-tsc --noEmit --skipLibCheck"
+  },
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "dependencies": {
+    "@payment/backoffice-runtime": "workspace:*",
+    "@vben/types": "workspace:*"
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "name": "@payment/backoffice-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit --skipLibCheck"
+  },
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./adapter/component": {
+      "types": "./src/adapter/component/index.ts",
+      "default": "./src/adapter/component/index.ts"
+    },
+    "./adapter/form": {
+      "types": "./src/adapter/form.ts",
+      "default": "./src/adapter/form.ts"
+    },
+    "./adapter/vxe-table": {
+      "types": "./src/adapter/vxe-table.ts",
+      "default": "./src/adapter/vxe-table.ts"
+    },
+    "./api": {
+      "types": "./src/api/index.ts",
+      "default": "./src/api/index.ts"
+    },
+    "./api/error-contract": {
+      "types": "./src/api/error-contract.ts",
+      "default": "./src/api/error-contract.ts"
+    },
+    "./api/core/oidc-navigation": {
+      "types": "./src/api/core/oidc-navigation.ts",
+      "default": "./src/api/core/oidc-navigation.ts"
+    },
+    "./api/menu-contract": {
+      "types": "./src/api/menu-contract.ts",
+      "default": "./src/api/menu-contract.ts"
+    },
+    "./api/permission-codes": {
+      "types": "./src/api/permission-codes.ts",
+      "default": "./src/api/permission-codes.ts"
+    },
+    "./api/request": {
+      "types": "./src/api/request.ts",
+      "default": "./src/api/request.ts"
+    },
+    "./api/session": {
+      "types": "./src/api/session.ts",
+      "default": "./src/api/session.ts"
+    },
+    "./locales": {
+      "types": "./src/locales/index.ts",
+      "default": "./src/locales/index.ts"
+    },
+    "./deployment-internal": {
+      "types": "./src/deployment.ts",
+      "default": "./src/deployment.ts"
+    },
+    "./layouts": {
+      "types": "./src/layouts/index.ts",
+      "default": "./src/layouts/index.ts"
+    },
+    "./views/identity-members": {
+      "types": "./src/views/identity-members/index.ts",
+      "default": "./src/views/identity-members/index.ts"
+    },
+    "./router/product-access": {
+      "types": "./src/router/product-access.ts",
+      "default": "./src/router/product-access.ts"
+    },
+    "./router/route-lifecycle": {
+      "types": "./src/router/route-lifecycle.ts",
+      "default": "./src/router/route-lifecycle.ts"
+    },
+    "./router/routes": {
+      "types": "./src/router/routes/index.ts",
+      "default": "./src/router/routes/index.ts"
+    },
+    "./store": {
+      "types": "./src/store/index.ts",
+      "default": "./src/store/index.ts"
+    }
+  },
+  "dependencies": {
+    "@vben-core/menu-ui": "workspace:*",
+    "@vben/access": "workspace:*",
+    "@vben/common-ui": "workspace:*",
+    "@vben/constants": "workspace:*",
+    "@vben/hooks": "workspace:*",
+    "@vben/icons": "workspace:*",
+    "@vben/layouts": "workspace:*",
+    "@vben/locales": "workspace:*",
+    "@vben/plugins": "workspace:*",
+    "@vben/preferences": "workspace:*",
+    "@vben/request": "workspace:*",
+    "@vben/stores": "workspace:*",
+    "@vben/styles": "workspace:*",
+    "@vben/types": "workspace:*",
+    "@vben/utils": "workspace:*",
+    "@vueuse/core": "catalog:",
+    "antdv-next": "catalog:",
+    "dayjs": "catalog:",
+    "pinia": "catalog:",
+    "vue": "catalog:",
+    "vue-router": "catalog:"
+  }
+}

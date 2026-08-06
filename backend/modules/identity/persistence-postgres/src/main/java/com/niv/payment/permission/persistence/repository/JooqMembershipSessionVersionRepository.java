@@ -25,7 +25,9 @@ public final class JooqMembershipSessionVersionRepository implements MembershipS
     public Optional<MembershipVersions> findActiveVersions(AccountDomain accountDomain, long tenantId,
                                                            long membershipId, long userId) {
         String domain = accountDomain.name();
-        return dsl.select(IAM_MEMBERSHIP.PERMISSION_VERSION, IAM_MEMBERSHIP.SESSION_VERSION)
+        return dsl.select(IAM_MEMBERSHIP.PERMISSION_VERSION, IAM_MEMBERSHIP.SESSION_VERSION,
+                IAM_USER.IDENTITY_VERSION, IAM_USER.IDP_ISSUER, IAM_USER.IDP_SUBJECT,
+                IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
             .from(IAM_MEMBERSHIP)
             .join(IAM_TENANT)
                 .on(IAM_TENANT.ID.eq(IAM_MEMBERSHIP.TENANT_ID)
@@ -38,8 +40,7 @@ public final class JooqMembershipSessionVersionRepository implements MembershipS
             .join(IAM_AUTHENTICATION_CREDENTIAL)
                 .on(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(IAM_USER.ID)
                     .and(IAM_AUTHENTICATION_CREDENTIAL.STATUS.eq(ACTIVE))
-                    .and(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN.eq(domain))
-                    .and(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH.isNotNull()))
+                    .and(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN.eq(domain)))
             .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
                 .and(IAM_MEMBERSHIP.ID.eq(membershipId))
                 .and(IAM_MEMBERSHIP.USER_ID.eq(userId))
@@ -47,6 +48,10 @@ public final class JooqMembershipSessionVersionRepository implements MembershipS
                 .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE)))
             .fetchOptional(row -> new MembershipVersions(
                 row.get(IAM_MEMBERSHIP.PERMISSION_VERSION),
-                row.get(IAM_MEMBERSHIP.SESSION_VERSION)));
+                row.get(IAM_MEMBERSHIP.SESSION_VERSION),
+                row.get(IAM_USER.IDENTITY_VERSION),
+                row.get(IAM_USER.IDP_ISSUER),
+                row.get(IAM_USER.IDP_SUBJECT),
+                row.get(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH) != null));
     }
 }

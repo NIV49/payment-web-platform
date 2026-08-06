@@ -8,13 +8,17 @@ import com.niv.payment.permission.persistence.jooq.generated.Keys;
 import com.niv.payment.permission.persistence.jooq.generated.Public;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuditEvent.IamAuditEventPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamDepartment.IamDepartmentPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitation.IamIdentityInvitationPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleOutbox.IamIdentityLifecycleOutboxPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership.IamMembershipPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole.IamMembershipRolePath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMenu.IamMenuPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery.IamMfaRecoveryPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamPermissionChangeOutbox.IamPermissionChangeOutboxPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRole.IamRolePath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleGrant.IamRoleGrantPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleMenu.IamRoleMenuPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamTenantEntryHost.IamTenantEntryHostPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamUser.IamUserPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.records.IamTenantRecord;
 
@@ -190,6 +194,45 @@ public class IamTenant extends TableImpl<IamTenantRecord> {
         return Arrays.asList(Keys.UK_IAM_TENANT_CODE, Keys.UK_IAM_TENANT_ID_ACCOUNT_DOMAIN);
     }
 
+    private transient IamTenantEntryHostPath _iamTenantEntryHost;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_tenant_entry_host</code> table
+     */
+    public IamTenantEntryHostPath iamTenantEntryHost() {
+        if (_iamTenantEntryHost == null)
+            _iamTenantEntryHost = new IamTenantEntryHostPath(this, null, Keys.IAM_TENANT_ENTRY_HOST__FK_IAM_ENTRY_HOST_TENANT_DOMAIN.getInverseKey());
+
+        return _iamTenantEntryHost;
+    }
+
+    private transient IamIdentityInvitationPath _iamIdentityInvitation;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_invitation</code> table
+     */
+    public IamIdentityInvitationPath iamIdentityInvitation() {
+        if (_iamIdentityInvitation == null)
+            _iamIdentityInvitation = new IamIdentityInvitationPath(this, null, Keys.IAM_IDENTITY_INVITATION__FK_IAM_IDENTITY_INVITATION_TENANT_DOMAIN.getInverseKey());
+
+        return _iamIdentityInvitation;
+    }
+
+    private transient IamIdentityLifecycleOutboxPath _iamIdentityLifecycleOutbox;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_lifecycle_outbox</code> table
+     */
+    public IamIdentityLifecycleOutboxPath iamIdentityLifecycleOutbox() {
+        if (_iamIdentityLifecycleOutbox == null)
+            _iamIdentityLifecycleOutbox = new IamIdentityLifecycleOutboxPath(this, null, Keys.IAM_IDENTITY_LIFECYCLE_OUTBOX__FK_IAM_IDENTITY_OUTBOX_TENANT_REALM.getInverseKey());
+
+        return _iamIdentityLifecycleOutbox;
+    }
+
     private transient IamMembershipPath _fkIamMembershipTenantDomain;
 
     /**
@@ -202,6 +245,19 @@ public class IamTenant extends TableImpl<IamTenantRecord> {
             _fkIamMembershipTenantDomain = new IamMembershipPath(this, null, Keys.IAM_MEMBERSHIP__FK_IAM_MEMBERSHIP_TENANT_DOMAIN.getInverseKey());
 
         return _fkIamMembershipTenantDomain;
+    }
+
+    private transient IamMfaRecoveryPath _iamMfaRecovery;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_mfa_recovery</code> table
+     */
+    public IamMfaRecoveryPath iamMfaRecovery() {
+        if (_iamMfaRecovery == null)
+            _iamMfaRecovery = new IamMfaRecoveryPath(this, null, Keys.IAM_MFA_RECOVERY__FK_IAM_MFA_RECOVERY_TENANT_DOMAIN.getInverseKey());
+
+        return _iamMfaRecovery;
     }
 
     private transient IamAuditEventPath _iamAuditEvent;

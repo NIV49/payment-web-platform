@@ -1,8 +1,7 @@
 # Payment Web Platform 仓库总览
 
 > 仓库：`git@github.com:NIV49/payment-web-platform.git`
-> 当前分支基线：`codex/permission-reference-design`
-> 记录日期：2026-07-21
+> 记录日期：2026-08-05
 
 ## 1. 顶层结构
 
@@ -28,10 +27,13 @@ payment-web-platform/
 
 当前管理后台，来自 Vben 5.7.0 并完成精简。只保留：
 
-- `apps/web-antdv-next`：产品 Admin；
+- `apps/platform-admin`：运维后台应用；
+- `apps/merchant-admin`：商户后台应用；
+- `apps/agent-admin`：代理商后台应用；
 - `apps/backend-mock`：Nitro 本地 Mock；
 - `playground`：Vben 示例和 E2E；
-- `packages`、`internal`、`scripts`：Vben 运行与工程基础。
+- `packages/effects/backoffice-runtime`：三应用共享但不注册应用专属页面的运行时；
+- 其他 `packages`、`internal`、`scripts`：Vben 运行与工程基础。
 
 详细内容见 [Admin 前端工程上下文](./frontend/README.md) 和 [Vben 基线](./vben/README.md)。
 
@@ -41,7 +43,7 @@ payment-web-platform/
 
 ### `backend`
 
-Maven reactor。`applications/admin-api` 是当前唯一启动单元，`modules/identity` 拥有 Identity core 与 PostgreSQL、Redis、Sa-Token adapters。未来新增支付业务上下文时延续 `modules/<context>`，只有确实需要独立部署时才新增 `applications/<app>`。
+Maven reactor。`applications/platform-admin-api`、`applications/merchant-admin-api`、`applications/agent-admin-api` 是三个独立启动单元，分别固定 PLATFORM、MERCHANT、AGENT 账号域；`modules/identity` 拥有共享 Identity core 与 PostgreSQL、Redis、Sa-Token adapters。未来新增支付业务上下文时延续 `modules/<context>`，只有确实需要独立部署时才新增 `applications/<app>`。
 
 详细内容见 [后端工程上下文](./backend/README.md)。
 
@@ -80,15 +82,17 @@ Maven reactor。`applications/admin-api` 是当前唯一启动单元，`modules/
 
 ```mermaid
 flowchart LR
-  ADMIN["frontend/admin web-antdv-next"] -->|"HTTP /api contract"| API["backend applications/admin-api"]
-  API --> IAM["backend modules/identity"]
+  PLATFORM["platform-admin"] -->|"/api"| PLATFORM_API["platform-admin-api"]
+  MERCHANT["merchant-admin"] -->|"/api"| MERCHANT_API["merchant-admin-api"]
+  AGENT["agent-admin"] -->|"/api"| AGENT_API["agent-admin-api"]
+  PLATFORM_API --> IAM["backend modules/identity"]
+  MERCHANT_API --> IAM
+  AGENT_API --> IAM
   IAM --> PG["PostgreSQL"]
-  API --> REDIS["Redis / Sa-Token"]
-  PLAY["frontend/admin playground"] -. "模式参考" .-> ADMIN
-  MOCK["frontend/admin backend-mock"] -. "本地替代 API" .-> ADMIN
-  PORTAL["frontend/portal"] -. "未来共享业务契约" .-> API
-  DOCS["docs/ai-contract + ai-context"] --- ADMIN
-  DOCS --- API
+  IAM --> REDIS["Redis / Sa-Token"]
+  PLAY["frontend/admin playground"] -. "模式参考" .-> PLATFORM
+  MOCK["frontend/admin backend-mock"] -. "本地替代 API" .-> PLATFORM
+  DOCS["docs/ai-contract + ai-context"] --- IAM
 ```
 
 关键边界：
@@ -122,7 +126,10 @@ Vben 上游根目录与本仓库的 `frontend/admin` 存在目录位移。更新
 
 | 新能力 | 默认位置 |
 | --- | --- |
-| Admin 业务页面/API | `frontend/admin/apps/web-antdv-next/src` |
+| 运维后台业务页面/API | `frontend/admin/apps/platform-admin/src` |
+| 商户后台业务页面/API | `frontend/admin/apps/merchant-admin/src` |
+| 代理商后台业务页面/API | `frontend/admin/apps/agent-admin/src` |
+| 三后台共享运行时 | `frontend/admin/packages/effects/backoffice-runtime/src`；不得隐式注册任一应用专属页面 |
 | Vben 示例验证 | `frontend/admin/playground` |
 | 两个以上 Admin 应用共用的稳定能力 | 经评审后进入 `frontend/admin/packages` |
 | Nuxt 官网/收银台/国家应用 | `frontend/portal`（初始化后按其专属规则） |

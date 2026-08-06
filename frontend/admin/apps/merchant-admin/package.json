@@ -1,0 +1,19 @@
+{
+  "name": "@payment/merchant-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build --mode production",
+    "dev": "vite --mode development --port 6002 --strictPort",
+    "preview": "vite preview --outDir dist --port 6002 --strictPort",
+    "typecheck": "vue-tsc --noEmit --skipLibCheck"
+  },
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "dependencies": {
+    "@payment/backoffice-runtime": "workspace:*",
+    "@vben/types": "workspace:*"
+  }
+}

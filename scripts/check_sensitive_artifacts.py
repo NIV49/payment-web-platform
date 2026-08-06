@@ -197,24 +197,35 @@ SAFE_LITERAL_VALUES = {
     "redacted",
     "true",
 }
-SAFE_EMAIL_ADDRESSES = {"git@github.com"}
+SAFE_EMAIL_ADDRESSES = {"example@example.com", "git@github.com"}
 SAFE_EMAIL_SUFFIXES = (".example", ".invalid", ".test")
+APPROVED_BINARY_BLOB_HASHES = {
+    "frontend/admin/apps/agent-admin/public/favicon.ico": (
+        "ff35213ee7dd0334db69b47a91ba549040736f1d2fe1e0de164f2fa3ec89c169"
+    ),
+    "frontend/admin/apps/merchant-admin/public/favicon.ico": (
+        "ff35213ee7dd0334db69b47a91ba549040736f1d2fe1e0de164f2fa3ec89c169"
+    ),
+    "frontend/admin/apps/platform-admin/public/favicon.ico": (
+        "ff35213ee7dd0334db69b47a91ba549040736f1d2fe1e0de164f2fa3ec89c169"
+    ),
+}
 APPROVED_FINDING_HASHES = {
     (
         "frontend/admin/pnpm-lock.yaml",
-        7095,
+        7474,
         "EMAIL_ADDRESS",
         "b0373516d594ddd199b25c3655332b354837e065c5cc232f5043189897900ca7",
     ): "Published upstream deprecation contact in the frozen pnpm lockfile",
     (
         "frontend/admin/pnpm-lock.yaml",
-        17063,
+        17867,
         "GENERIC_SECRET_ASSIGNMENT",
         "4ccec3fd47ee5162962804420d4b53c8ee5ecfc827f79ffd21e679b305742003",
     ): "Package version mapping in the frozen pnpm lockfile",
     (
         "frontend/admin/pnpm-lock.yaml",
-        17063,
+        17867,
         "YAML_SECRET_SCALAR",
         "4ccec3fd47ee5162962804420d4b53c8ee5ecfc827f79ffd21e679b305742003",
     ): "Package version mapping in the frozen pnpm lockfile",
@@ -222,7 +233,7 @@ APPROVED_FINDING_HASHES = {
 APPROVED_FINDING_CONTEXTS = {
     (
         "frontend/admin/pnpm-lock.yaml",
-        7095,
+        7474,
         "EMAIL_ADDRESS",
     ): (
         "exact_line",
@@ -230,7 +241,7 @@ APPROVED_FINDING_CONTEXTS = {
     ),
     (
         "frontend/admin/pnpm-lock.yaml",
-        17063,
+        17867,
         "GENERIC_SECRET_ASSIGNMENT",
     ): (
         "exact_line",
@@ -238,7 +249,7 @@ APPROVED_FINDING_CONTEXTS = {
     ),
     (
         "frontend/admin/pnpm-lock.yaml",
-        17063,
+        17867,
         "YAML_SECRET_SCALAR",
     ): (
         "exact_line",
@@ -662,6 +673,13 @@ def is_safe_email(value: str) -> bool:
     lowered = value.casefold()
     domain = lowered.rsplit("@", 1)[-1]
     return lowered in SAFE_EMAIL_ADDRESSES or domain.endswith(SAFE_EMAIL_SUFFIXES)
+
+
+def is_approved_binary_blob(path: str, content: bytes) -> bool:
+    expected_digest = APPROVED_BINARY_BLOB_HASHES.get(path)
+    if expected_digest is None:
+        return False
+    return hashlib.sha256(content).hexdigest() == expected_digest
 
 
 def _iter_email_addresses(line: str) -> Iterator[str]:
@@ -4137,9 +4155,12 @@ def scan_file(path: Path, repository: Path) -> list[str]:
         return [
             f"{label}: OVERSIZE: file exceeds {MAX_TEXT_FILE_BYTES} bytes and was not scanned"
         ]
+    raw = path.read_bytes()
     try:
-        content = path.read_text(encoding="utf-8")
+        content = raw.decode("utf-8")
     except UnicodeDecodeError:
+        if is_approved_binary_blob(label, raw):
+            return []
         return [f"{label}: NON_UTF8: artifact requires an approved binary scanner"]
     return scan_text_content(label, content)
 
@@ -4342,6 +4363,8 @@ def scan_git_diff(repository: Path, base_commit: str, commit: str) -> list[str]:
                 continue
             content = raw.decode("utf-8")
         except UnicodeError:
+            if is_approved_binary_blob(path, raw):
+                continue
             errors.append(f"{path}: NON_UTF8: changed blob requires an approved binary scanner")
             continue
         except ValueError as error:

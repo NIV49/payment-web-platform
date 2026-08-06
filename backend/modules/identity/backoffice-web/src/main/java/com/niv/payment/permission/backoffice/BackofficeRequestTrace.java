@@ -2,7 +2,7 @@ package com.niv.payment.permission.backoffice;
 
 import java.util.UUID;
 
-final class BackofficeRequestTrace {
+public final class BackofficeRequestTrace {
     private static final ThreadLocal<String> TRACE = new ThreadLocal<>();
 
     static String begin() {
@@ -11,7 +11,7 @@ final class BackofficeRequestTrace {
         return value;
     }
 
-    static String current() {
+    public static String current() {
         String value = TRACE.get();
         return value == null ? "unavailable" : value;
     }

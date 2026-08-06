@@ -1,0 +1,2532 @@
+package com.niv.payment.adminapi;
+
+import cn.dev33.satoken.config.SaTokenConfig;
+import jakarta.servlet.http.Cookie;
+import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.persistence.repository.JooqRoleAdministrationRepository;
+import com.niv.payment.permission.persistence.repository.JooqRoleConfigurationRepository;
+import com.niv.payment.permission.service.IdentityAdministrationService;
+import com.niv.payment.permission.service.IdentityModels;
+import com.niv.payment.permission.service.RoleConfigurationCommand;
+import com.niv.payment.permission.service.RoleAssignmentPolicy;
+import com.niv.payment.identity.oidc.RedisOidcSessionIndex;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import com.jayway.jsonpath.JsonPath;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@Testcontainers
+@SpringBootTest(classes = AdminApiApplication.class)
+@AutoConfigureMockMvc
+@ActiveProfiles("local")
+class AdminApiContractIntegrationTest {
+    private static final String ORIGIN = "http://localhost:5999";
+    private static final String REQUEST_PROOF_HEADER = "X-CSRF-Token";
+    private static final String ADMIN_LOGIN_INPUT = "Admin-Test-Password-2026";
+    private static final String RESTRICTED_LOGIN_INPUT = "Low-Test-Password-2026";
+    private static final String LOCAL_SERVICE_SENTINEL = "disabled";
+
+    @Container
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(DockerImageName.parse("postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15").asCompatibleSubstituteFor("postgres"))
+        .withDatabaseName("payment_platform").withUsername("payment_dev").withPassword("payment_dev");
+
+    @Container
+    static final GenericContainer<?> VALKEY = new GenericContainer<>("valkey/valkey:7.2.13-alpine@sha256:ac32d5e70f29e2be83384f5173180911b666c79a0e91ac0d074de5771638ed91")
+        .withCommand("valkey-server", "--requirepass", LOCAL_SERVICE_SENTINEL)
+        .withExposedPorts(6379);
+
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("spring.data.redis.host", VALKEY::getHost);
+        registry.add("spring.data.redis.port", () -> VALKEY.getMappedPort(6379));
+        registry.add("payment.bootstrap-password", () -> ADMIN_LOGIN_INPUT);
+        registry.add("payment.security.allowed-origins", () -> ORIGIN);
+        registry.add("sa-token.cookie.secure", () -> false);
+    }
+
+    @Autowired MockMvc mvc;
+    @Autowired StringRedisTemplate redis;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired BCryptPasswordEncoder passwords;
+    @Autowired JooqRoleAdministrationRepository roles;
+    @Autowired JooqRoleConfigurationRepository roleConfigurations;
+    @Autowired ApplicationContext applicationContext;
+    @Autowired SaTokenConfig saTokenConfig;
+    private final Map<String, String> requestProofs = new ConcurrentHashMap<>();
+
+    @BeforeEach
+    void seedRestrictedUserAndSameDomainMembership() {
+        jdbc.update("""
+            UPDATE iam_membership SET status='ACTIVE',row_version=0,session_version=session_version+1
+             WHERE tenant_id=1 AND id=1000
+            """);
+        jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=1000");
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,1000,2000,1000)
+            """);
+        jdbc.update("""
+            INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status,account_domain)
+            VALUES(801,'local','restricted','Restricted User','ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
+            """);
+        jdbc.update("""
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+            VALUES(802,1,801,10,'ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
+            """);
+        jdbc.update("""
+            UPDATE iam_membership SET status='ACTIVE',row_version=0,session_version=session_version+1
+             WHERE tenant_id=1 AND id=802
+            """);
+        jdbc.update("""
+            INSERT INTO iam_authentication_credential(user_id,username,password_hash,status,account_domain)
+            VALUES(801,'restricted',?,'ACTIVE','PLATFORM')
+            ON CONFLICT(user_id) DO UPDATE SET password_hash=excluded.password_hash,status='ACTIVE',
+                account_domain='PLATFORM'
+            """, passwords.encode(RESTRICTED_LOGIN_INPUT));
+        jdbc.update("""
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain)
+            VALUES(4,'platform-four','Platform Four','PLATFORM','ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
+            """);
+        jdbc.update("""
+            INSERT INTO iam_department(id,tenant_id,parent_id,department_code,department_name,status)
+            VALUES(40,4,NULL,'root','Root','ACTIVE') ON CONFLICT(id) DO NOTHING
+            """);
+        jdbc.update("""
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+            VALUES(803,4,801,40,'ACTIVE','PLATFORM') ON CONFLICT(id) DO NOTHING
+            """);
+        jdbc.update("UPDATE iam_membership SET status='DISABLED' WHERE tenant_id=4 AND id=803");
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES(8800,1,'restricted-portal-access','Restricted Portal Access','PLATFORM',
+                   true,false,'ACTIVE')
+            ON CONFLICT(id) DO NOTHING
+            """);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES(8801,1,8800,3022,'system-backoffice-access','ACTIVE')
+            ON CONFLICT(role_id,permission_id,grant_key) DO NOTHING
+            """);
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES(8802,8801,'TENANT','TENANT_ALL')
+            ON CONFLICT(grant_id,dimension_code) DO NOTHING
+            """);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,802,8800,1000) ON CONFLICT DO NOTHING
+            """);
+
+    }
+
+    @Test
+    void unauthenticatedRequestReturns401Envelope() throws Exception {
+        mvc.perform(get("/api/user/info"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value(40102))
+            .andExpect(jsonPath("$.error").value("SESSION_INVALID"))
+            .andExpect(jsonPath("$.traceId").isString());
+    }
+
+    @Test
+    void healthIsAvailableWithoutAPlatformSession() throws Exception {
+        mvc.perform(get("/api/health"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("UP"));
+    }
+
+    @Test
+    void loginUsesOpaqueMarkerAndHardenedCookie() throws Exception {
+        String cookie = login("admin", ADMIN_LOGIN_INPUT);
+        assertThat(cookie).isNotBlank();
+    }
+
+    @Test
+    void securityCriticalSaTokenConfigurationIsBoundWithoutPostStartupRunner() {
+        assertThat(applicationContext.containsBean("saTokenSecurityInitializer")).isFalse();
+        assertThat(saTokenConfig.getTokenName()).isEqualTo("PAYMENT_PLATFORM_SESSION");
+        assertThat(saTokenConfig.getTimeout()).isEqualTo(28_800L);
+        assertThat(saTokenConfig.getActiveTimeout()).isEqualTo(1_800L);
+        assertThat(saTokenConfig.getIsConcurrent()).isFalse();
+        assertThat(saTokenConfig.getIsShare()).isFalse();
+        assertThat(saTokenConfig.getIsReadCookie()).isTrue();
+        assertThat(saTokenConfig.getIsReadHeader()).isFalse();
+        assertThat(saTokenConfig.getIsReadBody()).isFalse();
+        assertThat(saTokenConfig.getIsWriteHeader()).isFalse();
+        assertThat(saTokenConfig.getIsLastingCookie()).isTrue();
+        assertThat(saTokenConfig.getRightNowCreateTokenSession()).isTrue();
+        assertThat(saTokenConfig.getCookie().getHttpOnly()).isTrue();
+        assertThat(saTokenConfig.getCookie().getSecure()).isFalse();
+        assertThat(saTokenConfig.getCookie().getSameSite()).isEqualTo("Strict");
+        assertThat(saTokenConfig.getCookie().getPath()).isEqualTo("/");
+    }
+
+    @Test
+    void loginFailureDoesNotRevealWhetherUsernameExists() throws Exception {
+        String known = mvc.perform(post("/api/auth/login").header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"username\":\"admin\",\"password\":\"wrong\"}"))
+            .andExpect(status().isUnauthorized()).andReturn().getResponse().getContentAsString();
+        String unknown = mvc.perform(post("/api/auth/login").header("Origin", ORIGIN)
+                .contentType("application/json").content("{\"username\":\"unknown\",\"password\":\"wrong\"}"))
+            .andExpect(status().isUnauthorized()).andReturn().getResponse().getContentAsString();
+        assertThat(known).contains("INVALID_CREDENTIALS", "Invalid username or password");
+        assertThat(unknown).contains("INVALID_CREDENTIALS", "Invalid username or password");
+    }
+
+    @Test
+    void untrustedForwardedForCannotRotateTheLoginRateLimitBucket() throws Exception {
+        for (int attempt = 0; attempt < 5; attempt++) {
+            mvc.perform(post("/api/auth/login")
+                    .with(request -> {
+                        request.setRemoteAddr("198.51.100.77");
+                        return request;
+                    })
+                    .header("Origin", ORIGIN)
+                    .header("X-Forwarded-For", "203.0.113." + (attempt + 1))
+                    .contentType("application/json")
+                    .content("{\"username\":\"forwarded-header-probe\",\"password\":\"wrong\"}"))
+                .andExpect(status().isUnauthorized());
+        }
+
+        mvc.perform(post("/api/auth/login")
+                .with(request -> {
+                    request.setRemoteAddr("198.51.100.77");
+                    return request;
+                })
+                .header("Origin", ORIGIN)
+                .header("X-Forwarded-For", "203.0.113.250")
+                .contentType("application/json")
+                .content("{\"username\":\"forwarded-header-probe\",\"password\":\"wrong\"}"))
+            .andExpect(status().isTooManyRequests())
+            .andExpect(jsonPath("$.error").value("LOGIN_RATE_LIMITED"));
+    }
+
+    @Test
+    void oversizedJsonRequestIsRejectedBeforeControllerDispatch() throws Exception {
+        String body = "{\"username\":\"admin\",\"password\":\""
+            + "x".repeat(262_144) + "\"}";
+        mvc.perform(post("/api/auth/login").header("Origin", ORIGIN)
+                .contentType("application/json").content(body))
+            .andExpect(status().isPayloadTooLarge())
+            .andExpect(jsonPath("$.code").value(41301))
+            .andExpect(jsonPath("$.error").value("PAYLOAD_TOO_LARGE"));
+    }
+
+    @Test
+    void platformLoginIgnoresOtherDomainsAndRejectsClientTenantSelection() throws Exception {
+        mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"username\":\"merchant-admin\",\"password\":\""
+                    + ADMIN_LOGIN_INPUT + "\"}"))
+            .andExpect(status().isUnauthorized());
+
+        mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"username\":\"restricted\",\"password\":\"" + RESTRICTED_LOGIN_INPUT + "\"}"))
+            .andExpect(status().isOk());
+
+        mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"username\":\"restricted\",\"password\":\"" + RESTRICTED_LOGIN_INPUT
+                    + "\",\"tenantId\":\"1\"}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void currentUserCodesAndDynamicMenuMatchVbenContract() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        mvc.perform(get("/api/user/info").cookie(cookie)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.userId").value("100"))
+            .andExpect(jsonPath("$.data.homePath").value("/dashboard"))
+            .andExpect(jsonPath("$.data.systemAdministrator").value(true));
+        mvc.perform(get("/api/auth/codes").cookie(cookie)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.length()").value(20))
+            .andExpect(jsonPath("$.data[?(@ == 'backoffice:platform-access')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'user:assign-role')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'role:grant-update')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'menu:manage')]").doesNotExist());
+        String dynamicMenuBody = mvc.perform(get("/api/menu/all").cookie(cookie)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].pid").value("0"))
+            .andExpect(jsonPath("$.data[0].component").doesNotExist())
+            .andExpect(jsonPath("$.data[0].meta.title").value("page.dashboard.title"))
+            .andExpect(jsonPath("$.data[0].redirect").value("/dashboard/analytics"))
+            .andExpect(jsonPath("$.data[0].children[0].component").value("/dashboard/analytics/index"))
+            .andExpect(jsonPath("$.data[1].component").doesNotExist())
+            .andExpect(jsonPath("$.data[1].meta.title").value("system.title"))
+            .andExpect(jsonPath("$.data[1].children[0].component").value("/system/user/list"))
+            .andExpect(jsonPath("$.data[1].children[0].meta.title").value("system.user.title"))
+            .andExpect(jsonPath("$.data[1].children[1].meta.title").value("system.role.title"))
+            .andExpect(jsonPath("$.data[1].children[2].meta.title").value("system.menu.title"))
+            .andExpect(jsonPath("$.data[1].children[3].meta.title").value("system.dept.title"))
+            .andExpect(jsonPath("$.data[1].children[3].name").value("SystemDept"))
+            .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(dynamicMenuBody, "$.data..authCode")).isEmpty();
+        mvc.perform(get("/api/system/user/list?page=1&pageSize=20&status=1").cookie(cookie))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].id").isString());
+        mvc.perform(get("/api/system/role/list?page=1&pageSize=200&status=1").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items[0].status").value(1))
+            .andExpect(jsonPath("$.data.items[0].rowVersion").isNumber())
+            .andExpect(jsonPath("$.data.items[0].systemRole").isBoolean())
+            .andExpect(jsonPath("$.data.items[0].assignable").isBoolean());
+        mvc.perform(get("/api/system/dept/list").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].pid").value("0"))
+            .andExpect(jsonPath("$.data[0].rowVersion").isNumber());
+        String administrationMenuBody = mvc.perform(get("/api/system/menu/list").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].component").doesNotExist())
+            .andExpect(jsonPath("$.data[1].component").doesNotExist())
+            .andExpect(jsonPath("$.data[0].rowVersion").isNumber())
+            .andExpect(jsonPath("$.data[1].meta.title").value("system.title"))
+            .andExpect(jsonPath("$.data[1].children[0].component").value("/system/user/list"))
+            .andExpect(jsonPath("$.data[1].children[0].children[0].type").value("button"))
+            .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<String>>read(administrationMenuBody, "$.data..authCode"))
+            .containsExactlyInAnyOrder(
+                "user:view", "user:create", "user:update", "user:delete", "user:disable", "user:assign-role",
+                "role:view", "role:create", "role:update", "role:delete",
+                "menu:view", "menu:manage", "menu:create", "menu:update", "menu:delete",
+                "department:view", "department:manage", "department:create", "department:update",
+                "department:delete", "role:grant-update");
+    }
+
+    @Test
+    void cookieAuthenticatedMutationsRequireAnIndependentRequestProof() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+
+        mvc.perform(post("/api/auth/logout").cookie(cookie).header("Origin", ORIGIN))
+            .andExpect(status().isForbidden());
+        mvc.perform(get("/api/user/info").cookie(cookie))
+            .andExpect(status().isOk());
+
+        mvc.perform(post("/api/auth/logout").cookie(cookie).header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isOk());
+        mvc.perform(get("/api/user/info").cookie(cookie))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void oidcCallbackAndBackChannelProtocolEndpointsDoNotDependOnOrigin() throws Exception {
+        mvc.perform(get("/api/auth/oidc/callback").queryParam("code", "code-1")
+                .queryParam("state", "state-1"))
+            .andExpect(status().isNotFound());
+        mvc.perform(post("/api/auth/oidc/backchannel-logout")
+                .contentType("application/x-www-form-urlencoded")
+                .param("logout_token", "signed-value"))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void redisOidcSessionIndexSeparatesSidSubjectAndReplayNamespaces() {
+        var index = new RedisOidcSessionIndex(redis, "platform", Duration.ofHours(9),
+            Duration.ofSeconds(30), Duration.ofHours(24));
+
+        index.register("https://idp.example.test/realms/platform", "subject-1", "session-1", 1000L);
+
+        assertThat(index.findBySession(
+            "https://idp.example.test/realms/platform", "session-1")).containsExactly(1000L);
+        assertThat(index.findBySubject(
+            "https://idp.example.test/realms/platform", "subject-1")).containsExactly(1000L);
+        assertThat(index.claimEvent(
+            "https://idp.example.test/realms/platform", "event-1"))
+            .extracting(com.niv.payment.identity.oidc.OidcSessionIndex.EventClaim::status)
+            .isEqualTo(com.niv.payment.identity.oidc.OidcSessionIndex.Status.ACQUIRED);
+        var claim = index.claimEvent(
+            "https://idp.example.test/realms/platform", "event-2");
+        index.completeEvent("https://idp.example.test/realms/platform", "event-2", claim.owner());
+        assertThat(index.claimEvent(
+            "https://idp.example.test/realms/platform", "event-2").status())
+            .isEqualTo(com.niv.payment.identity.oidc.OidcSessionIndex.Status.COMPLETED);
+    }
+
+    @Test
+    void roleGrantEndpointsKeepPresentationMenusSeparateAndUseTheFrozenDimensionsContract() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        mvc.perform(get("/api/v1/iam/permissions/grantable").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.length()").value(18))
+            .andExpect(jsonPath("$.data[0].permissionCode").isString())
+            .andExpect(jsonPath("$.data[0].riskLevel").value("NORMAL"))
+            .andExpect(jsonPath("$.data[0].requiredDimensions[0].code").value("TENANT"))
+            .andExpect(jsonPath("$.data[0].requiredDimensions[0].allowedModes[0]").value("TENANT_ALL"))
+            .andExpect(jsonPath("$.data[0].allowedScopeModes").doesNotExist());
+
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Grant Contract Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        List<Long> menuIdsBefore = jdbc.queryForList(
+            "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
+            Long.class, Long.parseLong(roleId));
+        String username = "portal-role-user-" + roleId;
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"name\":\"Portal Role User\","
+                    + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
+            .andExpect(status().isOk());
+        assertThat(login(username, ADMIN_LOGIN_INPUT)).isNotBlank();
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"reject null grant\",\"grants\":[null]}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("""
+                    {"expectedVersion":0,"reason":"reject null dimension",
+                     "grants":[{"grantKey":"invalid","permissionCode":"user:view",
+                       "dimensions":[null]}]}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        assertThat(jdbc.queryForObject(
+            "SELECT row_version FROM iam_role WHERE tenant_id=1 AND id=?",
+            Long.class, Long.parseLong(roleId))).isZero();
+        assertThat(jdbc.queryForObject(
+            """
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.grant_key='system-backoffice-access'
+               AND grant_row.status='ACTIVE'
+               AND permission.permission_code='backoffice:platform-access'
+            """, Long.class, Long.parseLong(roleId))).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
+            """, Long.class, roleId)).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE_GRANTS' AND aggregate_ref=?
+            """, Long.class, roleId)).isZero();
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roleId").value(roleId))
+            .andExpect(jsonPath("$.data.roleVersion").value(0))
+            .andExpect(jsonPath("$.data.editable").value(true))
+            .andExpect(jsonPath("$.data.grants.length()").value(0));
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("""
+                    {"expectedVersion":0,"reason":"least privilege acceptance",
+                     "grants":[{"grantKey":"user-view","permissionCode":"user:view",
+                       "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roleVersion").value(1))
+            .andExpect(jsonPath("$.data.grants[0].permissionCode").value("user:view"))
+            .andExpect(jsonPath("$.data.grants[0].dimensions[0].code").value("TENANT"))
+            .andExpect(jsonPath("$.data.grants[0].dimensions[0].mode").value("TENANT_ALL"))
+            .andExpect(jsonPath("$.data.grants[0].dimensions[0].targets.length()").value(0))
+            .andExpect(jsonPath("$.data.grants[0].dimension").doesNotExist());
+
+        assertThat(jdbc.queryForList(
+            "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
+            Long.class, Long.parseLong(roleId))).isEqualTo(menuIdsBefore);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
+            """, Long.class, roleId)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.grant_key='system-backoffice-access'
+               AND grant_row.status='ACTIVE'
+               AND permission.permission_code='backoffice:platform-access'
+            """, Long.class, Long.parseLong(roleId))).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE_GRANTS' AND aggregate_ref=?
+            """, Long.class, roleId)).isOne();
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"stale\",\"grants\":[]}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("OPTIMISTIC_LOCK_CONFLICT"));
+        mvc.perform(put("/api/v1/iam/roles/2000/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"forbidden system role\",\"grants\":[]}"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void nonAssignableRoleGrantIsReadOnlyAndRejectsReplacement() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES (?,1,?,?,'PLATFORM',false,false,'ACTIVE')
+            """, roleId, "non-assignable-grant-" + roleId, "Non Assignable Grant " + roleId);
+        try {
+            mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.editable").value(false));
+
+            mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json")
+                    .content("{\"name\":\"Must Stay Protected\",\"menuIds\":[],"
+                        + "\"status\":1,\"expectedVersion\":0}"))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+
+            mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                    .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                    .content("{\"expectedVersion\":0,\"reason\":\"ordinary workflow denied\",\"grants\":[]}"))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+
+            assertThat(jdbc.queryForMap("""
+                SELECT row_version,assignable,system_role FROM iam_role WHERE tenant_id=1 AND id=?
+                """, roleId))
+                .containsEntry("row_version", 0L)
+                .containsEntry("assignable", false)
+                .containsEntry("system_role", false);
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=?
+                """, Long.class, roleId)).isZero();
+        } finally {
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+        }
+    }
+
+    @Test
+    void roleMenuIdsRejectButtonsAndDisabledMenusWithoutPartialWrites() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String rejectedRoleName = "Button Menu Role";
+
+        mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"" + rejectedRoleName
+                    + "\",\"menuIds\":[\"6020\"],\"status\":1}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role WHERE tenant_id=1 AND role_name=?
+            """, Long.class, rejectedRoleName)).isZero();
+
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Disabled Menu Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Must Not Persist\",\"menuIds\":[\"6031\"],"
+                    + "\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+
+        assertThat(jdbc.queryForMap("""
+            SELECT role_name,row_version FROM iam_role WHERE tenant_id=1 AND id=?
+            """, roleId))
+            .containsEntry("role_name", "Disabled Menu Role")
+            .containsEntry("row_version", 0L);
+        assertThat(jdbc.queryForList("""
+            SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id
+            """, Long.class, roleId)).containsExactly(6001L);
+
+        jdbc.update("""
+            INSERT INTO iam_role_menu(tenant_id,role_id,menu_id)
+            VALUES(1,?,6020),(1,?,6031)
+            """, roleId, roleId);
+        String filteredRoleBody = mvc.perform(get("/api/system/role/list").cookie(cookie)
+                .param("page", "1").param("pageSize", "20").param("name", "Disabled Menu Role"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items.length()").value(1))
+            .andExpect(jsonPath("$.data.items[0].menuIds.length()").value(1))
+            .andExpect(jsonPath("$.data.items[0].menuIds[0]").value("6001"))
+            .andReturn().getResponse().getContentAsString();
+        Number filteredVersion = JsonPath.read(filteredRoleBody, "$.data.items[0].rowVersion");
+
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Disabled Menu Role\",\"menuIds\":[\"6001\"],"
+                    + "\"status\":1,\"expectedVersion\":" + filteredVersion.longValue() + "}"))
+            .andExpect(status().isOk());
+        assertThat(jdbc.queryForList("""
+            SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id
+            """, Long.class, roleId)).containsExactly(6001L, 6020L, 6031L);
+    }
+
+    @Test
+    void roleGrantRevocationInvalidatesMemberSessionAndRefreshesAuthorizationCodes() throws Exception {
+        Cookie admin = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(admin).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(admin))
+                .contentType("application/json")
+                .content("{\"name\":\"Revocation Contract Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        List<Long> menuIdsBefore = jdbc.queryForList(
+            "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
+            Long.class, roleId);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,802,?,1000)
+            """, roleId);
+
+        try {
+            long permissionVersionBefore = jdbc.queryForObject("""
+                SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=802
+                """, Long.class);
+            mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(admin)
+                    .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(admin)).contentType("application/json")
+                    .content("""
+                        {"expectedVersion":0,"reason":"grant acceptance permission",
+                         "grants":[{"grantKey":"acceptance-user-create","permissionCode":"user:create",
+                           "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                        """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roleVersion").value(1));
+            assertThat(jdbc.queryForObject("""
+                SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=802
+                """, Long.class)).isEqualTo(permissionVersionBefore + 1L);
+
+            Cookie restricted = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            mvc.perform(get("/api/auth/codes").cookie(restricted))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[?(@ == 'user:create')]").exists())
+                .andExpect(jsonPath("$.data[?(@ == 'backoffice:platform-access')]").exists());
+
+            mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(admin)
+                    .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(admin)).contentType("application/json")
+                    .content("{\"expectedVersion\":1,\"reason\":\"revoke acceptance permission\",\"grants\":[]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.roleVersion").value(2))
+                .andExpect(jsonPath("$.data.grants.length()").value(0));
+
+            assertThat(jdbc.queryForObject("""
+                SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=802
+                """, Long.class)).isEqualTo(permissionVersionBefore + 2L);
+            assertThat(jdbc.queryForList(
+                "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
+                Long.class, roleId)).isEqualTo(menuIdsBefore);
+            mvc.perform(get("/api/auth/codes").cookie(restricted))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("SESSION_INVALID"))
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                    org.hamcrest.Matchers.containsString("PAYMENT_PLATFORM_SESSION="),
+                    org.hamcrest.Matchers.containsString("Max-Age=0"))));
+            mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(restricted))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("SESSION_INVALID"));
+
+            Cookie refreshed = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            mvc.perform(get("/api/auth/codes").cookie(refreshed))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0]").value("backoffice:platform-access"));
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_audit_event
+                 WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
+                """, Long.class, Long.toString(roleId))).isEqualTo(2L);
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_permission_change_outbox
+                 WHERE tenant_id=1 AND aggregate_type='ROLE_GRANTS' AND aggregate_ref=?
+                """, Long.class, Long.toString(roleId))).isEqualTo(2L);
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802 AND role_id=?",
+                roleId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+            jdbc.update("UPDATE iam_membership SET permission_version=permission_version+1 WHERE tenant_id=1 AND id=802");
+        }
+    }
+
+    @Test
+    void roleGrantEndpointsRecheckSystemRoleAfterTheHttpPermissionGate() throws Exception {
+        mvc.perform(get("/api/v1/iam/permissions/grantable"))
+            .andExpect(status().isUnauthorized());
+
+        long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long roleViewGrant = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long grantUpdateGrant = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long roleViewDimension = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long grantUpdateDimension = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES (?,1,?,?,'PLATFORM',true,false,'ACTIVE')
+            """, roleId, "grant-gate-" + roleId, "Grant Gate " + roleId);
+        jdbc.update("INSERT INTO iam_membership_role(tenant_id,membership_id,role_id) VALUES(1,802,?)", roleId);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3007,'gate-role-view','ACTIVE'),
+                   (?,1,?,3021,'gate-grant-update','ACTIVE')
+            """, roleViewGrant, roleId, grantUpdateGrant, roleId);
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL'),(?,?,'TENANT','TENANT_ALL')
+            """, roleViewDimension, roleViewGrant, grantUpdateDimension, grantUpdateGrant);
+        try {
+            Cookie restricted = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            mvc.perform(get("/api/v1/iam/permissions/grantable").cookie(restricted))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802 AND role_id=?", roleId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+            jdbc.update("UPDATE iam_membership SET permission_version=permission_version+1 WHERE tenant_id=1 AND id=802");
+        }
+    }
+
+    @Test
+    void roleGrantEndpointsAcceptAnActorWithMultipleActiveSystemRoles() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES (?,1,?,?,'PLATFORM',false,true,'ACTIVE')
+            """, roleId, "second-system-role-" + roleId, "Second System Role " + roleId);
+        jdbc.update("INSERT INTO iam_membership_role(tenant_id,membership_id,role_id) VALUES(1,1000,?)", roleId);
+        try {
+            mvc.perform(get("/api/v1/iam/permissions/grantable").cookie(cookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(18));
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=1000 AND role_id=?",
+                roleId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+        }
+    }
+
+    @Test
+    void unsupportedExistingGrantMakesTheRoleReadOnlyAndRejectsReplacement() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Unsupported Grant Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3021,'unsupported-admin-only','ACTIVE')
+            """, grantId, Long.parseLong(roleId));
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"must reject unsupported\",\"grants\":[]}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+    }
+
+    @Test
+    void nonPortalPermissionUsingTheReservedGrantKeyFailsClosed() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Reserved Key Conflict Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3001,'system-backoffice-access','DISABLED')
+            """, grantId, Long.parseLong(roleId));
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"reserved key conflict\",\"grants\":[]}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+    }
+
+    @Test
+    void duplicateGrantKeysAndPermissionsFailClosed() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String duplicateKeyRole = createRole(cookie, "Duplicate Grant Key Role");
+        insertTenantGrant(duplicateKeyRole, 3001L, "duplicate-key");
+        insertTenantGrant(duplicateKeyRole, 3002L, "duplicate-key");
+        mvc.perform(get("/api/v1/iam/roles/" + duplicateKeyRole + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+
+        String duplicatePermissionRole = createRole(cookie, "Duplicate Permission Role");
+        insertTenantGrant(duplicatePermissionRole, 3001L, "user-view-first");
+        insertTenantGrant(duplicatePermissionRole, 3001L, "user-view-second");
+        mvc.perform(get("/api/v1/iam/roles/" + duplicatePermissionRole + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+    }
+
+    @Test
+    void disabledAdditionalPortalGrantFailsClosed() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleId = createRole(cookie, "Disabled Extra Portal Role");
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3022,'disabled-extra-portal','DISABLED')
+            """, grantId, Long.parseLong(roleId));
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+    }
+
+    @Test
+    void legacyGrantReturnedByGetCanBePutBackUnchanged() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleId = createRole(cookie, "Legacy Grant Round Trip Role");
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        insertTenantGrant(roleId, 3001L, "legacy-backoffice-access-" + grantId, grantId);
+
+        String response = mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(true))
+            .andExpect(jsonPath("$.data.grants[0].grantKey")
+                .value("legacy-backoffice-access-" + grantId))
+            .andReturn().getResponse().getContentAsString();
+        Number roleVersion = JsonPath.read(response, "$.data.roleVersion");
+        Object grants = JsonPath.read(response, "$.data.grants");
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"expectedVersion\":" + roleVersion.longValue()
+                    + ",\"reason\":\"HTTP round trip\",\"grants\":" + grants + "}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.grants[0].grantKey")
+                .value("legacy-backoffice-access-" + grantId));
+    }
+
+    @Test
+    void wrongDomainOrMalformedProtectedPortalGrantFailsClosed() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Malformed Portal Grant Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        long protectedGrantId = jdbc.queryForObject("""
+            SELECT id FROM iam_role_grant
+             WHERE tenant_id=1 AND role_id=? AND grant_key='system-backoffice-access'
+            """, Long.class, Long.parseLong(roleId));
+
+        jdbc.update("UPDATE iam_role_grant SET permission_id=3023 WHERE id=?", protectedGrantId);
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"wrong domain\",\"grants\":[]}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+
+        jdbc.update("UPDATE iam_role_grant SET permission_id=3022 WHERE id=?", protectedGrantId);
+        jdbc.update("""
+            UPDATE iam_grant_dimension SET dimension_code='OWNER',scope_mode='SELF'
+             WHERE grant_id=?
+            """, protectedGrantId);
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(false));
+    }
+
+    @Test
+    void legacyCompatibilityShadowDoesNotBlockGranularGrantReplacement() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Legacy Shadow Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        long legacyGrantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long modernGrantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long legacyDimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long modernDimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,3012,'legacy-menu-manage','ACTIVE'),
+                   (?,1,?,3015,'modern-menu-create','ACTIVE')
+            """, legacyGrantId, Long.parseLong(roleId), modernGrantId, Long.parseLong(roleId));
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL'),(?,?,'TENANT','TENANT_ALL')
+            """, legacyDimensionId, legacyGrantId, modernDimensionId, modernGrantId);
+
+        mvc.perform(get("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.editable").value(true))
+            .andExpect(jsonPath("$.data.grants.length()").value(1))
+            .andExpect(jsonPath("$.data.grants[0].permissionCode").value("menu:create"));
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"expectedVersion\":0,\"reason\":\"retire legacy shadow\",\"grants\":[]}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roleVersion").value(1))
+            .andExpect(jsonPath("$.data.grants.length()").value(0));
+
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant
+             WHERE tenant_id=1 AND role_id=? AND status='ACTIVE'
+            """, Long.class, Long.parseLong(roleId))).isOne();
+    }
+
+    @Test
+    void outboxFailureRollsBackRoleGrantReplacementAuditAndVersion() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Grant Rollback Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String roleId = JsonPath.read(roleBody, "$.data.id");
+        jdbc.execute("""
+            CREATE FUNCTION fail_selected_role_grant_outbox()
+            RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NEW.aggregate_type='ROLE_GRANTS' AND NEW.aggregate_ref='%s' THEN
+                    RAISE EXCEPTION 'forced role grant outbox failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+            """.formatted(roleId));
+        jdbc.execute("""
+            CREATE TRIGGER trg_fail_selected_role_grant_outbox
+            BEFORE INSERT ON iam_permission_change_outbox
+            FOR EACH ROW EXECUTE FUNCTION fail_selected_role_grant_outbox()
+            """);
+        try {
+            mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                    .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                    .content("""
+                        {"expectedVersion":0,"reason":"rollback acceptance",
+                         "grants":[{"grantKey":"user-view","permissionCode":"user:view",
+                           "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                        """))
+                .andExpect(status().isInternalServerError());
+        } finally {
+            jdbc.execute("DROP TRIGGER trg_fail_selected_role_grant_outbox ON iam_permission_change_outbox");
+            jdbc.execute("DROP FUNCTION fail_selected_role_grant_outbox()");
+        }
+
+        assertThat(jdbc.queryForObject("SELECT row_version FROM iam_role WHERE id=?", Long.class,
+            Long.parseLong(roleId))).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.grant_key='system-backoffice-access'
+               AND permission.permission_code='backoffice:platform-access'
+            """, Long.class, Long.parseLong(roleId))).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND permission.permission_code='user:view'
+            """, Long.class, Long.parseLong(roleId))).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_GRANTS' AND target_ref=?
+            """, Long.class, roleId)).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE_GRANTS' AND aggregate_ref=?
+            """, Long.class, roleId)).isZero();
+    }
+
+    @Test
+    void dynamicMenuExcludesButtonsAndAddsOnlyTheAuthorizedRoutesActiveAncestors() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        long catalogId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long pageId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long siblingId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long buttonId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long disabledParentId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long brokenPageId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+
+        jdbc.update("""
+            INSERT INTO iam_menu(id,tenant_id,parent_id,menu_type,menu_name,route_name,route_path,
+                                 component_path,auth_code,sort_order,status,meta_json)
+            VALUES
+              (?,1,NULL,'DIRECTORY','Contract ancestor','ContractAncestor','/contract-ancestor',
+               NULL,NULL,700,'ACTIVE','{"title":"system.title"}'::jsonb),
+              (?,1,?,'PAGE','Contract page','ContractPage','/contract-page',
+               '/system/user/list',NULL,701,'ACTIVE','{"title":"system.user.title"}'::jsonb),
+              (?,1,?,'PAGE','Unauthorized sibling','UnauthorizedSibling','/unauthorized-sibling',
+               '/system/user/list',NULL,702,'ACTIVE','{"title":"system.user.title"}'::jsonb),
+              (?,1,?,'BUTTON','Route button','RouteButton',NULL,
+               NULL,'user:create',703,'ACTIVE','{"title":"common.create"}'::jsonb),
+              (?,1,NULL,'DIRECTORY','Disabled ancestor','DisabledAncestor','/disabled-ancestor',
+               NULL,NULL,704,'DISABLED','{"title":"system.title"}'::jsonb),
+              (?,1,?,'PAGE','Broken child page','BrokenChildPage','/broken-child-page',
+               '/system/user/list',NULL,705,'ACTIVE','{"title":"system.user.title"}'::jsonb)
+            """, catalogId, pageId, catalogId, siblingId, catalogId, buttonId, pageId,
+            disabledParentId, brokenPageId, disabledParentId);
+        jdbc.update("""
+            INSERT INTO iam_role_menu(tenant_id,role_id,menu_id)
+            VALUES(1,2000,?),(1,2000,?),(1,2000,?)
+            """, pageId, buttonId, brokenPageId);
+
+        try {
+            String body = mvc.perform(get("/api/menu/all").cookie(cookie))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+            List<String> routeNames = JsonPath.read(body, "$..name");
+
+            assertThat(routeNames)
+                .contains("ContractAncestor", "ContractPage")
+                .doesNotContain("UnauthorizedSibling", "RouteButton", "DisabledAncestor", "BrokenChildPage");
+        } finally {
+            jdbc.update("DELETE FROM iam_role_menu WHERE tenant_id=1 AND menu_id IN (?,?,?)",
+                pageId, buttonId, brokenPageId);
+            jdbc.update("DELETE FROM iam_menu WHERE tenant_id=1 AND id IN (?,?,?,?,?,?)",
+                buttonId, siblingId, pageId, brokenPageId, catalogId, disabledParentId);
+        }
+    }
+
+    @Test
+    void unregisteredApiRoutesAreDeniedByDefault() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+
+        mvc.perform(get("/api/not-registered").cookie(cookie))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+        mvc.perform(get("/api/system/user-archive").cookie(cookie))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+    }
+
+    @Test
+    void missingNonApiResourcesReturn404InsteadOf500() throws Exception {
+        mvc.perform(get("/missing-resource"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.code").value(40401))
+            .andExpect(jsonPath("$.error").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void menuWritesEnforceVbenTitleAndComponentContract() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"pid":"6000","type":"menu","name":"InvalidLiteralTitle","path":"/contract/literal-title",
+                     "component":"/system/user/list","meta":{"title":"Literal title"},"status":1}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"pid":"6000","type":"menu","name":"InvalidPageComponent","path":"/contract/component",
+                     "component":"/system/not-registered","meta":{"title":"system.user.title"},"status":1}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"pid":"0","type":"catalog","name":"LegacyLayoutComponent","path":"/contract/catalog",
+                     "component":"BasicLayout","meta":{"title":"system.title"},"status":1}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"pid":"6000","type":"menu","name":"InjectedPageMeta","path":"/contract/injected-page",
+                     "component":"/system/user/list",
+                     "meta":{"title":"system.user.title","iframeSrc":"javascript:alert(1)"},"status":1}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"pid":"6001","type":"button","name":"InjectedButtonMeta","authCode":"user:create",
+                     "meta":{"title":"common.create","link":"javascript:alert(1)"},"status":1}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"pid":"6000","type":"link","name":"ContractDocumentation","path":"/contract/docs",
+                     "component":"IFrameView","meta":{"title":"system.title","link":"https://docs.example.com"},
+                     "status":1}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.id").isString());
+    }
+    @Test
+    void auditEventUsesTheHttpRequestTraceId() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String traceId = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"username":"trace-audit-user","name":"Trace Audit User","deptId":"10",
+                     "roleIds":[],"status":1}
+                    """))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getHeader("X-Trace-Id");
+
+        String auditTraceId = jdbc.queryForObject("""
+            SELECT trace_id FROM iam_audit_event
+             WHERE target_type='USER' AND action_code='CREATE'
+             ORDER BY occurred_at DESC, id DESC LIMIT 1
+            """, String.class);
+        assertThat(auditTraceId).isEqualTo(traceId);
+    }
+
+    @Test
+    void serverSidePepUsesTheVersionedGrantCache() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        long version = jdbc.queryForObject("""
+            SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=1000
+            """, Long.class);
+        String key = "iam:platform:grant:1:1000:v" + version;
+        redis.delete(key);
+
+        mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(cookie))
+            .andExpect(status().isOk());
+
+        assertThat(redis.hasKey(key)).isTrue();
+    }
+
+    @Test
+    void committedPermissionVersionChangeInvalidatesSessionAndClearsCookie() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        long version = jdbc.queryForObject("""
+            SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=1000
+            """, Long.class);
+
+        try {
+            jdbc.update("""
+                UPDATE iam_membership SET permission_version=permission_version+1
+                 WHERE tenant_id=1 AND id=1000
+                """);
+
+            mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(cookie))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(40102))
+                .andExpect(jsonPath("$.error").value("SESSION_INVALID"))
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                    org.hamcrest.Matchers.containsString("PAYMENT_PLATFORM_SESSION="),
+                    org.hamcrest.Matchers.containsString("Max-Age=0"))));
+        } finally {
+            jdbc.update("""
+                UPDATE iam_membership SET permission_version=?
+                 WHERE tenant_id=1 AND id=1000
+                """, version);
+        }
+    }
+
+
+    @Test
+    void everySystemEndpointRequiresServerSidePermission() throws Exception {
+        Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+        mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(cookie))
+            .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+        mvc.perform(patch("/api/system/role/2000/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void membershipPutRequiresStatusAndRoleCapabilitiesBeyondUserUpdate() throws Exception {
+        long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES(?,1,?,?,'PLATFORM',true,false,'ACTIVE')
+            """, roleId, "restricted-update-" + roleId, "Restricted Update " + roleId);
+        assertThat(jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            SELECT ?,1,?,id,'update-only','ACTIVE'
+              FROM iam_permission WHERE permission_code='user:update'
+            """, grantId, roleId)).isOne();
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES(?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,802,?,802)
+            """, roleId);
+        jdbc.update("""
+            UPDATE iam_membership SET permission_version=permission_version+1
+             WHERE tenant_id=1 AND id=802
+            """);
+
+        try {
+            Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            var membershipBefore = jdbc.queryForMap("""
+                SELECT department_id,status,row_version FROM iam_membership
+                 WHERE tenant_id=1 AND id=802
+                """);
+            List<Long> rolesBefore = jdbc.queryForList("""
+                SELECT role_id FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=802 ORDER BY role_id
+                """, Long.class);
+
+            mvc.perform(put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json")
+                    .content("{\"deptId\":\"10\",\"roleIds\":[\"" + roleId
+                        + "\"],\"status\":0,\"userVersion\":0}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+
+            assertThat(jdbc.queryForMap("""
+                SELECT department_id,status,row_version FROM iam_membership
+                 WHERE tenant_id=1 AND id=802
+                """)).isEqualTo(membershipBefore);
+            assertThat(jdbc.queryForList("""
+                SELECT role_id FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=802 ORDER BY role_id
+                """, Long.class)).isEqualTo(rolesBefore);
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802 AND role_id=?", roleId);
+            jdbc.update("DELETE FROM iam_grant_dimension WHERE id=?", dimensionId);
+            jdbc.update("DELETE FROM iam_role_grant WHERE id=?", grantId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+            jdbc.update("""
+                UPDATE iam_membership SET permission_version=permission_version+1
+                 WHERE tenant_id=1 AND id=802
+                """);
+        }
+    }
+
+    @Test
+    void passwordResetRequiresPlatformSystemAdministratorEvenWithUserUpdatePermission() throws Exception {
+        long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES(?,1,?,?,'PLATFORM',true,false,'ACTIVE')
+            """, roleId, "password-reset-operator-" + roleId, "Password Reset Operator " + roleId);
+        assertThat(jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            SELECT ?,1,?,id,'password-reset','ACTIVE'
+              FROM iam_permission WHERE permission_code='user:update'
+            """, grantId, roleId)).isOne();
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES(?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,802,?,802)
+            """, roleId);
+        jdbc.update("""
+            UPDATE iam_membership SET permission_version=permission_version+1
+             WHERE tenant_id=1 AND id=802
+            """);
+
+        try {
+            Cookie restricted = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            long credentialVersion = jdbc.queryForObject("""
+                SELECT row_version FROM iam_authentication_credential WHERE user_id=100
+                """, Long.class);
+            String hashBefore = jdbc.queryForObject("""
+                SELECT password_hash FROM iam_authentication_credential WHERE user_id=100
+                """, String.class);
+
+            mvc.perform(post("/api/system/user/100/password/reset")
+                    .cookie(restricted).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(restricted)).contentType("application/json")
+                    .content("{\"credentialVersion\":" + credentialVersion + "}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+
+            assertThat(jdbc.queryForObject("""
+                SELECT password_hash FROM iam_authentication_credential WHERE user_id=100
+                """, String.class)).isEqualTo(hashBefore);
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802 AND role_id=?", roleId);
+            jdbc.update("DELETE FROM iam_grant_dimension WHERE id=?", dimensionId);
+            jdbc.update("DELETE FROM iam_role_grant WHERE id=?", grantId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+            jdbc.update("""
+                UPDATE iam_membership SET permission_version=permission_version+1
+                 WHERE tenant_id=1 AND id=802
+                """);
+        }
+    }
+
+    @Test
+    void disabledMembershipInvalidatesTheExistingSessionWith401() throws Exception {
+        Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+        jdbc.update("UPDATE iam_membership SET status='DISABLED' WHERE tenant_id=1 AND id=802");
+
+        assertSessionInvalid(cookie);
+    }
+
+    @Test
+    void disabledCredentialInvalidatesTheExistingSessionWith401() throws Exception {
+        Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+        try {
+            jdbc.update("UPDATE iam_authentication_credential SET status='DISABLED' WHERE user_id=801");
+            assertSessionInvalid(cookie);
+        } finally {
+            jdbc.update("UPDATE iam_authentication_credential SET status='ACTIVE' WHERE user_id=801");
+        }
+    }
+
+    @Test
+    void disabledUserInvalidatesTheExistingSessionWith401() throws Exception {
+        Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+        try {
+            jdbc.update("UPDATE iam_user SET status='DISABLED' WHERE id=801");
+            assertSessionInvalid(cookie);
+        } finally {
+            jdbc.update("UPDATE iam_user SET status='ACTIVE' WHERE id=801");
+        }
+    }
+
+    @Test
+    void disabledTenantInvalidatesTheExistingSessionWith401() throws Exception {
+        Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+        try {
+            jdbc.update("UPDATE iam_tenant SET status='DISABLED' WHERE id=1");
+            assertSessionInvalid(cookie);
+        } finally {
+            jdbc.update("UPDATE iam_tenant SET status='ACTIVE' WHERE id=1");
+        }
+    }
+
+    @Test
+    void ordinaryUserManagementCannotAssignOrRemoveSystemRoles() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"username":"system-role-escalation","name":"Escalation Attempt","deptId":"10",
+                     "roleIds":["2000"],"status":1}
+                    """))
+            .andExpect(status().isUnprocessableEntity())
+            .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .put("/api/system/user/100").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"username":"admin","name":"Platform Administrator","deptId":"10",
+                     "roleIds":[],"status":1,"userVersion":0}
+                    """))
+            .andExpect(status().isUnprocessableEntity())
+            .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+    }
+
+    @Test
+    void disabledOrdinaryRoleCanBePreservedOrRemovedButCannotBeNewlyAssigned() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Disabled Assignment Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        String username = "disabled-role-user-" + roleId;
+        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"name\":\"Disabled Role User\","
+                    + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":0}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long userId = Long.parseLong(JsonPath.read(userBody, "$.data.id"));
+        long membershipId = jdbc.queryForObject("""
+            SELECT id FROM iam_membership WHERE tenant_id=1 AND user_id=?
+            """, Long.class, userId);
+
+        try {
+            mvc.perform(patch("/api/system/role/" + roleId + "/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json")
+                    .content("{\"status\":0,\"expectedVersion\":0}"))
+                .andExpect(status().isOk());
+            mvc.perform(get("/api/system/user/list?page=1&pageSize=20&username=" + username).cookie(cookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].roleIds[0]").value(Long.toString(roleId)));
+
+            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json")
+                    .content("{\"deptId\":\"10\",\"roleIds\":[\"" + roleId
+                        + "\"],\"status\":0,\"userVersion\":0}"))
+                .andExpect(status().isOk());
+            assertThat(jdbc.queryForList("""
+                SELECT role_id FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=? ORDER BY role_id
+                """, Long.class, membershipId)).containsExactly(roleId);
+
+            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json")
+                    .content("{\"deptId\":\"10\",\"roleIds\":[],\"status\":0,\"userVersion\":1}"))
+                .andExpect(status().isOk());
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=?
+                """, Long.class, membershipId)).isZero();
+
+            mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json")
+                    .content("{\"deptId\":\"10\",\"roleIds\":[\"" + roleId
+                        + "\"],\"status\":0,\"userVersion\":2}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+            assertThat(jdbc.queryForMap("""
+                SELECT row_version,status FROM iam_membership WHERE tenant_id=1 AND id=?
+                """, membershipId))
+                .containsEntry("row_version", 2L)
+                .containsEntry("status", "DISABLED");
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=?
+                """, Long.class, membershipId)).isZero();
+
+            String rejectedUsername = "new-disabled-role-user-" + roleId;
+            long createAuditCountBefore = jdbc.queryForObject("""
+                SELECT count(*) FROM iam_audit_event
+                 WHERE tenant_id=1 AND target_type='USER' AND action_code='CREATE'
+                """, Long.class);
+            mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json")
+                    .content("{\"username\":\"" + rejectedUsername + "\",\"name\":\"Rejected Disabled Role\","
+                        + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":0}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_authentication_credential WHERE username=?
+                """, Long.class, rejectedUsername)).isZero();
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_user WHERE idp_issuer='local' AND idp_subject=?
+                """, Long.class, rejectedUsername)).isZero();
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_membership m
+                  JOIN iam_user u ON u.id=m.user_id
+                 WHERE m.tenant_id=1 AND u.idp_issuer='local' AND u.idp_subject=?
+                """, Long.class, rejectedUsername)).isZero();
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_audit_event
+                 WHERE tenant_id=1 AND target_type='USER' AND action_code='CREATE'
+                """, Long.class)).isEqualTo(createAuditCountBefore);
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=?", membershipId);
+            jdbc.update("DELETE FROM iam_authentication_credential WHERE user_id=?", userId);
+            jdbc.update("DELETE FROM iam_membership WHERE tenant_id=1 AND id=?", membershipId);
+            jdbc.update("DELETE FROM iam_user WHERE id=?", userId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+        }
+    }
+
+    @Test
+    void nonSystemAdministratorCannotRemoveDisabledRoleTheyHold() throws Exception {
+        long operatorRoleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long disabledRoleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                 assignable,system_role,status)
+            VALUES
+              (?,1,?,?,'PLATFORM',true,false,'ACTIVE'),
+              (?,1,?,?,'PLATFORM',true,false,'DISABLED')
+            """,
+            operatorRoleId, "restricted-role-operator-" + operatorRoleId,
+            "Restricted Role Operator " + operatorRoleId,
+            disabledRoleId, "restricted-disabled-role-" + disabledRoleId,
+            "Restricted Disabled Role " + disabledRoleId);
+        assertThat(jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            SELECT nextval('iam_id_seq'),1,?,id,
+                   'restricted-' || replace(permission_code, ':', '-'),'ACTIVE'
+              FROM iam_permission
+             WHERE permission_code IN ('user:update','user:disable','user:assign-role')
+            """, operatorRoleId)).isEqualTo(3);
+        assertThat(jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            SELECT nextval('iam_id_seq'),id,'TENANT','TENANT_ALL'
+              FROM iam_role_grant WHERE tenant_id=1 AND role_id=?
+            """, operatorRoleId)).isEqualTo(3);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,802,?,802),(1,802,?,802)
+            """, operatorRoleId, disabledRoleId);
+        jdbc.update("""
+            UPDATE iam_membership SET permission_version=permission_version+1
+             WHERE tenant_id=1 AND id=802
+            """);
+
+        try {
+            Cookie cookie = cookie(login("restricted", RESTRICTED_LOGIN_INPUT));
+            mvc.perform(put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json")
+                    .content("{\"deptId\":\"10\",\"roleIds\":[\"" + operatorRoleId
+                        + "\"],\"status\":1,\"userVersion\":0}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("IAM_ROLE_NOT_ASSIGNABLE"));
+
+            assertThat(jdbc.queryForObject("""
+                SELECT row_version FROM iam_membership WHERE tenant_id=1 AND id=802
+                """, Long.class)).isZero();
+            assertThat(jdbc.queryForList("""
+                SELECT role_id FROM iam_membership_role
+                 WHERE tenant_id=1 AND membership_id=802 ORDER BY role_id
+                """, Long.class)).containsExactlyInAnyOrder(8800L, operatorRoleId, disabledRoleId);
+        } finally {
+            jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=802");
+            jdbc.update("""
+                DELETE FROM iam_grant_dimension
+                 WHERE grant_id IN (SELECT id FROM iam_role_grant WHERE tenant_id=1 AND role_id=?)
+                """, operatorRoleId);
+            jdbc.update("DELETE FROM iam_role_grant WHERE tenant_id=1 AND role_id=?", operatorRoleId);
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id IN (?,?)",
+                operatorRoleId, disabledRoleId);
+            jdbc.update("""
+                UPDATE iam_membership SET permission_version=permission_version+1
+                 WHERE tenant_id=1 AND id=802
+                """);
+        }
+    }
+
+    @Test
+    void lastActiveSystemAdministratorCannotBeDisabled() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+
+        mvc.perform(patch("/api/system/user/100/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
+            .andExpect(status().isUnprocessableEntity())
+            .andExpect(jsonPath("$.error").value("IAM_LAST_ADMIN_PROTECTED"));
+    }
+
+    @Test
+    void unreachableSystemAdministratorsDoNotDefeatLastAdministratorProtection() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        List<TestIdentity> unreachable = new ArrayList<>();
+        // Simulate a corrupted/pre-V13 store. A healthy migrated database rejects this row,
+        // while the repository still must fail closed if its database invariant is bypassed.
+        jdbc.execute("""
+            ALTER TABLE iam_authentication_credential
+            DROP CONSTRAINT ck_iam_authentication_bcrypt_hash
+            """);
+
+        try {
+            unreachable.add(seedSystemAdministrator("DISABLED", "ACTIVE", "not-used"));
+            unreachable.add(seedSystemAdministrator("ACTIVE", "LOCKED", "not-used"));
+            unreachable.add(seedSystemAdministrator("ACTIVE", "ACTIVE", null));
+            unreachable.add(seedSystemAdministrator("ACTIVE", "ACTIVE", "not-a-bcrypt-hash"));
+            mvc.perform(patch("/api/system/user/100/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("IAM_LAST_ADMIN_PROTECTED"));
+            assertThat(jdbc.queryForMap("""
+                SELECT status,row_version FROM iam_membership WHERE tenant_id=1 AND id=1000
+                """)).containsEntry("status", "ACTIVE").containsEntry("row_version", 0L);
+        } finally {
+            for (TestIdentity identity : unreachable) {
+                jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=?",
+                    identity.membershipId());
+                jdbc.update("DELETE FROM iam_authentication_credential WHERE user_id=?", identity.userId());
+                jdbc.update("DELETE FROM iam_membership WHERE tenant_id=1 AND id=?", identity.membershipId());
+                jdbc.update("DELETE FROM iam_user WHERE id=?", identity.userId());
+            }
+            jdbc.execute("""
+                ALTER TABLE iam_authentication_credential
+                ADD CONSTRAINT ck_iam_authentication_bcrypt_hash
+                CHECK (
+                    password_hash IS NULL
+                    OR password_hash ~ '^[$]2[aby][$](1[0-4])[$][./A-Za-z0-9]{53}$'
+                )
+                """);
+        }
+    }
+
+    @Test
+    void userRoleIdsAreRequiredButEmptyAssignmentsAreAccepted() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String base = "{\"username\":\"no-roles\",\"name\":\"No Roles\",\"deptId\":\"10\",\"status\":1";
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content(base + "}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content(base + ",\"roleIds\":null}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content(base + ",\"roleIds\":[]}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").isString());
+    }
+
+    @Test
+    void userStatusUsesOptimisticVersionAndDoesNotDisableGlobalCredential() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=4 AND id=803");
+        mvc.perform(patch("/api/system/user/801/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.userVersion").value(1));
+        mvc.perform(patch("/api/system/user/801/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"status\":1,\"userVersion\":0}"))
+            .andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT status FROM iam_user WHERE id=801", String.class)).isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForObject("SELECT status FROM iam_authentication_credential WHERE user_id=801", String.class))
+            .isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForObject("SELECT status FROM iam_membership WHERE tenant_id=4 AND id=803", String.class))
+            .isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void staleRoleWritesReturn409WithoutOverwritingOrDeletingTheCurrentRow() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String body = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Versioned Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(body, "$.data.id"));
+
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Current Role\",\"menuIds\":[],\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isOk());
+        mvc.perform(put("/api/system/role/" + roleId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Stale Role\",\"menuIds\":[],\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value(40902))
+            .andExpect(jsonPath("$.error").value("OPTIMISTIC_LOCK_CONFLICT"))
+            .andExpect(jsonPath("$.message").value("The record has changed; reload and retry"));
+        mvc.perform(patch("/api/system/role/" + roleId + "/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"status\":0,\"expectedVersion\":0}"))
+            .andExpect(status().isConflict());
+        mvc.perform(delete("/api/system/role/" + roleId).queryParam("expectedVersion", "0")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isConflict());
+
+        assertThat(jdbc.queryForMap("SELECT role_name,status,row_version FROM iam_role WHERE tenant_id=1 AND id=?", roleId))
+            .containsEntry("role_name", "Current Role")
+            .containsEntry("status", "ACTIVE")
+            .containsEntry("row_version", 1L);
+
+        mvc.perform(put("/api/system/role/9223372036854775807").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Missing Role\",\"menuIds\":[],\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error").value("RESOURCE_NOT_FOUND"));
+        mvc.perform(delete("/api/system/role/9223372036854775807").queryParam("expectedVersion", "0")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void roleConfigurationCreationPersistsMenusAndGrantsAtomically() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String response = mvc.perform(post("/api/v1/iam/roles/configuration")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("""
+                    {"name":"Atomic Created Role","status":1,"remark":"single transaction",
+                     "menuIds":["6000","6002"],
+                     "grants":[{"grantKey":"user-view","permissionCode":"user:view",
+                       "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roleVersion").value(0))
+            .andExpect(jsonPath("$.data.menuIds.length()").value(2))
+            .andExpect(jsonPath("$.data.grants[0].permissionCode").value("user:view"))
+            .andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(response, "$.data.roleId"));
+
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_menu
+             WHERE tenant_id=1 AND role_id=? AND menu_id IN (6000,6002)
+            """, Long.class, roleId)).isEqualTo(2L);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_menu role_menu
+              JOIN iam_menu menu ON menu.tenant_id=role_menu.tenant_id AND menu.id=role_menu.menu_id
+             WHERE role_menu.tenant_id=1 AND role_menu.role_id=? AND menu.menu_type='BUTTON'
+            """, Long.class, roleId)).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.status='ACTIVE' AND permission.permission_code='user:view'
+            """, Long.class, roleId)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+               AND grant_row.grant_key='system-backoffice-access'
+               AND grant_row.status='ACTIVE'
+               AND permission.permission_code='backoffice:platform-access'
+            """, Long.class, roleId)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_CONFIGURATION' AND target_ref=?
+               AND action_code='CREATE'
+            """, Long.class, Long.toString(roleId))).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE_CONFIGURATION' AND aggregate_ref=?
+               AND event_type='ROLE_CONFIGURATION_CREATED'
+            """, Long.class, Long.toString(roleId))).isOne();
+    }
+
+    @Test
+    void roleConfigurationCreateAndReplaceRejectTheServerManagedGrantKey() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String reservedGrant = """
+            [{"grantKey":"system-backoffice-access","permissionCode":"user:view",
+              "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]
+            """;
+
+        mvc.perform(post("/api/v1/iam/roles/configuration")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("""
+                    {"name":"Reserved Key Create","status":1,"menuIds":[],"grants":%s}
+                    """.formatted(reservedGrant)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM iam_role WHERE tenant_id=1 AND role_name='Reserved Key Create'",
+            Long.class)).isZero();
+
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Reserved Key Replace\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/configuration")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("""
+                    {"expectedVersion":0,"name":"Reserved Key Replace","status":1,
+                     "menuIds":[],"reason":"must stay server managed","grants":%s}
+                    """.formatted(reservedGrant)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        assertThat(jdbc.queryForObject(
+            "SELECT row_version FROM iam_role WHERE tenant_id=1 AND id=?", Long.class, roleId)).isZero();
+    }
+
+    @Test
+    void roleConfigurationCreationKeepsGeneratedCodeWithinDatabaseLimit() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleName = "R".repeat(128);
+        String response = mvc.perform(post("/api/v1/iam/roles/configuration")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("""
+                    {"name":"%s","status":1,"remark":"maximum role name",
+                     "menuIds":[],"grants":[]}
+                    """.formatted(roleName)))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(response, "$.data.roleId"));
+
+        var role = jdbc.queryForMap("""
+            SELECT role_code,role_name FROM iam_role WHERE tenant_id=1 AND id=?
+            """, roleId);
+        assertThat(role.get("role_name")).isEqualTo(roleName);
+        assertThat((String) role.get("role_code"))
+            .hasSizeLessThanOrEqualTo(100)
+            .endsWith("-" + roleId);
+    }
+
+    @Test
+    void roleConfigurationReplacesRoleMenusAndGrantsWithOneVersionChange() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Atomic Configuration Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        long tombstonedMenuId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_menu(
+                id,tenant_id,menu_type,menu_name,route_name,route_path,status,deleted_at)
+            VALUES (?,1,'PAGE',?,? ,?,'DISABLED',CURRENT_TIMESTAMP)
+            """, tombstonedMenuId, "Atomic Historical Menu " + tombstonedMenuId,
+            "AtomicHistoricalMenu" + tombstonedMenuId, "/atomic-historical-menu-" + tombstonedMenuId);
+        jdbc.update("""
+            INSERT INTO iam_role_menu(tenant_id,role_id,menu_id) VALUES(1,?,?),(1,?,6031)
+            """, roleId, tombstonedMenuId, roleId);
+        String username = "atomic-role-user-" + roleId;
+        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"name\":\"Atomic Role User\","
+                    + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long userId = Long.parseLong(JsonPath.read(userBody, "$.data.id"));
+        long permissionVersionBefore = jdbc.queryForObject("""
+            SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND user_id=?
+            """, Long.class, userId);
+
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/configuration")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("""
+                    {"expectedVersion":0,"name":"Atomic Configuration Updated","status":1,
+                     "remark":"one transaction","menuIds":["6001"],"reason":"least privilege",
+                     "grants":[{"grantKey":"user-view","permissionCode":"user:view",
+                       "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roleVersion").value(1))
+            .andExpect(jsonPath("$.data.menuIds[0]").value("6001"))
+            .andExpect(jsonPath("$.data.grants[0].permissionCode").value("user:view"));
+
+        assertThat(jdbc.queryForMap("""
+            SELECT role_name,status,row_version FROM iam_role WHERE tenant_id=1 AND id=?
+            """, roleId))
+            .containsEntry("role_name", "Atomic Configuration Updated")
+            .containsEntry("status", "ACTIVE")
+            .containsEntry("row_version", 1L);
+        assertThat(jdbc.queryForList("""
+            SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id
+            """, Long.class, roleId)).containsExactly(6001L, 6031L, tombstonedMenuId);
+        assertThat(jdbc.queryForObject("""
+            SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND user_id=?
+            """, Long.class, userId)).isEqualTo(permissionVersionBefore + 1L);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=? AND status='ACTIVE'
+            """, Long.class, roleId)).isEqualTo(2L);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_CONFIGURATION' AND target_ref=?
+            """, Long.class, Long.toString(roleId))).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE_CONFIGURATION' AND aggregate_ref=?
+            """, Long.class, Long.toString(roleId))).isOne();
+        assertThat(jdbc.queryForMap("""
+            SELECT before_value->>'menuIds' AS before_menu_ids,
+                   after_value->>'menuIds' AS after_menu_ids
+              FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE_CONFIGURATION' AND target_ref=?
+            """, Long.toString(roleId)))
+            .containsEntry("before_menu_ids", "6000")
+            .containsEntry("after_menu_ids", "6001");
+    }
+
+    @Test
+    void roleConfigurationRechecksAllFourPermissionsInsideTheDatabaseTransaction() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"DB Time Authorization Role\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        AdministrationActor actor = administrationActor();
+        List<String> requiredPermissions =
+            List.of("role:view", "role:update", "menu:view", "role:grant-update");
+
+        try {
+            for (String permission : requiredPermissions) {
+                assertThat(jdbc.update("""
+                    UPDATE iam_role_grant SET status='DISABLED'
+                     WHERE tenant_id=1 AND role_id=2000
+                       AND permission_id=(SELECT id FROM iam_permission WHERE permission_code=?)
+                       AND status='ACTIVE'
+                    """, permission)).isOne();
+                try {
+                    org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                            roleConfigurations.replaceAtomically(new RoleConfigurationCommand(
+                                1L, roleId, 0L, actor, "Must Not Persist", 1, null,
+                                List.of(), "database-time authorization", List.of())))
+                        .isInstanceOf(SecurityException.class);
+                    assertThat(jdbc.queryForMap("""
+                        SELECT role_name,row_version FROM iam_role WHERE tenant_id=1 AND id=?
+                        """, roleId))
+                        .containsEntry("role_name", "DB Time Authorization Role")
+                        .containsEntry("row_version", 0L);
+                } finally {
+                    assertThat(jdbc.update("""
+                        UPDATE iam_role_grant SET status='ACTIVE'
+                         WHERE tenant_id=1 AND role_id=2000
+                           AND permission_id=(SELECT id FROM iam_permission WHERE permission_code=?)
+                           AND status='DISABLED'
+                        """, permission)).isOne();
+                }
+            }
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_audit_event
+                 WHERE tenant_id=1 AND target_type='ROLE_CONFIGURATION' AND target_ref=?
+                """, Long.class, Long.toString(roleId))).isZero();
+            assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM iam_permission_change_outbox
+                 WHERE tenant_id=1 AND aggregate_type='ROLE_CONFIGURATION' AND aggregate_ref=?
+                """, Long.class, Long.toString(roleId))).isZero();
+        } finally {
+            jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+        }
+    }
+
+    @Test
+    void deletingRoleRevokesMembershipButPreservesConfigurationHistory() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Soft Deleted Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        mvc.perform(put("/api/v1/iam/roles/" + roleId + "/grants").cookie(cookie)
+                .header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("""
+                    {"expectedVersion":0,"reason":"seed delete history",
+                     "grants":[{"grantKey":"user-view","permissionCode":"user:view",
+                       "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
+                    """))
+            .andExpect(status().isOk());
+        String username = "soft-delete-user-" + roleId;
+        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"name\":\"Soft Delete User\","
+                    + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long userId = Long.parseLong(JsonPath.read(userBody, "$.data.id"));
+        long membershipId = jdbc.queryForObject("""
+            SELECT id FROM iam_membership WHERE tenant_id=1 AND user_id=?
+            """, Long.class, userId);
+        long permissionVersionBefore = jdbc.queryForObject("""
+            SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=?
+            """, Long.class, membershipId);
+
+        mvc.perform(delete("/api/system/role/" + roleId).queryParam("expectedVersion", "1")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isOk());
+
+        assertThat(jdbc.queryForMap("""
+            SELECT status,row_version,deleted_at FROM iam_role WHERE tenant_id=1 AND id=?
+            """, roleId))
+            .containsEntry("status", "DISABLED")
+            .containsEntry("row_version", 2L)
+            .containsKey("deleted_at");
+        assertThat(jdbc.queryForObject("""
+            SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=?
+            """, Long.class, membershipId)).isEqualTo(permissionVersionBefore + 1L);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_membership_role WHERE tenant_id=1 AND role_id=?
+            """, Long.class, roleId)).isZero();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_menu WHERE tenant_id=1 AND role_id=?
+            """, Long.class, roleId)).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant WHERE tenant_id=1 AND role_id=?
+            """, Long.class, roleId)).isEqualTo(2);
+        assertThat(jdbc.queryForList("""
+            SELECT permission.permission_code
+              FROM iam_role_grant grant_row
+              JOIN iam_permission permission ON permission.id=grant_row.permission_id
+             WHERE grant_row.tenant_id=1 AND grant_row.role_id=?
+             ORDER BY permission.permission_code
+            """, String.class, roleId))
+            .containsExactly("backoffice:platform-access", "user:view");
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='ROLE' AND target_ref=? AND action_code='DELETE'
+            """, Long.class, Long.toString(roleId))).isOne();
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_permission_change_outbox
+             WHERE tenant_id=1 AND aggregate_type='ROLE' AND aggregate_ref=? AND event_type='ROLE_DELETED'
+            """, Long.class, Long.toString(roleId))).isOne();
+        mvc.perform(get("/api/system/role/list")
+                .queryParam("id", Long.toString(roleId))
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items").isEmpty())
+            .andExpect(jsonPath("$.data.total").value(0));
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"username\":\"deleted-role-candidate-" + roleId
+                    + "\",\"name\":\"Deleted Role Candidate\",\"deptId\":\"10\","
+                    + "\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void ordinaryRoleRepositoryWritesRejectSystemAndNonAssignableRoles() {
+        AdministrationActor actor = administrationActor();
+        List<Long> roleIds = new ArrayList<>();
+        for (int index = 0; index < 6; index++) {
+            long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+            boolean systemRole = index >= 3;
+            boolean assignable = systemRole;
+            jdbc.update("""
+                INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
+                                     assignable,system_role,status)
+                VALUES (?,1,?,?,'PLATFORM',?,?,'ACTIVE')
+                """, roleId, "protected-role-" + roleId, "Protected Role " + roleId,
+                assignable, systemRole);
+            roleIds.add(roleId);
+        }
+
+        try {
+            org.junit.jupiter.api.Assertions.assertAll(
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRole(
+                        1L, actor, roleIds.get(0),
+                        new IdentityModels.RoleCommand("Denied Update", List.of(), 1, null), 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRoleStatus(
+                        1L, actor, roleIds.get(1), 0, 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.deleteRole(
+                        1L, actor, roleIds.get(2), 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRole(
+                        1L, actor, roleIds.get(3),
+                        new IdentityModels.RoleCommand("Denied System Update", List.of(), 1, null), 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRoleStatus(
+                        1L, actor, roleIds.get(4), 0, 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class),
+                () -> org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.deleteRole(
+                        1L, actor, roleIds.get(5), 0L))
+                    .isInstanceOf(RoleAssignmentPolicy.RoleNotAssignableException.class));
+
+            for (Long roleId : roleIds) {
+                assertThat(jdbc.queryForMap("""
+                    SELECT role_name,status,row_version FROM iam_role WHERE tenant_id=1 AND id=?
+                    """, roleId))
+                    .containsEntry("role_name", "Protected Role " + roleId)
+                    .containsEntry("status", "ACTIVE")
+                    .containsEntry("row_version", 0L);
+            }
+        } finally {
+            for (Long roleId : roleIds) {
+                jdbc.update("DELETE FROM iam_role WHERE tenant_id=1 AND id=?", roleId);
+            }
+        }
+    }
+
+    @Test
+    void staleDepartmentWritesReturn409WithoutOverwritingOrDeletingTheCurrentRow() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String body = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"10\",\"name\":\"Versioned Department\",\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long departmentId = Long.parseLong(JsonPath.read(body, "$.data.id"));
+
+        mvc.perform(put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"10\",\"name\":\"Current Department\",\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isOk());
+        mvc.perform(put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"10\",\"name\":\"Stale Department\",\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isConflict());
+        mvc.perform(delete("/api/system/dept/" + departmentId).queryParam("expectedVersion", "0")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isConflict());
+
+        assertThat(jdbc.queryForMap("SELECT department_name,row_version FROM iam_department WHERE tenant_id=1 AND id=?", departmentId))
+            .containsEntry("department_name", "Current Department")
+            .containsEntry("row_version", 1L);
+    }
+
+    @Test
+    void staleMenuWritesReturn409WithoutOverwritingOrDeletingTheCurrentRow() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String path = "/versioned-menu-" + jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        String body = mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"6000\",\"type\":\"menu\",\"name\":\"VersionedMenu\",\"path\":\""
+                    + path + "\",\"component\":\"/system/user/list\",\"meta\":{\"title\":\"system.user.title\"},\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long menuId = Long.parseLong(JsonPath.read(body, "$.data.id"));
+
+        mvc.perform(put("/api/system/menu/" + menuId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"6000\",\"type\":\"menu\",\"name\":\"CurrentMenu\",\"path\":\""
+                    + path + "\",\"component\":\"/system/user/list\",\"meta\":{\"title\":\"system.user.title\"},"
+                    + "\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isOk());
+        mvc.perform(put("/api/system/menu/" + menuId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"6000\",\"type\":\"menu\",\"name\":\"StaleMenu\",\"path\":\""
+                    + path + "\",\"component\":\"/system/user/list\",\"meta\":{\"title\":\"system.user.title\"},"
+                    + "\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isConflict());
+        mvc.perform(delete("/api/system/menu/" + menuId).queryParam("expectedVersion", "0")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isConflict());
+
+        assertThat(jdbc.queryForMap("SELECT menu_name,row_version FROM iam_menu WHERE tenant_id=1 AND id=?", menuId))
+            .containsEntry("menu_name", "CurrentMenu")
+            .containsEntry("row_version", 1L);
+    }
+
+    @Test
+    void staleUserDeleteReturns409WithoutTerminatingTheCurrentMembership() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String username = "versioned-delete-user-" + jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"name\":\"Versioned Delete User\","
+                    + "\"deptId\":\"10\",\"roleIds\":[],\"status\":0}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long userId = Long.parseLong(JsonPath.read(body, "$.data.id"));
+
+        mvc.perform(put("/api/system/user/" + userId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"deptId\":\"10\",\"roleIds\":[],\"status\":0,\"userVersion\":0}"))
+            .andExpect(status().isOk());
+        mvc.perform(delete("/api/system/user/" + userId).queryParam("expectedVersion", "0")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isConflict());
+
+        assertThat(jdbc.queryForMap("SELECT status,row_version FROM iam_membership WHERE tenant_id=1 AND user_id=?", userId))
+            .containsEntry("status", "DISABLED")
+            .containsEntry("row_version", 1L);
+    }
+
+    @Test
+    void createdLocalIdentityUsesTheConfiguredInitialPasswordAndSupportsReset() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String username = "recoverable-disabled-user";
+        String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"name\":\"Recoverable Disabled User\","
+                    + "\"deptId\":\"10\",\"roleIds\":[\"8800\"],\"status\":0}"))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString();
+        long userId = Long.parseLong(JsonPath.read(body, "$.data.id"));
+
+        assertThat(jdbc.queryForObject("SELECT status FROM iam_user WHERE id=?", String.class, userId))
+            .isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForObject(
+            "SELECT status FROM iam_authentication_credential WHERE user_id=?", String.class, userId))
+            .isEqualTo("ACTIVE");
+        String initialHash = jdbc.queryForObject(
+            "SELECT password_hash FROM iam_authentication_credential WHERE user_id=?", String.class, userId);
+        assertThat(passwords.matches(ADMIN_LOGIN_INPUT, initialHash)).isTrue();
+        assertThat(jdbc.queryForObject(
+            "SELECT status FROM iam_membership WHERE tenant_id=1 AND user_id=?", String.class, userId))
+            .isEqualTo("DISABLED");
+
+        mvc.perform(get("/api/system/user/list?page=1&pageSize=20&username=" + username).cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items[0].identityStatus").value("ACTIVE"))
+            .andExpect(jsonPath("$.data.items[0].status").value(0));
+        mvc.perform(patch("/api/system/user/" + userId + "/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"status\":1,\"userVersion\":0}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.userVersion").value(1));
+
+        Cookie createdUserCookie = cookie(login(username, ADMIN_LOGIN_INPUT));
+        long otherMembershipId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+            VALUES(?,4,?,40,'ACTIVE','PLATFORM')
+            """, otherMembershipId, userId);
+        List<Long> sessionVersionsBefore = jdbc.queryForList("""
+            SELECT session_version FROM iam_membership
+             WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class, userId);
+        List<Long> rowVersionsBefore = jdbc.queryForList("""
+            SELECT row_version FROM iam_membership
+             WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class, userId);
+        long resetCredentialVersion = jdbc.queryForObject("""
+            SELECT row_version FROM iam_authentication_credential WHERE user_id=?
+            """, Long.class, userId);
+
+        mvc.perform(post("/api/system/user/" + userId + "/password/reset")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"credentialVersion\":" + resetCredentialVersion + "}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.credentialVersion").value(resetCredentialVersion + 1));
+        String resetHash = jdbc.queryForObject(
+            "SELECT password_hash FROM iam_authentication_credential WHERE user_id=?", String.class, userId);
+        assertThat(resetHash).isNotEqualTo(initialHash);
+        assertThat(passwords.matches(ADMIN_LOGIN_INPUT, resetHash)).isTrue();
+        assertThat(jdbc.queryForList("""
+            SELECT session_version FROM iam_membership
+             WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class, userId)).containsExactly(
+                sessionVersionsBefore.get(0) + 1,
+                sessionVersionsBefore.get(1) + 1);
+        assertThat(jdbc.queryForList("""
+            SELECT row_version FROM iam_membership
+             WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class, userId)).containsExactly(
+                rowVersionsBefore.get(0) + 1,
+                rowVersionsBefore.get(1) + 1);
+        assertThat(jdbc.queryForMap("""
+            SELECT action_code,permission_code,after_value::text AS after_value
+              FROM iam_audit_event
+             WHERE tenant_id=1 AND target_type='USER' AND target_ref=?
+             ORDER BY occurred_at DESC,id DESC LIMIT 1
+            """, Long.toString(userId)))
+            .containsEntry("action_code", "RESET_PASSWORD")
+            .containsEntry("permission_code", "user:update")
+            .containsEntry("after_value", "{}")
+            .doesNotContainValue(ADMIN_LOGIN_INPUT);
+        mvc.perform(get("/api/user/info").cookie(createdUserCookie))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error").value("SESSION_INVALID"));
+        mvc.perform(post("/api/system/user/" + userId + "/password/reset")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
+                .content("{\"credentialVersion\":" + resetCredentialVersion + "}"))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void tenantMembershipUpdateNeverMutatesGlobalIdentityOrAnotherTenant() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=4 AND id=803");
+        var userBefore = jdbc.queryForMap("""
+            SELECT display_name,status,remark,row_version FROM iam_user WHERE id=801
+            """);
+        var credentialBefore = jdbc.queryForMap("""
+            SELECT username,status,row_version FROM iam_authentication_credential WHERE user_id=801
+            """);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .put("/api/system/user/801").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("""
+                    {"deptId":"10","roleIds":[],"status":0,"userVersion":0}
+                    """))
+            .andExpect(status().isOk());
+
+        assertThat(jdbc.queryForObject("""
+            SELECT status FROM iam_membership WHERE tenant_id=1 AND user_id=801
+            """, String.class)).isEqualTo("DISABLED");
+        assertThat(jdbc.queryForObject("""
+            SELECT status FROM iam_membership WHERE tenant_id=4 AND user_id=801
+            """, String.class)).isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForMap("""
+            SELECT display_name,status,remark,row_version FROM iam_user WHERE id=801
+            """)).isEqualTo(userBefore);
+        assertThat(jdbc.queryForMap("""
+            SELECT username,status,row_version FROM iam_authentication_credential WHERE user_id=801
+            """)).isEqualTo(credentialBefore);
+    }
+
+    @Test
+    void departmentTreeRejectsCyclesAndOrphaningChildren() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Cycle Parent\",\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String parentId = JsonPath.read(parentBody, "$.data.id");
+        String childBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"pid\":\"" + parentId + "\",\"name\":\"Cycle Child\",\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String childId = JsonPath.read(childBody, "$.data.id");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .put("/api/system/dept/" + parentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"pid\":\"" + childId
+                    + "\",\"name\":\"Cycle Parent\",\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .delete("/api/system/dept/" + parentId).queryParam("expectedVersion", "0")
+                .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void departmentWritesCannotCreateATreeDeeperThanThirtyTwoLevels() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        long parentId = 10L;
+        for (int depth = 2; depth <= 32; depth++) {
+            long id = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+            jdbc.update("""
+                INSERT INTO iam_department(id,tenant_id,parent_id,department_code,department_name,status)
+                VALUES(?,1,?,?,?,'ACTIVE')
+                """, id, parentId, "depth-" + id, "Depth " + depth);
+            parentId = id;
+        }
+
+        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"" + parentId + "\",\"name\":\"Too Deep\",\"status\":1}"))
+            .andExpect(status().isBadRequest());
+
+        String movableBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"10\",\"name\":\"Movable\",\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String movableId = JsonPath.read(movableBody, "$.data.id");
+        mvc.perform(put("/api/system/dept/" + movableId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"" + parentId
+                    + "\",\"name\":\"Movable\",\"status\":1,\"expectedVersion\":0}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void putCannotDisableDepartmentWithActiveChild() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Protected Parent\",\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String parentId = JsonPath.read(parentBody, "$.data.id");
+        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"pid\":\"" + parentId
+                    + "\",\"name\":\"Active Child\",\"status\":1}"))
+            .andExpect(status().isOk());
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .put("/api/system/dept/" + parentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"10\",\"name\":\"Protected Parent\",\"status\":0,\"expectedVersion\":0}"))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void putCannotDisableDepartmentWithActiveMembership() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Assigned Department\",\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String departmentId = JsonPath.read(departmentBody, "$.data.id");
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"username\":\"assigned-department-user\","
+                    + "\"name\":\"Assigned User\",\"deptId\":\"" + departmentId
+                    + "\",\"roleIds\":[],\"status\":1}"))
+            .andExpect(status().isOk());
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .put("/api/system/dept/" + departmentId).cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"pid\":\"10\",\"name\":\"Assigned Department\",\"status\":0,\"expectedVersion\":0}"))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void cannotActivateMembershipInDisabledDepartment() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Disabled Department\",\"status\":0}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String departmentId = JsonPath.read(departmentBody, "$.data.id");
+
+        mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"username\":\"disabled-department-user\","
+                    + "\"name\":\"Disabled Department User\",\"deptId\":\"" + departmentId
+                    + "\",\"roleIds\":[],\"status\":1}"))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void cannotCreateActiveDepartmentBelowDisabledParent() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Disabled Parent\",\"status\":0}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String parentId = JsonPath.read(parentBody, "$.data.id");
+
+        mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json").content("{\"pid\":\"" + parentId
+                    + "\",\"name\":\"Invalid Active Child\",\"status\":1}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void failedJooqRoleReplacementRollsBackRoleMenusAndMembershipVersion() throws Exception {
+        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"Jooq Transaction Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
+        String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"username\":\"jooq-transaction-user\",\"name\":\"Jooq Transaction User\","
+                    + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long userId = Long.parseLong(JsonPath.read(userBody, "$.data.id"));
+        long membershipVersionBefore = jdbc.queryForObject("""
+            SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND user_id=?
+            """, Long.class, userId);
+
+        AdministrationActor actor = administrationActor();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRole(
+                1L,
+                actor,
+                roleId,
+                new IdentityModels.RoleCommand(
+                    "Must Roll Back", List.of(Long.MAX_VALUE), 1, "must roll back"),
+                0L))
+            .isInstanceOf(IdentityAdministrationService.ResourceNotFoundException.class);
+
+        long crossTenantMenuId = 8_910_999L;
+        jdbc.update("""
+            INSERT INTO iam_menu(id,tenant_id,menu_type,menu_name,route_path,status)
+            VALUES(?,2,'PAGE','Cross Tenant Menu','/cross-tenant-menu','ACTIVE')
+            ON CONFLICT(id) DO NOTHING
+            """, crossTenantMenuId);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> roles.updateRole(
+                1L,
+                actor,
+                roleId,
+                new IdentityModels.RoleCommand(
+                    "Must Still Roll Back", List.of(crossTenantMenuId), 1, "cross tenant"),
+                0L))
+            .isInstanceOf(IdentityAdministrationService.ResourceNotFoundException.class);
+
+        assertThat(jdbc.queryForObject("SELECT role_name FROM iam_role WHERE id=?", String.class, roleId))
+            .isEqualTo("Jooq Transaction Role");
+        assertThat(jdbc.queryForList(
+            "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
+            Long.class,
+            roleId)).containsExactly(6000L);
+        assertThat(jdbc.queryForObject("""
+            SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND user_id=?
+            """, Long.class, userId)).isEqualTo(membershipVersionBefore);
+    }
+
+    private String login(String username, String password) throws Exception {
+        String header = mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.accessToken").value("cookie-session"))
+            .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                org.hamcrest.Matchers.containsString("PAYMENT_PLATFORM_SESSION="),
+                org.hamcrest.Matchers.containsString("HttpOnly"),
+                org.hamcrest.Matchers.containsString("SameSite=Strict"))))
+            .andReturn().getResponse().getHeader("Set-Cookie");
+        String sessionValue = header.substring("PAYMENT_PLATFORM_SESSION=".length(), header.indexOf(';'));
+        String body = mvc.perform(get("/api/auth/csrf").cookie(cookie(sessionValue)))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString();
+        requestProofs.put(sessionValue, JsonPath.read(body, "$.data.requestProof"));
+        return sessionValue;
+    }
+
+    private String requestProof(Cookie cookie) {
+        String proof = requestProofs.get(cookie.getValue());
+        if (proof == null) {
+            throw new IllegalStateException("No request proof was issued for the test session");
+        }
+        return proof;
+    }
+
+    private String createRole(Cookie cookie, String name) throws Exception {
+        String body = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"name\":\"" + name + "\",\"menuIds\":[],\"status\":1}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return JsonPath.read(body, "$.data.id");
+    }
+
+    private void insertTenantGrant(String roleId, long permissionId, String grantKey) {
+        long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        insertTenantGrant(roleId, permissionId, grantKey, grantId);
+    }
+
+    private void insertTenantGrant(String roleId, long permissionId, String grantKey, long grantId) {
+        long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        jdbc.update("""
+            INSERT INTO iam_role_grant(id,tenant_id,role_id,permission_id,grant_key,status)
+            VALUES (?,1,?,?,?,'ACTIVE')
+            """, grantId, Long.parseLong(roleId), permissionId, grantKey);
+        jdbc.update("""
+            INSERT INTO iam_grant_dimension(id,grant_id,dimension_code,scope_mode)
+            VALUES (?,?,'TENANT','TENANT_ALL')
+            """, dimensionId, grantId);
+    }
+
+    private AdministrationActor administrationActor() {
+        long permissionVersion = jdbc.queryForObject("""
+            SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=1000
+            """, Long.class);
+        long sessionVersion = jdbc.queryForObject("""
+            SELECT session_version FROM iam_membership WHERE tenant_id=1 AND id=1000
+            """, Long.class);
+        return new AdministrationActor(1000L, 100L, permissionVersion, sessionVersion);
+    }
+
+    private void assertSessionInvalid(Cookie cookie) throws Exception {
+        mvc.perform(get("/api/user/info").cookie(cookie))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value(40102))
+            .andExpect(jsonPath("$.error").value("SESSION_INVALID"))
+            .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                org.hamcrest.Matchers.containsString("PAYMENT_PLATFORM_SESSION="),
+                org.hamcrest.Matchers.containsString("Max-Age=0"))));
+    }
+
+    private TestIdentity seedSystemAdministrator(String userStatus, String credentialStatus,
+                                                  String passwordHash) {
+        long userId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        long membershipId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        String username = "unreachable-admin-" + userId;
+        jdbc.update("""
+            INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status,account_domain)
+            VALUES(?,'integration-test',?,?,?,'PLATFORM')
+            """, userId, username, "Unreachable Administrator " + userId, userStatus);
+        jdbc.update("""
+            INSERT INTO iam_authentication_credential(user_id,username,password_hash,status,account_domain)
+            VALUES(?,?,?,?,'PLATFORM')
+            """, userId, username, passwordHash, credentialStatus);
+        jdbc.update("""
+            INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
+            VALUES(?,1,?,10,'ACTIVE','PLATFORM')
+            """, membershipId, userId);
+        jdbc.update("""
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(1,?,2000,1000)
+            """, membershipId);
+        return new TestIdentity(userId, membershipId);
+    }
+
+    private static Cookie cookie(String value) {
+        return new Cookie("PAYMENT_PLATFORM_SESSION", value);
+    }
+
+    private record TestIdentity(long userId, long membershipId) {
+    }
+}
