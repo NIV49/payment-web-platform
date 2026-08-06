@@ -13,13 +13,21 @@ const deployments = {
     directory: 'agent-admin',
     namespace: 'payment-agent-admin',
     title: 'Payment Agent Admin',
-    views: [...commonViews, 'src/views/dashboard/workspace/index.vue'],
+    views: [
+      ...commonViews,
+      'src/views/dashboard/workspace/index.vue',
+      'src/views/identity/members/index.vue',
+    ],
   },
   merchant: {
     directory: 'merchant-admin',
     namespace: 'payment-merchant-admin',
     title: 'Payment Merchant Admin',
-    views: [...commonViews, 'src/views/dashboard/workspace/index.vue'],
+    views: [
+      ...commonViews,
+      'src/views/dashboard/workspace/index.vue',
+      'src/views/identity/members/index.vue',
+    ],
   },
   platform: {
     directory: 'platform-admin',
@@ -30,6 +38,8 @@ const deployments = {
       'src/views/dashboard/analytics/index.vue',
       'src/views/dashboard/workspace/index.vue',
       'src/views/demos/antd/index.vue',
+      'src/views/identity/members/index.vue',
+      'src/views/identity/tenant-bootstrap/index.vue',
       'src/views/system/dept/list.vue',
       'src/views/system/menu/list.vue',
       'src/views/system/role/list.vue',

@@ -5,6 +5,7 @@ import { preferences } from '@vben/preferences';
 import { useAccessStore, useUserStore } from '@vben/stores';
 import { startProgress, stopProgress } from '@vben/utils';
 
+import { SYSTEM_ADMINISTRATOR_ROUTE_ROLE } from '@payment/backoffice-runtime/deployment-internal';
 import {
   accessRoutes,
   coreRouteNames,
@@ -113,7 +114,13 @@ function setupAccessGuard(router: Router) {
     ) {
       return false;
     }
-    const userRoles = userInfo.roles ?? [];
+    const userRoles = [...(userInfo.roles ?? [])];
+    if (
+      (userInfo as { systemAdministrator?: boolean }).systemAdministrator ===
+      true
+    ) {
+      userRoles.push(SYSTEM_ADMINISTRATOR_ROUTE_ROLE);
+    }
 
     // 生成菜单和路由
     const { accessibleMenus, accessibleRoutes } = await generateAccess({

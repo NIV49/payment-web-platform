@@ -87,6 +87,46 @@ class BackofficeSecurityConfigurationTest {
         verify(sessions, org.mockito.Mockito.times(2)).requireRequestProof("request-proof");
     }
 
+    @Test
+    void identityReadsRequireTheCurrentHostSessionWithoutBrowserWriteProof() {
+        AuthorizationSubject subject = mock(AuthorizationSubject.class);
+        when(sessions.currentSubject("merchant.example.test")).thenReturn(subject);
+
+        for (String path : Set.of("/api/identity/members", "/api/identity/invitation-roles")) {
+            MockHttpServletRequest request = request("GET", path);
+
+            assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+        }
+
+        verify(sessions, org.mockito.Mockito.times(2)).currentSubject("merchant.example.test");
+    }
+
+    @Test
+    void identityInvitationRequiresTrustedOriginAndIndependentRequestProof() {
+        AuthorizationSubject subject = mock(AuthorizationSubject.class);
+        when(sessions.currentSubject("merchant.example.test")).thenReturn(subject);
+        MockHttpServletRequest request = request("POST", "/api/identity/invitations");
+        request.addHeader("Origin", ORIGIN);
+        request.addHeader("X-CSRF-Token", "request-proof");
+
+        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
+
+        verify(sessions).currentSubject("merchant.example.test");
+        verify(sessions).requireRequestProof("request-proof");
+    }
+
+    @Test
+    void sharedMerchantBoundaryRejectsPlatformTenantBootstrap() {
+        MockHttpServletRequest request = request("POST", "/api/identity/tenant-bootstraps");
+        request.addHeader("Origin", ORIGIN);
+        request.addHeader("X-CSRF-Token", "request-proof");
+
+        assertThatThrownBy(() -> interceptor.preHandle(
+            request, new MockHttpServletResponse(), new Object()))
+            .isInstanceOf(BackofficeAccessDeniedException.class);
+        verifyNoInteractions(sessions);
+    }
+
     private static MockHttpServletRequest request(String method, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
         request.setServerName("merchant.example.test");

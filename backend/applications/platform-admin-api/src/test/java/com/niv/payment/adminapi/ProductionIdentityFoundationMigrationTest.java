@@ -3,7 +3,14 @@ package com.niv.payment.adminapi;
 import com.niv.payment.identity.oidc.JooqOidcIdentityRepository;
 import com.niv.payment.identity.oidc.JooqTrustedEntryResolver;
 import com.niv.payment.identity.lifecycle.JooqMfaRecoveryRepository;
+import com.niv.payment.identity.lifecycle.FederatedIdentity;
+import com.niv.payment.identity.lifecycle.IdentityInvitationRepository;
+import com.niv.payment.identity.lifecycle.IdentityInvitationStep;
+import com.niv.payment.identity.lifecycle.JooqIdentityInvitationRepository;
+import com.niv.payment.identity.lifecycle.MemberInvitationCommand;
 import com.niv.payment.identity.lifecycle.MfaRecoveryStep;
+import com.niv.payment.identity.lifecycle.TenantBootstrapCommand;
+import com.niv.payment.identity.lifecycle.TenantType;
 import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.domain.AuthorizationSubject;
 import org.flywaydb.core.Flyway;
@@ -22,6 +29,7 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,7 +57,7 @@ class ProductionIdentityFoundationMigrationTest {
     void freshSchemaCreatesProductionIdentityFoundationWithoutContractingUsername() throws Exception {
         flyway(null).migrate();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("24");
+        assertThat(currentSuccessfulVersion()).isEqualTo("27");
         assertThat(singleLong("""
             SELECT count(*) FROM information_schema.columns
              WHERE table_schema='public' AND table_name='iam_user'
@@ -74,13 +82,208 @@ class ProductionIdentityFoundationMigrationTest {
                AND table_name IN ('iam_tenant_entry_host',
                                   'iam_identity_lifecycle_outbox',
                                   'iam_identity_lifecycle_relay_state',
-                                  'iam_mfa_recovery')
-            """)).isEqualTo(4L);
+                                  'iam_mfa_recovery',
+                                  'iam_identity_invitation',
+                                  'iam_identity_invitation_role')
+            """)).isEqualTo(6L);
         assertThat(singleLong("""
             SELECT count(*) FROM information_schema.columns
              WHERE table_schema='public' AND table_name='iam_identity_lifecycle_outbox'
                AND column_name IN ('payload','email','token','password','secret','recovery_code')
             """)).isZero();
+        assertThat(singleLong("""
+            SELECT count(*) FROM information_schema.columns
+             WHERE table_schema='public'
+               AND table_name IN ('iam_identity_invitation','iam_identity_invitation_role')
+               AND column_name IN ('email','email_hash','payload','token','password','secret',
+                                   'totp_secret','recovery_code')
+            """)).isZero();
+    }
+
+    @Test
+    void invitationReservationConstrainsActorRolesAndTargetToTheirDeclaredTenants() throws Exception {
+        flyway(null).migrate();
+        execute("""
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain) VALUES
+              (20501,'merchant-20501','Merchant 20501','DIRECT_MERCHANT','ACTIVE','MERCHANT'),
+              (20502,'merchant-20502','Merchant 20502','DIRECT_MERCHANT','ACTIVE','MERCHANT');
+            INSERT INTO iam_user(
+                id,idp_issuer,idp_subject,display_name,status,account_domain,idp_provisioning_status
+            ) VALUES(20503,'https://idp.example.test/realms/MERCHANT','actor-20503',
+                     'Actor','ACTIVE','MERCHANT','PROVISIONED');
+            INSERT INTO iam_authentication_credential(
+                user_id,username,password_hash,status,account_domain
+            ) VALUES(20503,'actor-20503',NULL,'ACTIVE','MERCHANT');
+            INSERT INTO iam_membership(
+                id,tenant_id,user_id,status,account_domain
+            ) VALUES(20504,20501,20503,'ACTIVE','MERCHANT');
+            INSERT INTO iam_role(
+                id,tenant_id,role_code,role_name,applicable_tenant_type,
+                assignable,system_role,status
+            ) VALUES
+              (20505,20501,'member','Member','DIRECT_MERCHANT',true,false,'ACTIVE'),
+              (20506,20502,'other-member','Other Member','DIRECT_MERCHANT',true,false,'ACTIVE');
+            INSERT INTO iam_identity_invitation(
+                id,invitation_kind,tenant_id,account_domain,requested_by_tenant_id,
+                requested_by_membership_id,idempotency_key,display_name,status
+            ) VALUES(20507,'MEMBER',20501,'MERCHANT',20501,20504,
+                     '2dc0c7a8-6d5b-468f-a26e-3d4bb0ebdd55','Invited Member','RESERVED');
+            INSERT INTO iam_identity_invitation_role(invitation_id,tenant_id,role_id)
+            VALUES(20507,20501,20505);
+            """);
+
+        assertThatThrownBy(() -> execute("""
+            INSERT INTO iam_identity_invitation_role(invitation_id,tenant_id,role_id)
+            VALUES(20507,20501,20506)
+            """))
+            .hasStackTraceContaining("fk_iam_identity_invitation_role_role");
+        assertThatThrownBy(() -> execute("""
+            INSERT INTO iam_identity_invitation(
+                invitation_kind,tenant_id,account_domain,requested_by_tenant_id,
+                requested_by_membership_id,idempotency_key,display_name,status
+            ) VALUES('MEMBER',20502,'MERCHANT',20502,20504,
+                     '3dc0c7a8-6d5b-468f-a26e-3d4bb0ebdd55','Cross Tenant','RESERVED')
+            """))
+            .hasStackTraceContaining("fk_iam_identity_invitation_actor");
+    }
+
+    @Test
+    void invitationRepositoryActivatesOnlyOrdinaryRoleMembershipAfterOrderedRelay() throws Exception {
+        flyway(null).migrate();
+        execute("""
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain)
+            VALUES(20701,'merchant-20701','Merchant 20701','DIRECT_MERCHANT','ACTIVE','MERCHANT');
+            INSERT INTO iam_user(
+                id,idp_issuer,idp_subject,display_name,status,account_domain,idp_provisioning_status
+            ) VALUES(20702,'https://idp.example.test/realms/MERCHANT','actor-20702',
+                     'Merchant Administrator','ACTIVE','MERCHANT','PROVISIONED');
+            INSERT INTO iam_authentication_credential(
+                user_id,username,password_hash,status,account_domain
+            ) VALUES(20702,'merchant-administrator',NULL,'ACTIVE','MERCHANT');
+            INSERT INTO iam_membership(id,tenant_id,user_id,status,account_domain)
+            VALUES(20703,20701,20702,'ACTIVE','MERCHANT');
+            INSERT INTO iam_role(
+                id,tenant_id,role_code,role_name,applicable_tenant_type,
+                assignable,system_role,status
+            ) VALUES
+              (20704,20701,'tenant-system-admin','Tenant System Administrator',
+               'DIRECT_MERCHANT',false,true,'ACTIVE'),
+              (20705,20701,'settlement-reader','Settlement Reader',
+               'DIRECT_MERCHANT',true,false,'ACTIVE');
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(20701,20703,20704,20703);
+            """);
+
+        UUID key = UUID.fromString("92d8b47e-ec71-4421-a121-e2b5e5e7ee9a");
+        AuthorizationSubject actor = new AuthorizationSubject(20702, 20703, 20701,
+            null, 0, 0, true);
+        try (Connection connection = connection()) {
+            var repository = new JooqIdentityInvitationRepository(
+                DSL.using(connection, SQLDialect.POSTGRES), () -> "trace-invitation");
+            assertThatThrownBy(() -> repository.reserveMember(AccountDomain.MERCHANT, actor,
+                new MemberInvitationCommand("blocked@example.test", "Blocked", List.of(20704L), key)))
+                .isInstanceOf(SecurityException.class);
+
+            IdentityInvitationRepository.Reservation reservation = repository.reserveMember(
+                AccountDomain.MERCHANT, actor,
+                new MemberInvitationCommand("member@example.test", "Invited Member",
+                    List.of(20705L), key));
+            var invitation = repository.attachIdentity(reservation, new FederatedIdentity(
+                "https://idp.example.test/realms/MERCHANT", "invited-subject-20706",
+                "invite-" + key));
+            assertThat(invitation.status())
+                .isEqualTo(IdentityInvitationRepository.Status.PROVISION_PENDING);
+
+            Instant clock = Instant.parse("2030-08-06T01:00:00Z");
+            for (IdentityInvitationStep expected : IdentityInvitationStep.values()) {
+                var task = repository.claimNext(AccountDomain.MERCHANT, clock,
+                    Duration.ofSeconds(30)).orElseThrow();
+                assertThat(task.nextStep()).isEqualTo(expected);
+                repository.completeStep(task.invitationId(), expected, clock.plusSeconds(1));
+                clock = clock.plusSeconds(2);
+            }
+
+            assertThat(singleString("SELECT status FROM iam_identity_invitation WHERE id="
+                + invitation.invitationId())).isEqualTo("COMPLETED");
+            assertThat(singleString("SELECT status FROM iam_membership WHERE id="
+                + invitation.membershipId())).isEqualTo("ACTIVE");
+            assertThat(singleLong("SELECT count(*) FROM iam_membership_role WHERE membership_id="
+                + invitation.membershipId() + " AND role_id=20705")).isOne();
+            assertThat(singleString("SELECT status FROM iam_identity_lifecycle_relay_state"))
+                .isEqualTo("PUBLISHED");
+        }
+    }
+
+    @Test
+    void tenantBootstrapReusesExistingRealmIdentityAndActivatesBoundaryOnlyAtCompletion()
+        throws Exception {
+        flyway(null).migrate();
+        execute("""
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain)
+            VALUES
+              (20801,'platform-20801','Platform Operations','PLATFORM','ACTIVE','PLATFORM'),
+              (20802,'merchant-source','Merchant Source','DIRECT_MERCHANT','ACTIVE','MERCHANT');
+            INSERT INTO iam_user(
+                id,idp_issuer,idp_subject,display_name,status,account_domain,idp_provisioning_status
+            ) VALUES
+              (20803,'https://idp.example.test/realms/PLATFORM','platform-actor-20803',
+               'Platform Administrator','ACTIVE','PLATFORM','PROVISIONED'),
+              (20804,'https://idp.example.test/realms/MERCHANT','merchant-admin-20804',
+               'Existing Merchant Administrator','ACTIVE','MERCHANT','PROVISIONED');
+            INSERT INTO iam_authentication_credential(
+                user_id,username,password_hash,status,account_domain
+            ) VALUES
+              (20803,'platform-administrator',NULL,'ACTIVE','PLATFORM'),
+              (20804,'existing-merchant-administrator',NULL,'ACTIVE','MERCHANT');
+            INSERT INTO iam_membership(id,tenant_id,user_id,status,account_domain)
+            VALUES
+              (20805,20801,20803,'ACTIVE','PLATFORM'),
+              (20806,20802,20804,'ACTIVE','MERCHANT');
+            INSERT INTO iam_role(
+                id,tenant_id,role_code,role_name,applicable_tenant_type,
+                assignable,system_role,status
+            ) VALUES(20807,20801,'platform-system-admin','Platform System Administrator',
+                     'PLATFORM',false,true,'ACTIVE');
+            INSERT INTO iam_membership_role(tenant_id,membership_id,role_id,assigned_by)
+            VALUES(20801,20805,20807,20805);
+            """);
+
+        UUID key = UUID.fromString("a30a651a-61aa-44ea-9496-22c7ae0dc288");
+        AuthorizationSubject actor = new AuthorizationSubject(20803, 20805, 20801,
+            null, 0, 0, true);
+        try (Connection connection = connection()) {
+            var repository = new JooqIdentityInvitationRepository(
+                DSL.using(connection, SQLDialect.POSTGRES), () -> "trace-bootstrap");
+            var reservation = repository.reserve(actor, AccountDomain.MERCHANT,
+                new TenantBootstrapCommand("merchant-new", "Merchant New",
+                    TenantType.DIRECT_MERCHANT, "merchant-new.admin.example.test",
+                    "existing@example.test", "Existing Merchant Administrator", key));
+            assertThat(singleString("SELECT status FROM iam_tenant WHERE id="
+                + reservation.tenantId())).isEqualTo("DISABLED");
+            assertThat(singleString("SELECT status FROM iam_tenant_entry_host WHERE tenant_id="
+                + reservation.tenantId())).isEqualTo("DISABLED");
+
+            var bootstrap = repository.attachIdentity(reservation, new FederatedIdentity(
+                "https://idp.example.test/realms/MERCHANT", "merchant-admin-20804",
+                "existing-merchant-administrator", FederatedIdentity.Mode.EXISTING_ACTIVE));
+            Instant clock = Instant.parse("2030-08-06T02:00:00Z");
+            var task = repository.claimNext(AccountDomain.MERCHANT, clock,
+                Duration.ofSeconds(30)).orElseThrow();
+            assertThat(task.nextStep()).isEqualTo(IdentityInvitationStep.APPLICATION_ACTIVATION);
+            repository.completeStep(task.invitationId(), task.nextStep(), clock.plusSeconds(1));
+
+            assertThat(singleString("SELECT status FROM iam_tenant WHERE id="
+                + bootstrap.tenantId())).isEqualTo("ACTIVE");
+            assertThat(singleString("SELECT status FROM iam_tenant_entry_host WHERE tenant_id="
+                + bootstrap.tenantId())).isEqualTo("ACTIVE");
+            assertThat(singleString("SELECT status FROM iam_membership WHERE id="
+                + bootstrap.firstAdministratorMembershipId())).isEqualTo("ACTIVE");
+            assertThat(singleLong("SELECT count(*) FROM iam_identity_invitation WHERE id="
+                + bootstrap.invitationId()
+                + " AND identity_mode='EXISTING_ACTIVE'"
+                + " AND keycloak_user_enabled_at IS NULL AND action_email_sent_at IS NULL"))
+                .isOne();
+        }
     }
 
     @Test

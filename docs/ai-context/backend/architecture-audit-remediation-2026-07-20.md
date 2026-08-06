@@ -28,7 +28,7 @@
 | P0-3 完整授权内核未接 HTTP | Admin 已关闭 | `AdminSecurityInterceptor -> AdminAuthorizationEnforcer -> DefaultAuthorizationService -> versioned GrantSnapshot`；未知 method/path 默认拒绝 | 支付详情/列表尚无真实 endpoint；不能把 Admin PEP 宣称为支付数据权限完成 |
 | P0-4 角色分配可越权、最后管理员可被删 | 主体/版本并发路径已关闭，RoleGrant PUT 时间竞态已关闭 | system/non-assignable/disabled role 拒绝；禁止自提权和越过操作者委派上限；最后可登录的活动 system admin 保护只计算符合统一 BCrypt 格式/成本策略的凭证；`PUT user` 统一要求 update/disable/assign-role；可信 Session 生成包含 userId、membershipId、permissionVersion、sessionVersion 的 `AdministrationActor`，写事务锁定 tenant + actor tuple 后复核主体与两个版本；RoleGrant PUT 锁后用数据库时间重验两项权限 | 其他管理写接口仍有 finite `valid_until` 边界；双人 break-glass provisioning 尚未实现 |
 | P0-5 支付实施规格/旧系统证据缺失 | 未关闭 | 目标架构只保留为约束和评审输入 | 状态机、账本、金额精度、API/事件/渠道契约、旧新映射、迁移/回滚演练未定版；禁止开始真实资金链 |
-| P1 身份/租户语义混乱 | 原型边界已关闭 | UserCreate 与 MembershipUpdate 拆分；租户内 PUT 不修改全局 User/Credential；多 Membership 登录要求选 workspace；新建身份固定为 `PENDING_ACTIVATION`、Credential 固定为 `DISABLED` 且无 password hash，列表/API 独立返回 `identityStatus` | 外部 OIDC IdP、邀请/密码设置/激活/重置、MFA 和全局身份管理 API 未实现；当前没有可用的生产激活流程 |
+| P1 身份/租户语义混乱 | 候选实现已收敛模型边界 | UserCreate 与 MembershipUpdate 拆分；生产路径增加三 Realm OIDC、平台租户首管理员初始化、同租户普通角色邀请、禁用身份 provisioning、required actions、action email、幂等 relay 和应用身份激活；身份映射固定为 `issuer + subject`，应用不保存认证秘密 | IAM-002 仍是 candidate；真实 Keycloak/SMTP/首次登录 required actions、三服务 relay、失败告警和恢复演练尚未闭环，当前不能宣称生产激活已放行 |
 | P1 Session 只查 Membership | 已关闭 | Sa-Token 安全属性由 Boot auto-configuration 在 ApplicationContext 创建期绑定；Session 查询精确匹配 tenant + membership + user，并检查 Tenant/User/Credential/Membership 四态、受 V13 约束的可验证 BCrypt hash 与 sessionVersion；Core 登录也在调用 verifier 前执行同一 `LoginCredentialPolicy`；授权加载另核 permissionVersion；主体/版本失效均返回 401 `SESSION_INVALID` | 生产 Session/Redis 故障演练未完成 |
 | P1 登录限流可被轮换账号或并发绕过 | 已关闭当前本地边界 | Redis Lua 在密码校验前原子预留 client 全局桶与 client/username 桶；15 分钟窗口分别限制 30/5；两个 key 共用 client digest hash tag，在 Redis Cluster 中同槽执行；真实 Valkey 并发回归覆盖原子性、账号轮换与成功释放 | 分布式攻击、代理地址基数、可观测性和生产故障演练仍未完成 |
 | P1 Grant 缓存越过时间边界/并发读 | 已关闭（保守策略） | Snapshot 保存最近 future `valid_from/valid_until`；Loader 与 Redis adapter 双层保证 temporal boundary 快照不被接受或写入缓存，每个请求都以单条 PostgreSQL 查询的 MVCC 视图和 `statement_timestamp()` 为判定点，彻底排除 DB/应用时钟偏差；无时间边界的 cache-hit 返回前再次读取 permissionVersion，版本变化时丢弃旧命中并有界重试一次；4096 明细硬上限 | cache-hit 的最终版本复核是读路径线性化点：此前已提交撤权必须生效，此后提交属于已进入处理的请求；Admin 写仍由事务锁后 actor/version 复核。分布式变更通知与 relay 未完成 |
@@ -55,7 +55,7 @@
 1. User、Role、Menu、Department 管理写授权 finite `valid_until` 的锁等待 TOCTOU（RoleGrant PUT 已关闭）；
 2. RoleGrant 生产 cutover 的 N-1 清零、双版本验证与审批；
 3. 审计 before/after、拒绝事件和登录失败事件；
-4. 外部 IdP、MFA、邀请/激活/重置与可信审批工作流；
+4. 外部 IdP、MFA、邀请/激活/重置在真实 Keycloak/SMTP 环境中的闭环演练，以及 IAM-002 正式签名 gate；
 5. 商户/市场/渠道/客户/历史关系数据权限 Provider 及真实业务查询集成；
 6. Outbox relay、投递/重放/告警和灾难恢复演练；
 7. Payment/Ledger 状态机、金额精度、幂等、调账/对账、事件和迁移/回滚的可执行规格。

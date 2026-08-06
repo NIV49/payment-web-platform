@@ -7,6 +7,7 @@ package com.niv.payment.permission.persistence.jooq.generated.tables;
 import com.niv.payment.permission.persistence.jooq.generated.Keys;
 import com.niv.payment.permission.persistence.jooq.generated.Public;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuthenticationCredential.IamAuthenticationCredentialPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitation.IamIdentityInvitationPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleOutbox.IamIdentityLifecycleOutboxPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership.IamMembershipPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery.IamMfaRecoveryPath;
@@ -222,6 +223,19 @@ public class IamUser extends TableImpl<IamUserRecord> {
             _fkIamAuthenticationUserDomain = new IamAuthenticationCredentialPath(this, null, Keys.IAM_AUTHENTICATION_CREDENTIAL__FK_IAM_AUTHENTICATION_USER_DOMAIN.getInverseKey());
 
         return _fkIamAuthenticationUserDomain;
+    }
+
+    private transient IamIdentityInvitationPath _iamIdentityInvitation;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_invitation</code> table
+     */
+    public IamIdentityInvitationPath iamIdentityInvitation() {
+        if (_iamIdentityInvitation == null)
+            _iamIdentityInvitation = new IamIdentityInvitationPath(this, null, Keys.IAM_IDENTITY_INVITATION__FK_IAM_IDENTITY_INVITATION_USER_DOMAIN.getInverseKey());
+
+        return _iamIdentityInvitation;
     }
 
     private transient IamIdentityLifecycleOutboxPath _iamIdentityLifecycleOutbox;

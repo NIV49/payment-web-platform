@@ -7,6 +7,7 @@ package com.niv.payment.permission.persistence.jooq.generated.tables;
 import com.niv.payment.permission.persistence.jooq.generated.Indexes;
 import com.niv.payment.permission.persistence.jooq.generated.Keys;
 import com.niv.payment.permission.persistence.jooq.generated.Public;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitationRole.IamIdentityInvitationRolePath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole.IamMembershipRolePath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleGrant.IamRoleGrantPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleMenu.IamRoleMenuPath;
@@ -227,6 +228,19 @@ public class IamRole extends TableImpl<IamRoleRecord> {
             _iamTenant = new IamTenantPath(this, Keys.IAM_ROLE__IAM_ROLE_TENANT_ID_FKEY, null);
 
         return _iamTenant;
+    }
+
+    private transient IamIdentityInvitationRolePath _iamIdentityInvitationRole;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_invitation_role</code> table
+     */
+    public IamIdentityInvitationRolePath iamIdentityInvitationRole() {
+        if (_iamIdentityInvitationRole == null)
+            _iamIdentityInvitationRole = new IamIdentityInvitationRolePath(this, null, Keys.IAM_IDENTITY_INVITATION_ROLE__FK_IAM_IDENTITY_INVITATION_ROLE_ROLE.getInverseKey());
+
+        return _iamIdentityInvitationRole;
     }
 
     private transient IamMembershipRolePath _iamMembershipRole;

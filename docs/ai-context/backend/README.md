@@ -206,7 +206,13 @@ Controller 从可信 Session 构造 `AdministrationActor(membershipId, expectedU
 
 主体/版本复核本身不等于完整权限判定。RoleGrant PUT 额外在锁定 tenant、actor、目标 role 和 ACTIVE system role 后，以单条 PostgreSQL `statement_timestamp()` 查询重新验证 `role:view` 与 `role:grant-update`；角色 configuration PUT 在同一边界精确重验 `role:view/role:update/menu:view/role:grant-update`。两者都拒绝非 NORMAL/SAME_TENANT_ONLY、非精确 `TENANT/TENANT_ALL`、带 target、step-up 或 approval 的入口授权；双连接测试证明等待锁期间过期会 fail closed。User、普通 Role、Menu、Department 其他写接口尚未执行同等权限重验，有限 `valid_until` 的同类 TOCTOU 对这些接口仍是生产 **NO-GO / Required**；过渡期不得给这些写权限设置有限有效期。
 
-创建用户是“全局 Identity + 当前 Tenant Membership”用例；Membership 只按请求预配置。配置 `payment.bootstrap-password` 的 `local` profile 使用同一运行时开发口令为每个新用户生成独立 BCrypt hash，并创建 ACTIVE User/Credential；未配置该属性的 profile 仍创建 `PENDING_ACTIVATION` User、`DISABLED` Credential 且不写 password hash。API 用 `identityStatus` 与 Membership `status` 分开表达；本地系统管理员可把 local identity 重置为该运行时开发口令，但当前仍没有生产邀请、首次改密、忘记密码或身份激活流程。普通管理员更新只修改 Membership；活动 PLATFORM 系统管理员可在同一事务中额外修改全局 username、display name、remark 和本地 Credential username，使用 user/identity/credential 三个版本防止覆盖。local issuer 的 `idp_subject` 随用户名同步，外部 IdP subject 拒绝本地改写，用户名改变推进该 User 全部未终止 Membership 的 sessionVersion。用户角色全集先校验同租户存在性，再由 added/removed diff 策略判断可分配性：新分配只接受 ACTIVE、未删除、assignable、非 system 角色；已有禁用普通角色可保留，只有活动系统管理员可将其移除；受保护角色不能通过普通流程增删。部门依赖采用同一规则：新建或改绑只接受 ACTIVE、未删除部门，编辑时可原样保留当前禁用部门，但不能把其他用户新绑到禁用部门。
+创建用户是“全局 Identity + 当前 Tenant Membership”用例；Membership 只按请求预配置。配置 `payment.bootstrap-password` 的 `local` profile 使用同一运行时开发口令为每个新用户生成独立 BCrypt hash，并创建 ACTIVE User/Credential；未配置该属性的 profile 仍创建 `PENDING_ACTIVATION` User、`DISABLED` Credential 且不写 password hash。API 用 `identityStatus` 与 Membership `status` 分开表达；本地系统管理员可把 local identity 重置为该运行时开发口令。该 `/system/user` 路径仍只是本地管理基线，不承担生产 OIDC 邀请、首次改密或 MFA 激活；生产邀请使用独立的 identity lifecycle 路径。普通管理员更新只修改 Membership；活动 PLATFORM 系统管理员可在同一事务中额外修改全局 username、display name、remark 和本地 Credential username，使用 user/identity/credential 三个版本防止覆盖。local issuer 的 `idp_subject` 随用户名同步，外部 IdP subject 拒绝本地改写，用户名改变推进该 User 全部未终止 Membership 的 sessionVersion。用户角色全集先校验同租户存在性，再由 added/removed diff 策略判断可分配性：新分配只接受 ACTIVE、未删除、assignable、非 system 角色；已有禁用普通角色可保留，只有活动系统管理员可将其移除；受保护角色不能通过普通流程增删。部门依赖采用同一规则：新建或改绑只接受 ACTIVE、未删除部门，编辑时可原样保留当前禁用部门，但不能把其他用户新绑到禁用部门。
+
+### 生产邀请与租户首管理员初始化
+
+三个组合根都提供本应用拥有的成员列表、普通可分配角色和邀请接口。邀请要求当前账号域和租户中的 ACTIVE 系统管理员及最近 LoA 2，只冻结同租户 ACTIVE、assignable、非 system 角色；浏览器不能提交账号域、tenant、Realm 或 issuer。平台组合根另有默认关闭的租户初始化接口，只允许 PLATFORM 系统管理员在最近 LoA 2 下创建 MERCHANT/AGENT 租户及首位管理员。新租户、Host 和首管理员 Membership 在生命周期 relay 完成前保持禁用或 INVITED，不会提前成为可信入口。
+
+Keycloak 管理客户端只在目标固定 Realm 内处理邮箱，并以随机幂等键派生的不透明用户名预留新身份；应用数据库、Outbox、审计和日志不保存邮箱、邀请 Token、密码、TOTP Secret 或恢复码。已有同 Realm ACTIVE 身份可以复用，但应用 User 最终只按精确 `issuer + subject` 查找或创建，邮箱不是持久映射键。新身份按 Keycloak enable、设置 `VERIFY_EMAIL/UPDATE_PASSWORD/CONFIGURE_TOTP` required actions 并发送动作邮件、本端激活顺序幂等推进；任一步失败保留 `PROVISION_PENDING` 并退避重试。应用不把“邮件已发送”当成用户已完成动作；Keycloak 在 required actions 和 LoA 2 满足前继续阻断 OIDC 登录。已有身份跳过 Keycloak 凭证动作，只创建目标租户 Membership。同域多 Membership 合法，已有目标 Membership 则失败关闭。
 
 Role 普通 update/status/delete 在 tenant/actor 锁之后以 `FOR UPDATE` 锁定目标角色，只允许 `system_role=false AND assignable=true`；受保护角色统一返回 422 `IAM_ROLE_NOT_ASSIGNABLE`。角色编辑使用 configuration PUT，在一个事务中锁定一次目标角色并替换字段、ACTIVE 可路由 `role_menu` 和可表达 RoleGrant，只递增一次 role/member 版本并写一组 audit/outbox；替换范围只包含当前 ACTIVE、未删除、可路由菜单，已禁用、BUTTON 或墓碑菜单的既有 `role_menu` 作为历史关系原样保留。RoleGrant GET 对 system/non-assignable、墓碑或含不可表达 Grant 的角色拒绝编辑。角色软删除设置 `status=DISABLED/deleted_at`，显式清除 membership_role 使授权立即失效，保留 role_menu/role_grant 历史；所有角色列表和有效授权 join 都排除墓碑。禁用但未删除角色保留在自身管理列表，依赖选择器只接收 ACTIVE、未删除记录。
 
@@ -292,7 +298,7 @@ V17 为 `iam_role/iam_menu/iam_department` 增加 `deleted_at`，为菜单和部
 
 V18 为 Tenant、User、Credential、Membership 增加 `account_domain` 并用组合外键拒绝跨域关系；V19 为三个组合根增加服务端维护的入口 Permission/Grant；V20 收敛保留 grant key 冲突并保留原授权语义、审计和版本证据。登录入口固定账号域，客户端不能提交 tenant、realm 或 portal 切换后台。
 
-### V21-V24 生产身份数据与恢复基础
+### V21-V27 生产身份数据、恢复与邀请基础
 
 V21 增加 User `identity_version` 和 IdP provisioning 状态、服务端管理的 `iam_tenant_entry_host`，以及独立的 append-only `iam_identity_lifecycle_outbox` 与 mutable relay state。生命周期事件只允许 user、tenant、realm、操作类型、幂等键和时间，不提供可保存邮箱、邀请 Token、密码、TOTP Secret 或 Recovery Code 的 payload 字段；`issuer + subject` 唯一约束继续沿用 V1。
 
@@ -300,13 +306,15 @@ V21 增加 User `identity_version` 和 IdP provisioning 状态、服务端管理
 
 V24 追加 `iam_mfa_recovery`，把 MFA 恢复建模为四步 durable state machine。请求事务写独立 lifecycle Outbox 后立即阻断目标身份并推进 identity/session version；relay 按 Keycloak MFA Credential、Recovery Code、Keycloak Session、应用 Session 顺序执行，使用行租约、`SKIP LOCKED`、有界错误码和退避重试。数据库 CHECK 禁止在四个完成时间齐备前写 `COMPLETED`，partial unique index 禁止同一 User 同时存在两个 pending recovery。该表没有 profile/secret payload 字段。
 
+V25-V27 追加 `iam_identity_invitation` 和冻结角色关系。V25 建立成员邀请、租户首管理员初始化、租约重试和完成约束；V26 区分 `NEW_DISABLED` 与 `EXISTING_ACTIVE`，允许同 Realm 已有 ACTIVE 身份加入另一 Tenant；V27 收敛两种模式的完成约束，使已有身份只能直接进入本端激活，新身份必须先完成 Keycloak enable 与动作邮件。三个版本已经在一次性 PostgreSQL 18 空库上随 V1-V27 全量执行并重生成 jOOQ；它们一经执行不得回写。
+
 V22 的 sidecar 明确 `executeInTransaction=false`。三个应用、测试 helper 和 jOOQ codegen 都关闭 PostgreSQL transactional advisory lock，避免非事务并发索引等待 Flyway 自身事务锁。生产迁移 Job 必须使用同一设置；V22 异常中断后先检查同名索引是否 `indisvalid=false`，仅删除该精确无效索引后再重试，不得直接 `repair` 掩盖未完成 DDL。
 
 ### 迁移纪律
 
 - 所有已执行版本不可修改 checksum；
 - 结构和数据修正新增前向版本；
-- 同时测试空库从 V1 全量迁移、历史版本升级，以及各拒绝路径；V21-V24 还要覆盖 IdP 状态回填、跨域 Host/Outbox 原子拒绝、事件不可变、expand 前置约束、账号域用户名唯一性和 MFA 四步完成约束；
+- 同时测试空库从 V1 全量迁移、历史版本升级，以及各拒绝路径；V21-V27 还要覆盖 IdP 状态回填、跨域 Host/Outbox 原子拒绝、事件不可变、expand 前置约束、账号域用户名唯一性、MFA 四步完成约束、普通角色冻结、已有身份复用，以及租户/Host 在首管理员完成前保持禁用；
 - 密码和固定身份初始化只允许 local profile；已有库先按 [V8 fixture 隔离迁移手册](../../runbooks/iam-v8-fixture-isolation.md) 盘点。无关真实数据可原样保留，只有落入预留 footprint 或依赖 tenant `1` 的历史数据才需要单独的前向迁移；
 - 菜单 component 和 i18n key 属于跨端协议，迁移前要有契约校验。
 
@@ -392,7 +400,7 @@ cd backend
 - `meta_json` 已有容器、深度、key/string 和总 value 硬上限，外链字段也按菜单类型隔离；新增字段仍必须先定义跨端语义和测试，不得把任意 JSON 当成无约束扩展口。
 - `SystemAdministrationController` 同时承担多资源 DTO/映射，继续扩展会形成浅而宽的入口层。
 - Role、Department、Menu 与 User 管理写入已统一执行 optimistic version 契约；Local fixture 仍不是生产 provisioning；命中 V8 预留 footprint 冲突的历史库需要人工前向迁移，无关业务数据不受 V8 影响。
-- 角色 `menuIds` 只是导航/展示，BUTTON authCode 只是目录展示绑定；统一角色配置 UI/API 仍分别写 `role_menu` 与 RoleGrant，不从任一方推导另一方。RoleGrant 写在生产默认受 legacy cutover 闸门禁用，N-1 清退、正式审批和演练完成前不得打开；三端 OIDC、step-up 和 MFA 恢复 relay 已接入，三份 Realm bootstrap 已在全新 Keycloak 26.7.0 实例验证导入，但仍缺邀请/通用 lifecycle、已有 Realm 漂移治理、可信审批证据、关系数据权限、审计拒绝/登录失败和生产级可观测性。
+- 角色 `menuIds` 只是导航/展示，BUTTON authCode 只是目录展示绑定；统一角色配置 UI/API 仍分别写 `role_menu` 与 RoleGrant，不从任一方推导另一方。RoleGrant 写在生产默认受 legacy cutover 闸门禁用，N-1 清退、正式审批和演练完成前不得打开；三端 OIDC、step-up、MFA 恢复和邀请 lifecycle relay 已接入，三份 Realm bootstrap 已在全新 Keycloak 26.7.0 实例验证导入，但仍缺已有 Realm 漂移治理、真实邮件/TOTP/恢复演练、可信审批证据、关系数据权限、审计拒绝/登录失败和生产级可观测性。
 - 资金权限核心已有模型和测试，但不得在完成 [迁移计划](../permission/09-migration-plan.md) 的门禁前直接接入真实资金写路径。
 
 ## 11. 改动检查清单

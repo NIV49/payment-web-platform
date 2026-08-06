@@ -1,0 +1,33 @@
+{
+  "title": "身份治理",
+  "members": {
+    "title": "成员治理",
+    "list": "成员列表",
+    "invite": "邀请成员",
+    "inviteSuccess": "邀请已受理，身份激活完成前成员不可登录",
+    "displayName": "显示名称",
+    "email": "登录邮箱",
+    "roles": "普通角色",
+    "membershipStatus": "成员状态",
+    "identityStatus": "身份状态",
+    "provisioningStatus": "供应状态",
+    "administrator": "租户管理员",
+    "ordinaryMember": "普通成员",
+    "recovery": "恢复 MFA",
+    "recoveryConfirm": "确认撤销该成员的认证凭证、恢复码、Keycloak 会话和应用会话，并要求重新配置 MFA？",
+    "recoverySuccess": "MFA 恢复已受理",
+    "stepUp": "重新验证身份",
+    "stepUpRequired": "邀请和恢复前需要完成最近十分钟内的 LoA 2 验证"
+  },
+  "bootstrap": {
+    "title": "租户首管创建",
+    "create": "创建租户和首位管理员",
+    "success": "租户首管已受理；身份激活完成前租户入口保持禁用",
+    "tenantCode": "租户编码",
+    "tenantName": "租户名称",
+    "tenantType": "租户类型",
+    "entryHost": "租户入口 Host",
+    "administratorEmail": "首位管理员邮箱",
+    "administratorName": "首位管理员名称"
+  }
+}

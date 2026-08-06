@@ -66,6 +66,10 @@
       "types": "./src/layouts/index.ts",
       "default": "./src/layouts/index.ts"
     },
+    "./views/identity-members": {
+      "types": "./src/views/identity-members/index.ts",
+      "default": "./src/views/identity-members/index.ts"
+    },
     "./router/product-access": {
       "types": "./src/router/product-access.ts",
       "default": "./src/router/product-access.ts"

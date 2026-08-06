@@ -27,6 +27,11 @@ class AdminApiPermissionPolicyTest {
         assertThat(policy.requiredPermissions("GET", "/api/user/info")).isEmpty();
         assertThat(policy.requiredPermissions("POST", "/api/auth/logout")).isEmpty();
         assertThat(policy.requiredPermissions("GET", "/api/auth/csrf")).isEmpty();
+        assertThat(policy.requiredPermissions("GET", "/api/identity/members")).isEmpty();
+        assertThat(policy.requiredPermissions("GET", "/api/identity/invitation-roles")).isEmpty();
+        assertThat(policy.requiredPermissions("POST", "/api/identity/invitations")).isEmpty();
+        assertThat(policy.requiredPermissions("POST", "/api/identity/tenant-bootstraps")).isEmpty();
+        assertThat(policy.requiredPermissions("POST", "/api/identity/mfa-recoveries")).isEmpty();
         assertThat(policy.requiredPermissions("GET", "/api/system/user/list")).isEqualTo(List.of("user:view"));
         assertThat(policy.requiredPermissions("POST", "/api/system/user")).isEqualTo(List.of("user:create"));
         assertThat(policy.requiredPermissions("PUT", "/api/system/user/100"))

@@ -2,7 +2,10 @@ import type { RouteRecordRaw } from 'vue-router';
 
 import { mergeRouteModules, traverseTreeValues } from '@vben/utils';
 
-import { getBackofficeDeployment } from '@payment/backoffice-runtime/deployment-internal';
+import {
+  getBackofficeDeployment,
+  getInstalledBackofficeDeployment,
+} from '@payment/backoffice-runtime/deployment-internal';
 
 import { coreRoutes, fallbackNotFoundRoute } from './core';
 
@@ -16,6 +19,10 @@ const dynamicRouteFiles = import.meta.glob('./modules/profile.ts', {
 
 /** 动态路由 */
 const dynamicRoutes: RouteRecordRaw[] = mergeRouteModules(dynamicRouteFiles);
+dynamicRoutes.push(
+  ...((getInstalledBackofficeDeployment()?.accessRoutes ??
+    []) as RouteRecordRaw[]),
+);
 
 /** 外部路由列表，访问这些页面可以不需要Layout，可能用于内嵌在别的系统(不会显示在菜单中) */
 // const externalRoutes: RouteRecordRaw[] = mergeRouteModules(externalRouteFiles);

@@ -9,6 +9,7 @@ import com.niv.payment.permission.persistence.jooq.generated.Keys;
 import com.niv.payment.permission.persistence.jooq.generated.Public;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuditEvent.IamAuditEventPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamDepartment.IamDepartmentPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitation.IamIdentityInvitationPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole.IamMembershipRolePath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMfaRecovery.IamMfaRecoveryPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamRoleGrant.IamRoleGrantPath;
@@ -285,6 +286,48 @@ public class IamMembership extends TableImpl<IamMembershipRecord> {
             _iamAuditEvent = new IamAuditEventPath(this, null, Keys.IAM_AUDIT_EVENT__FK_IAM_AUDIT_OPERATOR.getInverseKey());
 
         return _iamAuditEvent;
+    }
+
+    private transient IamIdentityInvitationPath _fkIamIdentityInvitationActor;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_invitation</code> table, via the
+     * <code>fk_iam_identity_invitation_actor</code> key
+     */
+    public IamIdentityInvitationPath fkIamIdentityInvitationActor() {
+        if (_fkIamIdentityInvitationActor == null)
+            _fkIamIdentityInvitationActor = new IamIdentityInvitationPath(this, null, Keys.IAM_IDENTITY_INVITATION__FK_IAM_IDENTITY_INVITATION_ACTOR.getInverseKey());
+
+        return _fkIamIdentityInvitationActor;
+    }
+
+    private transient IamIdentityInvitationPath _fkIamIdentityInvitationMembershipDomain;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_invitation</code> table, via the
+     * <code>fk_iam_identity_invitation_membership_domain</code> key
+     */
+    public IamIdentityInvitationPath fkIamIdentityInvitationMembershipDomain() {
+        if (_fkIamIdentityInvitationMembershipDomain == null)
+            _fkIamIdentityInvitationMembershipDomain = new IamIdentityInvitationPath(this, null, Keys.IAM_IDENTITY_INVITATION__FK_IAM_IDENTITY_INVITATION_MEMBERSHIP_DOMAIN.getInverseKey());
+
+        return _fkIamIdentityInvitationMembershipDomain;
+    }
+
+    private transient IamIdentityInvitationPath _fkIamIdentityInvitationMembershipTenant;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_invitation</code> table, via the
+     * <code>fk_iam_identity_invitation_membership_tenant</code> key
+     */
+    public IamIdentityInvitationPath fkIamIdentityInvitationMembershipTenant() {
+        if (_fkIamIdentityInvitationMembershipTenant == null)
+            _fkIamIdentityInvitationMembershipTenant = new IamIdentityInvitationPath(this, null, Keys.IAM_IDENTITY_INVITATION__FK_IAM_IDENTITY_INVITATION_MEMBERSHIP_TENANT.getInverseKey());
+
+        return _fkIamIdentityInvitationMembershipTenant;
     }
 
     private transient IamMembershipRolePath _fkIamMembershipRoleAssigner;

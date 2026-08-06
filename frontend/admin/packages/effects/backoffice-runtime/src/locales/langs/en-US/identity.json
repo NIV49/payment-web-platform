@@ -1,0 +1,33 @@
+{
+  "title": "Identity Governance",
+  "members": {
+    "title": "Member Governance",
+    "list": "Members",
+    "invite": "Invite Member",
+    "inviteSuccess": "Invitation accepted. The member cannot sign in until identity activation completes.",
+    "displayName": "Display Name",
+    "email": "Login Email",
+    "roles": "Ordinary Roles",
+    "membershipStatus": "Membership Status",
+    "identityStatus": "Identity Status",
+    "provisioningStatus": "Provisioning Status",
+    "administrator": "Tenant Administrator",
+    "ordinaryMember": "Ordinary Member",
+    "recovery": "Recover MFA",
+    "recoveryConfirm": "Revoke this member's credentials, recovery codes, Keycloak sessions, and application sessions, then require MFA reconfiguration?",
+    "recoverySuccess": "MFA recovery accepted",
+    "stepUp": "Verify Identity",
+    "stepUpRequired": "Invitation and recovery require LoA 2 verification completed within the last ten minutes."
+  },
+  "bootstrap": {
+    "title": "Tenant Bootstrap",
+    "create": "Create Tenant and First Administrator",
+    "success": "Tenant bootstrap accepted. The tenant entry remains disabled until identity activation completes.",
+    "tenantCode": "Tenant Code",
+    "tenantName": "Tenant Name",
+    "tenantType": "Tenant Type",
+    "entryHost": "Tenant Entry Host",
+    "administratorEmail": "First Administrator Email",
+    "administratorName": "First Administrator Name"
+  }
+}

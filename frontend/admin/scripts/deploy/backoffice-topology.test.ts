@@ -109,4 +109,34 @@ describe('independent backoffice application topology', () => {
       expect(await pathExists(`apps/agent-admin/${path}`)).toBe(false);
     }
   });
+
+  it('keeps member governance application-owned and tenant bootstrap platform-only', async () => {
+    for (const application of applications) {
+      expect(
+        await pathExists(
+          `apps/${application.directory}/src/views/identity/members/index.vue`,
+        ),
+      ).toBe(true);
+      const deployment = await workspaceFile(
+        `apps/${application.directory}/src/deployment.ts`,
+      );
+      expect(deployment).toContain("path: '/identity/members'");
+    }
+
+    expect(
+      await pathExists(
+        'apps/platform-admin/src/views/identity/tenant-bootstrap/index.vue',
+      ),
+    ).toBe(true);
+    expect(
+      await pathExists(
+        'apps/merchant-admin/src/views/identity/tenant-bootstrap/index.vue',
+      ),
+    ).toBe(false);
+    expect(
+      await pathExists(
+        'apps/agent-admin/src/views/identity/tenant-bootstrap/index.vue',
+      ),
+    ).toBe(false);
+  });
 });

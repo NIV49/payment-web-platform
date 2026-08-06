@@ -9,6 +9,8 @@ import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuthentic
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamDepartment;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamGrantDimension;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamGrantTarget;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitation;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitationRole;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleOutbox;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleRelayState;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership;
@@ -58,6 +60,18 @@ public class Tables {
      * The table <code>public.iam_grant_target</code>.
      */
     public static final IamGrantTarget IAM_GRANT_TARGET = IamGrantTarget.IAM_GRANT_TARGET;
+
+    /**
+     * Durable invitation orchestration without login email, invitation token,
+     * password, TOTP secret, or recovery code
+     */
+    public static final IamIdentityInvitation IAM_IDENTITY_INVITATION = IamIdentityInvitation.IAM_IDENTITY_INVITATION;
+
+    /**
+     * Roles frozen at invitation reservation; MEMBER invitations may reference
+     * only ordinary assignable roles
+     */
+    public static final IamIdentityInvitationRole IAM_IDENTITY_INVITATION_ROLE = IamIdentityInvitationRole.IAM_IDENTITY_INVITATION_ROLE;
 
     /**
      * Append-only identity lifecycle commands; never stores profile data or

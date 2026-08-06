@@ -3,6 +3,7 @@ package com.niv.payment.identity.oidc;
 import com.niv.payment.permission.domain.AccountDomain;
 
 import java.net.URI;
+import java.util.Objects;
 
 record KeycloakAdminSettings(URI issuer, URI tokenUri, URI adminBaseUri,
                              String realm, String clientId, String clientSecret) {
@@ -38,6 +39,20 @@ record KeycloakAdminSettings(URI issuer, URI tokenUri, URI adminBaseUri,
         }
         URI root = URI.create(oidc.issuer().getScheme() + "://" + oidc.issuer().getRawAuthority());
         return new KeycloakAdminSettings(oidc.issuer(), oidc.tokenUri(),
+            root.resolve("/admin/realms/" + realm), realm, adminClientId, credential.value());
+    }
+
+    static KeycloakAdminSettings forRealm(URI providerIssuer, AccountDomain accountDomain,
+                                          String adminClientId,
+                                          KeycloakAdminClientCredential credential) {
+        Objects.requireNonNull(providerIssuer, "providerIssuer");
+        Objects.requireNonNull(accountDomain, "accountDomain");
+        Objects.requireNonNull(credential, "credential");
+        URI root = URI.create(providerIssuer.getScheme() + "://" + providerIssuer.getRawAuthority());
+        String realm = accountDomain.name();
+        URI issuer = root.resolve("/realms/" + realm);
+        return new KeycloakAdminSettings(issuer,
+            root.resolve("/realms/" + realm + "/protocol/openid-connect/token"),
             root.resolve("/admin/realms/" + realm), realm, adminClientId, credential.value());
     }
 

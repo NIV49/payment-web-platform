@@ -11,7 +11,7 @@
 2. **Target Prototype Contract**：本轮原型认可的边界和不变量；
 3. **Compatibility Plan**：从当前原型走向可用于生产身份管理和支付数据权限的后续路径。
 
-当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V24 已落地 IAM-002 数据基础和 MFA 恢复状态机；三端已实施 Session-bound CSRF、逐请求 identityVersion、各自独立的 OIDC BFF、精确映射、Host 复核、签名 back-channel logout、十分钟 LoA 2 step-up，以及默认关闭的 Keycloak MFA 恢复 relay。三套生产前端已切换为 OIDC 跳转与一次性 handoff 兑换，本地开发仍保留账密验收入口。三份 Keycloak 26.7.0 Realm bootstrap 已通过全新实例导入和 service-account token 交换；邀请/激活、已有 Realm 声明式更新与漂移检测、生产演练和正式签名 gate 仍未完成，因此整体仍是生产 NO-GO。
+当前结论：PLATFORM、MERCHANT、AGENT 已形成三个独立账号域、浏览器产物和 API 组合根。三端分别固定 Origin、Cookie、Sa-Token login type 和 Redis/cache namespace；登录不再接受 `tenantId` 或其他工作区选择器。V21-V27 已落地 IAM-002 数据基础、MFA 恢复状态机、邀请和平台创建租户首位管理员；三端已实施 Session-bound CSRF、逐请求 identityVersion、各自独立的 OIDC BFF、精确映射、Host 复核、签名 back-channel logout、十分钟 LoA 2 step-up，以及 Keycloak MFA 恢复和邀请 relay。三套生产前端已切换为 OIDC 跳转与一次性 handoff 兑换，并各自拥有成员治理页面；本地开发仍保留账密验收入口。三份 Keycloak 26.7.0 Realm bootstrap 已通过全新实例导入和 service-account token 交换；但已有 Realm 声明式更新与漂移检测、真实 SMTP/TOTP/恢复码演练和正式签名 gate 仍未完成，因此 IAM-002 保持 candidate，整体仍是生产 NO-GO。
 
 ## IAM-001 已实现边界
 
@@ -987,12 +987,67 @@ Request：
 
 该端点当前使用 system-role + recent step-up 的服务端策略，不虚构一个未进入权限目录的 permission code；审计 reason 为 `SYSTEM_ADMIN_STEP_UP`。
 
-## 2.4 当前尚未实现
+## 2.4 身份邀请与租户首管契约
+
+以下接口都使用 Cookie Session。GET 要求服务端确认当前 Membership 持有当前 tenant 的 ACTIVE system role；POST 还要求可信 Origin、`X-CSRF-Token` 和最近十分钟内的 LoA 2 step-up。浏览器不能提交 `tenantId`、`accountDomain`、Realm、issuer、subject、Host 选择器或 returnHost；当前租户和账号域来自逐请求校验后的 Session，目标 Realm 由组合根或服务端 tenant type 映射确定。
+
+### GET `/identity/members`
+
+接受 `page`（从 1 开始）和 `pageSize`（1..100），返回 `items/total`。items 是当前可信 tenant 内未终止成员的最小治理视图：string `membershipId`、`displayName`、Membership status、User identity status、IdP provisioning status、`systemAdministrator` 和只用于禁止自恢复的 `currentMembership`。不返回登录邮箱、Keycloak subject、issuer、Credential、Recovery Code 或完整角色/权限明细。该列表用于同租户管理员选择 MFA 恢复目标；服务端仍在恢复事务中重新校验目标状态和“请求者与目标不是同一 User”。
+
+### GET `/identity/invitation-roles`
+
+只返回当前可信 tenant 内 `ACTIVE`、`assignable=true`、`systemRole=false` 且未删除的普通角色，ID 统一为 string。系统角色、不可委派角色和其他 tenant 的角色永不返回。
+
+### POST `/identity/invitations`
+
+Request：
+
+```json
+{
+  "email": "member@example.test",
+  "displayName": "Merchant Member",
+  "roleIds": ["22620"],
+  "idempotencyKey": "8ce154cf-4f13-4aac-b0de-74922513a14f"
+}
+```
+
+请求者必须是当前可信 tenant 的 ACTIVE system administrator。`roleIds` 非空、去重，且每项都必须是当前 tenant 的普通可委派角色；即使请求者是 system administrator，该接口也不能授予 system role。服务端先在 PostgreSQL 中以幂等键保留已校验的 tenant、actor 和角色边界，再在组合根固定 Realm 中精确解析身份：同 Realm 邮箱尚不存在时创建 disabled Keycloak User；恰好命中一个既有 ACTIVE Keycloak User 时复用其 `issuer + subject` 以保留同域多 Membership；歧义、禁用或跨 Realm 命中均失败关闭。邮箱只用于 Keycloak 侧查找和投递，不是应用身份键。应用 User 仍只以 canonical `issuer + subject` 建立映射；新身份 username 使用不含邮箱的 opaque 邀请标识，既有身份沿用其当前 opaque username。
+
+登录邮箱只在当前请求内存和发往 Keycloak 的管理请求中短暂存在。应用数据库、Outbox、relay 状态、日志和审计不得保存邮箱明文、邀请 Token、密码、TOTP Secret 或 Recovery Code。Keycloak 保存邮箱、生成 action Token，并发送包含 `VERIFY_EMAIL`、`UPDATE_PASSWORD`、`CONFIGURE_TOTP` 的验证邮件。通用 identity lifecycle Outbox 仍只保存 user、tenant、Realm、操作类型、幂等键和时间。
+
+数据库预留、Keycloak 身份解析、本地 User/Membership 绑定及 lifecycle relay 均可按同一幂等键重试。新身份的 relay 成功启用 Keycloak User 并提交 action email 后，才把应用 User、Credential 和 Membership 推进到可登录状态；既有 ACTIVE 身份不重置密码或 MFA，也不重复执行身份验证 action，只激活新增 Membership。任一步失败都保持新增 Membership 未激活并退避重试。成功返回 string `invitationId`、string `membershipId` 和 `PROVISION_PENDING` 或幂等重放所得状态。
+
+### POST `/identity/tenant-bootstraps`
+
+该端点只存在于 PLATFORM API。请求者必须是 PLATFORM tenant 的 ACTIVE system administrator，并完成 recent LoA 2 step-up。
+
+Request：
+
+```json
+{
+  "tenantCode": "merchant-acme",
+  "tenantName": "Acme Merchant",
+  "tenantType": "DIRECT_MERCHANT",
+  "entryHost": "acme.merchant.example.test",
+  "firstAdministrator": {
+    "email": "admin@example.test",
+    "displayName": "Acme Administrator"
+  },
+  "idempotencyKey": "8ce154cf-4f13-4aac-b0de-74922513a14f"
+}
+```
+
+`tenantType` 只允许 `AGENT`、`DIRECT_MERCHANT`、`INDIRECT_MERCHANT`，服务端据此固定 AGENT 或 MERCHANT 账号域和 Realm；客户端不能另传账号域。单个事务以 `DISABLED` 状态创建 tenant 和唯一 entry Host，同时创建一个不可委派 system role、一个普通可委派 member role、两者的 canonical `system-backoffice-access` Grant，以及首位管理员邀请预留。首位管理员只能由该平台端点取得 system role；普通 `/identity/invitations` 永远不能授予该角色。后续 Keycloak provisioning 使用目标 Realm 的独立 confidential admin client，并沿用上述 disabled-first、可重试、无明文邮箱持久化流程；首管 relay 完成后才原子激活 tenant 和 entry Host。
+
+首管或普通成员的 MFA 丢失继续使用 `/identity/mfa-recoveries`：必须由另一位同 tenant、同账号域管理员 recent step-up 后发起。当前单运维人员条件下，最后管理员和应急恢复接口保持禁用；不得把同一操作者、自动任务或 Codex 伪装成第二批准人。未来启用 break-glass 必须另行批准双人审批、审计和演练契约。
+
+## 2.5 当前尚未实现
 
 - 已存在 Realm 的声明式更新、漂移检测、生产密钥轮换和完整三 Realm 浏览器联调；bootstrap import 对已有 Realm 使用 `IGNORE_EXISTING`，不能承担配置更新；
-- 通用 PROVISION/ENABLE/DISABLE/DEPROVISION 生命周期 relay、邀请/激活和首位租户管理员创建；
+- ENABLE/DISABLE/DEPROVISION 生命周期 relay，以及邀请/首管流程的生产告警和真实邮件演练；
 - MFA 恢复的生产告警、TOTP/恢复码端到端演练和 break-glass 审批；
-- 生产级的新建用户密码激活、邀请、首次改密、忘记密码和管理员重置；
+- 忘记密码、管理员密码重置和最后管理员 break-glass；新建身份的密码设置、邮箱验证和 TOTP 注册由 Keycloak action email 承担；
 - 超出本文精确目录、数据维度或审批规则的通用 RoleGrant 管理；
 - 商户、市场、渠道、销售客户关系和历史代理关系数据范围 Provider；
 - 可信审批 workflow evidence、资源指纹、金额/币种绑定、过期和防重放；

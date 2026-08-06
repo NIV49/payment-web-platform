@@ -8,6 +8,7 @@ import com.niv.payment.permission.persistence.jooq.generated.Keys;
 import com.niv.payment.permission.persistence.jooq.generated.Public;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamAuditEvent.IamAuditEventPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamDepartment.IamDepartmentPath;
+import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityInvitation.IamIdentityInvitationPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamIdentityLifecycleOutbox.IamIdentityLifecycleOutboxPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembership.IamMembershipPath;
 import com.niv.payment.permission.persistence.jooq.generated.tables.IamMembershipRole.IamMembershipRolePath;
@@ -204,6 +205,19 @@ public class IamTenant extends TableImpl<IamTenantRecord> {
             _iamTenantEntryHost = new IamTenantEntryHostPath(this, null, Keys.IAM_TENANT_ENTRY_HOST__FK_IAM_ENTRY_HOST_TENANT_DOMAIN.getInverseKey());
 
         return _iamTenantEntryHost;
+    }
+
+    private transient IamIdentityInvitationPath _iamIdentityInvitation;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.iam_identity_invitation</code> table
+     */
+    public IamIdentityInvitationPath iamIdentityInvitation() {
+        if (_iamIdentityInvitation == null)
+            _iamIdentityInvitation = new IamIdentityInvitationPath(this, null, Keys.IAM_IDENTITY_INVITATION__FK_IAM_IDENTITY_INVITATION_TENANT_DOMAIN.getInverseKey());
+
+        return _iamIdentityInvitation;
     }
 
     private transient IamIdentityLifecycleOutboxPath _iamIdentityLifecycleOutbox;
