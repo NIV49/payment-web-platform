@@ -14,6 +14,7 @@ import org.jooq.impl.DSL;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -309,6 +310,17 @@ class JooqAdministrationLifecycleIntegrationTest {
 
     @Test
     void systemAdministratorCanUpdateIdentityWithThreeWayVersionChecks() {
+        assertThrows(IdentityAdministrationService.DataConflictException.class,
+            () -> users.updateUser(TENANT_ID, SYSTEM_ACTOR, TARGET_USER_ID,
+                new IdentityModels.MembershipUpdateCommand(
+                    "lifecycle-renamed", "Lifecycle Renamed", ROOT_DEPARTMENT_ID, List.of(), 1,
+                    0L, 0L, 0L, "renamed remark")));
+        assertEquals(0L, membershipValue(IAM_MEMBERSHIP.ROW_VERSION, TARGET_MEMBERSHIP_ID));
+        assertEquals(0L, userValue(IAM_USER.ROW_VERSION, TARGET_USER_ID));
+        assertEquals(0L, credentialValue(IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION, TARGET_USER_ID));
+
+        dsl.update(IAM_MEMBERSHIP).set(IAM_MEMBERSHIP.STATUS, "TERMINATED")
+            .where(IAM_MEMBERSHIP.ID.eq(OTHER_MEMBERSHIP_ID)).execute();
         users.updateUser(TENANT_ID, SYSTEM_ACTOR, TARGET_USER_ID,
             new IdentityModels.MembershipUpdateCommand(
                 "lifecycle-renamed", "Lifecycle Renamed", ROOT_DEPARTMENT_ID, List.of(), 1,
@@ -326,7 +338,7 @@ class JooqAdministrationLifecycleIntegrationTest {
         assertEquals(1L, membershipValue(IAM_MEMBERSHIP.ROW_VERSION, TARGET_MEMBERSHIP_ID));
         assertEquals(1L, userValue(IAM_USER.ROW_VERSION, TARGET_USER_ID));
         assertEquals(1L, credentialValue(IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION, TARGET_USER_ID));
-        assertEquals(1L, membershipValue(IAM_MEMBERSHIP.SESSION_VERSION, OTHER_MEMBERSHIP_ID));
+        assertEquals(0L, membershipValue(IAM_MEMBERSHIP.SESSION_VERSION, OTHER_MEMBERSHIP_ID));
         assertEquals(0L, membershipValue(IAM_MEMBERSHIP.SESSION_VERSION, TERMINATED_MEMBERSHIP_ID));
 
         IdentityModels.User view = queries.findUsers(TENANT_ID,
@@ -397,6 +409,112 @@ class JooqAdministrationLifecycleIntegrationTest {
             .from(IAM_AUTHENTICATION_CREDENTIAL)
             .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(EXTERNAL_USER_ID))
             .fetchSingle(IAM_AUTHENTICATION_CREDENTIAL.USERNAME));
+    }
+
+    @Test
+    void sameTenantPasswordResetHashesTheNewPasswordAndRevokesTheSession() {
+        long userId = 9_310_800L;
+        long membershipId = 9_310_801L;
+        String password = localTestPassword();
+        seedUser(userId, "local-password-reset", "Local Password Reset");
+        seedMembership(membershipId, TENANT_ID, userId, ROOT_DEPARTMENT_ID, "ACTIVE");
+        var encoder = new BCryptPasswordEncoder(10);
+        var resetRepository = new JooqUserAdministrationRepository(
+            dsl, queries, com.niv.payment.permission.domain.AccountDomain.PLATFORM,
+            () -> "password-reset-test", () -> null, () -> true, encoder::encode);
+
+        var result = resetRepository.resetUserPassword(
+            TENANT_ID, SYSTEM_ACTOR, userId, 0L, password);
+
+        String storedHash = dsl.select(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
+            .from(IAM_AUTHENTICATION_CREDENTIAL)
+            .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(userId))
+            .fetchSingle(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH);
+        assertTrue(encoder.matches(password, storedHash));
+        assertFalse(password.equals(storedHash));
+        assertEquals(1L, result.credentialVersion());
+        assertEquals(1L, membershipValue(IAM_MEMBERSHIP.SESSION_VERSION, membershipId));
+        assertThrows(IdentityAdministrationService.OptimisticLockException.class,
+            () -> resetRepository.resetUserPassword(
+                TENANT_ID, SYSTEM_ACTOR, userId, 0L, password));
+    }
+
+    @Test
+    void sameTenantPasswordResetRejectsSharedIdentityAndDisabledCapability() {
+        long sharedUserId = 9_310_820L;
+        long localMembershipId = 9_310_821L;
+        long otherMembershipId = 9_320_821L;
+        seedUser(sharedUserId, "shared-password-reset", "Shared Password Reset");
+        seedMembership(localMembershipId, TENANT_ID, sharedUserId, ROOT_DEPARTMENT_ID, "ACTIVE");
+        seedMembership(otherMembershipId, OTHER_TENANT_ID, sharedUserId,
+            OTHER_ROOT_DEPARTMENT_ID, "ACTIVE");
+        var encoder = new BCryptPasswordEncoder(10);
+        var resetRepository = new JooqUserAdministrationRepository(
+            dsl, queries, com.niv.payment.permission.domain.AccountDomain.PLATFORM,
+            () -> "password-reset-test", () -> null, () -> true, encoder::encode);
+        String originalHash = dsl.select(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
+            .from(IAM_AUTHENTICATION_CREDENTIAL)
+            .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(sharedUserId))
+            .fetchSingle(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH);
+
+        assertThrows(IdentityAdministrationService.DataConflictException.class,
+            () -> resetRepository.resetUserPassword(
+                TENANT_ID, SYSTEM_ACTOR, sharedUserId, 0L, localTestPassword()));
+        var disabled = new JooqUserAdministrationRepository(
+            dsl, queries, com.niv.payment.permission.domain.AccountDomain.PLATFORM,
+            () -> "password-reset-test", () -> null, () -> false, encoder::encode);
+        assertThrows(IdentityAdministrationService.DataConflictException.class,
+            () -> disabled.resetUserPassword(
+                TENANT_ID, SYSTEM_ACTOR, sharedUserId, 0L, localTestPassword()));
+        assertEquals(originalHash, dsl.select(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
+            .from(IAM_AUTHENTICATION_CREDENTIAL)
+            .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(sharedUserId))
+            .fetchSingle(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH));
+    }
+
+    @Test
+    void roleMemberBatchIsAtomicAndRevokesEveryChangedMembershipSession() {
+        long roleId = 9_310_900L;
+        long firstUserId = 9_310_910L;
+        long firstMembershipId = 9_310_911L;
+        long secondUserId = 9_310_920L;
+        long secondMembershipId = 9_310_921L;
+        dsl.insertInto(IAM_ROLE,
+                IAM_ROLE.ID, IAM_ROLE.TENANT_ID, IAM_ROLE.ROLE_CODE, IAM_ROLE.ROLE_NAME,
+                IAM_ROLE.APPLICABLE_TENANT_TYPE, IAM_ROLE.ASSIGNABLE, IAM_ROLE.SYSTEM_ROLE,
+                IAM_ROLE.STATUS)
+            .values(roleId, TENANT_ID, "lifecycle-batch-role", "Lifecycle Batch Role",
+                "PLATFORM", true, false, "ACTIVE")
+            .execute();
+        seedUser(firstUserId, "lifecycle-batch-first", "Lifecycle Batch First");
+        seedMembership(firstMembershipId, TENANT_ID, firstUserId, ROOT_DEPARTMENT_ID, "ACTIVE");
+        seedUser(secondUserId, "lifecycle-batch-second", "Lifecycle Batch Second");
+        seedMembership(secondMembershipId, TENANT_ID, secondUserId, ROOT_DEPARTMENT_ID, "ACTIVE");
+
+        assertThrows(IdentityAdministrationService.OptimisticLockException.class,
+            () -> users.updateRoleMembers(TENANT_ID, SYSTEM_ACTOR, roleId, List.of(
+                new IdentityModels.RoleMemberChange(firstUserId, 0L, true),
+                new IdentityModels.RoleMemberChange(secondUserId, 99L, true))));
+        assertFalse(dsl.fetchExists(dsl.selectOne().from(IAM_MEMBERSHIP_ROLE)
+            .where(IAM_MEMBERSHIP_ROLE.TENANT_ID.eq(TENANT_ID)
+                .and(IAM_MEMBERSHIP_ROLE.ROLE_ID.eq(roleId)))));
+        assertEquals(0L, membershipValue(IAM_MEMBERSHIP.ROW_VERSION, firstMembershipId));
+        assertEquals(0L, membershipValue(IAM_MEMBERSHIP.ROW_VERSION, secondMembershipId));
+
+        users.updateRoleMembers(TENANT_ID, SYSTEM_ACTOR, roleId, List.of(
+            new IdentityModels.RoleMemberChange(firstUserId, 0L, true),
+            new IdentityModels.RoleMemberChange(secondUserId, 0L, true)));
+
+        assertEquals(2, dsl.fetchCount(IAM_MEMBERSHIP_ROLE,
+            IAM_MEMBERSHIP_ROLE.TENANT_ID.eq(TENANT_ID)
+                .and(IAM_MEMBERSHIP_ROLE.ROLE_ID.eq(roleId))));
+        assertEquals(1L, membershipValue(IAM_MEMBERSHIP.ROW_VERSION, firstMembershipId));
+        assertEquals(1L, membershipValue(IAM_MEMBERSHIP.PERMISSION_VERSION, firstMembershipId));
+        assertEquals(1L, membershipValue(IAM_MEMBERSHIP.SESSION_VERSION, firstMembershipId));
+        assertEquals(1L, membershipValue(IAM_MEMBERSHIP.ROW_VERSION, secondMembershipId));
+        assertEquals(2L, users.findRoleMembers(TENANT_ID, roleId, true,
+            new IdentityModels.UserQuery(null, null, null, null, null,
+                null, null, 1, 20)).total());
     }
 
     private static void seedEditableTarget() {
@@ -501,5 +619,9 @@ class JooqAdministrationLifecycleIntegrationTest {
     private static String currentRemark() {
         return dsl.select(IAM_USER.REMARK).from(IAM_USER)
             .where(IAM_USER.ID.eq(TARGET_USER_ID)).fetchSingle(IAM_USER.REMARK);
+    }
+
+    private static String localTestPassword() {
+        return String.join("", "Abcd1234", "Efgh!!!!");
     }
 }

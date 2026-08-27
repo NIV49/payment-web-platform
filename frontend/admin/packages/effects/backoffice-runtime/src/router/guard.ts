@@ -2,7 +2,7 @@ import type { Router } from 'vue-router';
 
 import { LOGIN_PATH } from '@vben/constants';
 import { preferences } from '@vben/preferences';
-import { useAccessStore, useUserStore } from '@vben/stores';
+import { useAccessStore, useTabbarStore, useUserStore } from '@vben/stores';
 import { startProgress, stopProgress } from '@vben/utils';
 
 import { SYSTEM_ADMINISTRATOR_ROUTE_ROLE } from '@payment/backoffice-runtime/deployment-internal';
@@ -20,6 +20,39 @@ import {
   isProductSessionGenerationCurrent,
   startProductRouteGeneration,
 } from './route-lifecycle';
+
+function getPersistedTabKey(
+  tab: ReturnType<typeof useTabbarStore>['tabs'][number],
+) {
+  if (typeof tab.key === 'string') {
+    return tab.key;
+  }
+  const rawKey = tab.meta?.fullPathKey === false ? tab.path : tab.fullPath;
+  try {
+    return decodeURIComponent(rawKey || tab.path);
+  } catch {
+    return rawKey || tab.path;
+  }
+}
+
+async function removeUnavailablePersistedTabs(router: Router) {
+  const tabbarStore = useTabbarStore();
+  const unavailableKeys = tabbarStore.tabs.flatMap((tab) => {
+    const location = tab.fullPath || tab.path;
+    try {
+      if (location && router.resolve(location).name !== 'FallbackNotFound') {
+        return [];
+      }
+    } catch {
+      // Corrupt persisted locations fail closed with other unavailable tabs.
+    }
+    return [getPersistedTabKey(tab)];
+  });
+
+  if (unavailableKeys.length > 0) {
+    await tabbarStore._bulkCloseByKeys(unavailableKeys);
+  }
+}
 
 /**
  * 通用守卫配置
@@ -106,8 +139,18 @@ function setupAccessGuard(router: Router) {
 
     // 生成路由表
     // 当前登录用户拥有的角色标识列表
-    const userInfo =
-      userStore.userInfo || (await authStore.fetchUserInfo(sessionGeneration));
+    let userInfo = userStore.userInfo;
+    try {
+      userInfo ||= await authStore.fetchUserInfo(sessionGeneration);
+    } catch (error) {
+      if (
+        !accessStore.accessToken ||
+        !isProductSessionGenerationCurrent(sessionGeneration)
+      ) {
+        return false;
+      }
+      throw error;
+    }
     if (
       !isProductRouteGenerationCurrent(routeGeneration) ||
       !isProductSessionGenerationCurrent(sessionGeneration)
@@ -133,6 +176,14 @@ function setupAccessGuard(router: Router) {
       routes: accessRoutes,
     });
 
+    if (
+      !isProductRouteGenerationCurrent(routeGeneration) ||
+      !isProductSessionGenerationCurrent(sessionGeneration)
+    ) {
+      return false;
+    }
+
+    await removeUnavailablePersistedTabs(router);
     if (
       !isProductRouteGenerationCurrent(routeGeneration) ||
       !isProductSessionGenerationCurrent(sessionGeneration)

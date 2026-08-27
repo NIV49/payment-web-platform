@@ -44,6 +44,10 @@ class SaTokenSessionBridgeTest {
         assertEquals(20L, subject.membershipId());
         assertEquals(30L, subject.tenantId());
         assertEquals(7L, subject.permissionVersion());
+        assertEquals(11L, subject.identityVersion());
+        assertEquals("local", subject.issuer());
+        assertEquals("local-user-10", subject.subject());
+        org.junit.jupiter.api.Assertions.assertFalse(subject.federated());
     }
 
     @Test
@@ -178,7 +182,11 @@ class SaTokenSessionBridgeTest {
             (domain, tenantId, membershipId, userId) -> Optional.of(new MembershipVersions(
                 7L, 3L, 11L, "https://idp.example.test/realms/platform", "subject-10", false)));
 
-        assertEquals(20L, bridge.currentSubject("OPS.EXAMPLE.TEST").membershipId());
+        var subject = bridge.currentSubject("OPS.EXAMPLE.TEST");
+        assertEquals(20L, subject.membershipId());
+        assertEquals("https://idp.example.test/realms/platform", subject.issuer());
+        assertEquals("subject-10", subject.subject());
+        org.junit.jupiter.api.Assertions.assertTrue(subject.federated());
         org.junit.jupiter.api.Assertions.assertThrows(InvalidSessionException.class,
             () -> bridge.currentSubject("other.example.test"));
 
@@ -202,10 +210,11 @@ class SaTokenSessionBridgeTest {
     }
 
     @Test
-    void stepUpIsDerivedFromARecentTimestampInsteadOfAPermanentFlag() {
+    void stepUpUsesTheExactRecentWindowAndIgnoresTheLegacyPermanentFlag() {
         var attributes = new HashMap<>(baseAttributes());
         attributes.put(SessionAttributeNames.STEP_UP_VERIFIED, true);
-        attributes.put(SessionAttributeNames.STEP_UP_AT, NOW.minus(Duration.ofMinutes(9)).getEpochSecond());
+        attributes.put(SessionAttributeNames.STEP_UP_AT,
+            NOW.minus(Duration.ofMinutes(10)).getEpochSecond());
         var repository = (com.niv.payment.permission.port.MembershipSessionVersionRepository)
             (domain, tenantId, membershipId, userId) -> Optional.of(
                 new MembershipVersions(7L, 3L, 11L, "local", "local-user-10", true));
@@ -215,8 +224,13 @@ class SaTokenSessionBridgeTest {
 
         org.junit.jupiter.api.Assertions.assertTrue(bridge.currentSubject().stepUpVerified());
 
-        attributes.put(SessionAttributeNames.STEP_UP_AT, NOW.minus(Duration.ofMinutes(11)).getEpochSecond());
+        attributes.put(SessionAttributeNames.STEP_UP_AT,
+            NOW.minus(Duration.ofMinutes(10)).minusSeconds(1).getEpochSecond());
         org.junit.jupiter.api.Assertions.assertFalse(bridge.currentSubject().stepUpVerified());
+
+        attributes.put(SessionAttributeNames.STEP_UP_AT, NOW.plusSeconds(1).getEpochSecond());
+        org.junit.jupiter.api.Assertions.assertFalse(bridge.currentSubject().stepUpVerified());
+
         attributes.remove(SessionAttributeNames.STEP_UP_AT);
         org.junit.jupiter.api.Assertions.assertFalse(bridge.currentSubject().stepUpVerified());
     }

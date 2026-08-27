@@ -48,7 +48,7 @@ class SoftDeleteFoundationMigrationTest {
             );
             """);
 
-        flyway(null).migrate();
+        flyway("17").migrate();
 
         assertThat(singleLong("""
             SELECT count(*)

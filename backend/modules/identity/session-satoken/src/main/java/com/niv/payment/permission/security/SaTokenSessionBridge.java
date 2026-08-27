@@ -65,7 +65,7 @@ public final class SaTokenSessionBridge {
         if (identityVersion != currentVersions.identityVersion()) {
             throw new InvalidSessionException("Identity version is stale");
         }
-        validateFederatedIdentity(currentVersions, requestHost);
+        boolean federated = validateFederatedIdentity(currentVersions, requestHost);
         return new AuthorizationSubject(
             userId,
             membershipId,
@@ -73,6 +73,10 @@ public final class SaTokenSessionBridge {
             optionalLong(SessionAttributeNames.DEPARTMENT_ID),
             permissionVersion,
             sessionVersion,
+            identityVersion,
+            currentVersions.issuer(),
+            currentVersions.subject(),
+            federated,
             hasRecentStepUp());
     }
 
@@ -91,8 +95,8 @@ public final class SaTokenSessionBridge {
         }
     }
 
-    private void validateFederatedIdentity(MembershipSessionVersionRepository.MembershipVersions current,
-                                           String requestHost) {
+    private boolean validateFederatedIdentity(MembershipSessionVersionRepository.MembershipVersions current,
+                                              String requestHost) {
         Object sessionIssuer = saToken.sessionAttribute(SessionAttributeNames.ISSUER);
         Object sessionSubject = saToken.sessionAttribute(SessionAttributeNames.SUBJECT);
         Object entryHost = saToken.sessionAttribute(SessionAttributeNames.ENTRY_HOST);
@@ -101,7 +105,7 @@ public final class SaTokenSessionBridge {
             if (!current.localLoginCapable()) {
                 throw new InvalidSessionException("Local credential is no longer login capable");
             }
-            return;
+            return false;
         }
         if (!(sessionIssuer instanceof String issuer) || !(sessionSubject instanceof String subject)
             || !(entryHost instanceof String host)
@@ -111,6 +115,7 @@ public final class SaTokenSessionBridge {
         if (requestHost != null && !host.equals(requestHost.trim().toLowerCase(Locale.ROOT))) {
             throw new InvalidSessionException("Session entry host does not match the request host");
         }
+        return true;
     }
 
     private AccountDomain requiredAccountDomain() {

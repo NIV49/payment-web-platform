@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ActionItem } from './types';
 
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { useSimpleLocale } from '@vben-core/composables';
 import { cn } from '@vben-core/shared/utils';
@@ -16,9 +16,14 @@ import { VbenButton } from '../button';
 import { VbenIcon } from '../icon';
 
 const props = defineProps<{ action: ActionItem }>();
-const emit = defineEmits<{ confirm: [] }>();
+const emit = defineEmits<{
+  confirm: [];
+  popConfirmOpenChange: [open: boolean];
+}>();
 const { $t } = useSimpleLocale();
 const open = ref(false);
+
+watch(open, (value) => emit('popConfirmOpenChange', value));
 
 const itemClass = computed(() =>
   cn(
@@ -87,6 +92,12 @@ function onCancel() {
     >
       <div class="text-foreground mb-3 text-sm">
         {{ action.popConfirm.title ?? $t('confirmTitle') }}
+      </div>
+      <div
+        v-if="action.popConfirm.description"
+        class="text-muted-foreground mb-3 truncate text-sm"
+      >
+        {{ action.popConfirm.description }}
       </div>
       <div class="flex justify-end gap-2">
         <VbenButton size="sm" variant="outline" @click="onCancel">

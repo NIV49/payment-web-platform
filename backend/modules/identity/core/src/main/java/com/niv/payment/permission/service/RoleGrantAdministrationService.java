@@ -1,6 +1,7 @@
 package com.niv.payment.permission.service;
 
 import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.domain.ScopeDimension;
 import com.niv.payment.permission.domain.ScopeMode;
 
@@ -18,10 +19,14 @@ public final class RoleGrantAdministrationService {
         "role:view", "role:create", "role:update", "role:delete",
         "menu:view", "menu:create", "menu:update", "menu:delete",
         "department:view", "department:create", "department:update", "department:delete");
+    public static final Set<String> DICTIONARY_GRANTABLE_CODES = Set.of(
+        "dictionary:view", "dictionary:create", "dictionary:update", "dictionary:delete",
+        "dictionary-data:view");
 
     private final RoleGrantReadPort readPort;
     private final RoleGrantWritePort writePort;
     private final boolean legacyAdministrationCutoverComplete;
+    private final Set<String> grantableCodes;
 
     public RoleGrantAdministrationService(RoleGrantReadPort readPort, RoleGrantWritePort writePort) {
         this(readPort, writePort, false);
@@ -29,9 +34,23 @@ public final class RoleGrantAdministrationService {
 
     public RoleGrantAdministrationService(RoleGrantReadPort readPort, RoleGrantWritePort writePort,
                                           boolean legacyAdministrationCutoverComplete) {
+        this(readPort, writePort, legacyAdministrationCutoverComplete, GRANTABLE_CODES);
+    }
+
+    public RoleGrantAdministrationService(RoleGrantReadPort readPort, RoleGrantWritePort writePort,
+                                          boolean legacyAdministrationCutoverComplete,
+                                          AccountDomain accountDomain) {
+        this(readPort, writePort, legacyAdministrationCutoverComplete,
+            grantableCodes(accountDomain));
+    }
+
+    private RoleGrantAdministrationService(RoleGrantReadPort readPort, RoleGrantWritePort writePort,
+                                           boolean legacyAdministrationCutoverComplete,
+                                           Set<String> grantableCodes) {
         this.readPort = Objects.requireNonNull(readPort, "readPort");
         this.writePort = Objects.requireNonNull(writePort, "writePort");
         this.legacyAdministrationCutoverComplete = legacyAdministrationCutoverComplete;
+        this.grantableCodes = Set.copyOf(grantableCodes);
     }
 
     public List<RoleGrantModels.GrantablePermission> grantablePermissions(
@@ -43,7 +62,7 @@ public final class RoleGrantAdministrationService {
             readPort.findGrantablePermissions(tenantId, Objects.requireNonNull(actor, "actor"));
         Set<String> actual = catalog.stream().map(item -> item.code().value())
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        if (!actual.equals(GRANTABLE_CODES)) {
+        if (!actual.equals(grantableCodes)) {
             throw new IllegalStateException("Grantable permission catalog is incomplete or unsafe");
         }
         return List.copyOf(catalog);
@@ -73,7 +92,7 @@ public final class RoleGrantAdministrationService {
             if (PROTECTED_PORTAL_GRANT_KEY.equals(grant.grantKey())) {
                 throw new IllegalArgumentException("Grant key is reserved for server-managed backoffice access");
             }
-            if (!GRANTABLE_CODES.contains(grant.permission().value())) {
+            if (!grantableCodes.contains(grant.permission().value())) {
                 throw new IllegalArgumentException("Permission is not grantable from this administration surface");
             }
             if (grant.dimension() != ScopeDimension.TENANT || grant.mode() != ScopeMode.TENANT_ALL) {
@@ -84,6 +103,17 @@ public final class RoleGrantAdministrationService {
             }
         }
         return writePort.replaceAtomically(command);
+    }
+
+    public static Set<String> grantableCodes(AccountDomain accountDomain) {
+        Objects.requireNonNull(accountDomain, "accountDomain");
+        Set<String> result = new HashSet<>(GRANTABLE_CODES);
+        if (accountDomain == AccountDomain.PLATFORM) {
+            result.addAll(DICTIONARY_GRANTABLE_CODES);
+        } else {
+            result.add("dictionary-data:view");
+        }
+        return Set.copyOf(result);
     }
 
     public static final class LegacyAdministrationCutoverRequiredException extends IllegalStateException {

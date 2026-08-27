@@ -26,6 +26,13 @@ public final class MemberInvitationService {
         }
         IdentityInvitationRepository.Reservation reservation =
             repository.reserveMember(accountDomain, actor, command);
+        if (reservation.status() != IdentityInvitationRepository.Status.RESERVED) {
+            if (reservation.membershipId() == null) {
+                throw new IllegalStateException("Existing identity invitation has no membership");
+            }
+            return new IdentityInvitationRepository.Invitation(reservation.invitationId(),
+                reservation.membershipId(), reservation.status());
+        }
         FederatedIdentity identity = provisioner.resolveInvitationIdentity(accountDomain,
             command.idempotencyKey(), command.email(), command.displayName());
         return repository.attachIdentity(reservation, identity);

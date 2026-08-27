@@ -7,7 +7,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OidcBffExceptionHandlerTest {
     @Test
     void rejectedLoginUsesTheStandardTraceableEnvelope() {
-        var response = new OidcBffExceptionHandler(() -> "trace-1").rejected();
+        var response = new OidcBffExceptionHandler(() -> "trace-1").rejected(
+            new OidcFlowService.LoginRejectedException(
+                OidcFlowService.LoginRejectedException.Reason.ID_TOKEN_ACR_INVALID));
 
         assertThat(response.getStatusCode().value()).isEqualTo(401);
         assertThat(response.getBody()).isEqualTo(new OidcBffExceptionHandler.OidcErrorResponse(

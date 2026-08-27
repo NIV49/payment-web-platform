@@ -1,5 +1,5 @@
-import { access, readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { access, readdir, readFile } from 'node:fs/promises';
+import { extname, relative, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -11,6 +11,7 @@ const applications = [
     namespace: 'payment-platform-admin',
     packageName: '@payment/platform-admin',
     port: '5999',
+    trustedLocalHosts: ['platform.localhost'],
   },
   {
     accountDomain: 'MERCHANT',
@@ -19,6 +20,7 @@ const applications = [
     namespace: 'payment-merchant-admin',
     packageName: '@payment/merchant-admin',
     port: '6002',
+    trustedLocalHosts: ['merchant.localhost', 'merchant-e2e.localhost'],
   },
   {
     accountDomain: 'AGENT',
@@ -27,6 +29,7 @@ const applications = [
     namespace: 'payment-agent-admin',
     packageName: '@payment/agent-admin',
     port: '6001',
+    trustedLocalHosts: ['agent.localhost'],
   },
 ] as const;
 
@@ -41,6 +44,25 @@ async function pathExists(relativePath: string) {
   } catch {
     return false;
   }
+}
+
+async function sourceFilesUnder(relativeRoot: string) {
+  const root = resolve(process.cwd(), relativeRoot);
+  const sourceFiles: string[] = [];
+
+  async function visit(directory: string) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const absolutePath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(absolutePath);
+      } else if (['.ts', '.tsx', '.vue'].includes(extname(entry.name))) {
+        sourceFiles.push(absolutePath);
+      }
+    }
+  }
+
+  await visit(root);
+  return sourceFiles.toSorted();
 }
 
 describe('independent backoffice application topology', () => {
@@ -68,6 +90,10 @@ describe('independent backoffice application topology', () => {
       expect(environment).toMatch(/^VITE_GLOB_API_URL=\/api$/m);
       expect(environment).toMatch(/^VITE_ROUTER_HISTORY=history$/m);
       expect(viteConfig).toContain(`'${application.apiTarget}'`);
+      for (const host of application.trustedLocalHosts) {
+        expect(viteConfig).toContain(`'${host}'`);
+      }
+      expect(viteConfig).toContain('changeOrigin: false');
       expect(viteConfig).not.toContain('resolveDeployment');
       expect(main).toContain("from '@payment/backoffice-runtime'");
       expect(main).toContain("from './deployment'");
@@ -76,7 +102,32 @@ describe('independent backoffice application topology', () => {
     expect(await pathExists('apps/web-antdv-next')).toBe(false);
   });
 
-  it('keeps reusable runtime code outside deployable applications', async () => {
+  it('warms the current application entrypoint', async () => {
+    const applicationConfig = await workspaceFile(
+      'internal/vite-config/src/config/application.ts',
+    );
+
+    expect(applicationConfig).toContain("'./src/main.ts'");
+    expect(applicationConfig).not.toContain("'./src/bootstrap.ts'");
+  });
+
+  it('indexes every active locale root from the repository editor config', async () => {
+    const settings = await workspaceFile('../../.vscode/settings.json');
+
+    for (const localeRoot of [
+      'frontend/admin/packages/locales/src/langs',
+      'frontend/admin/packages/effects/backoffice-runtime/src/locales/langs',
+      'frontend/admin/playground/src/locales/langs',
+    ]) {
+      expect(settings).toContain(`"${localeRoot}"`);
+    }
+    expect(settings).toContain(
+      '"i18n-ally.pathMatcher": "{locale}/{namespace}.{ext}"',
+    );
+    expect(settings).toContain('"i18n-ally.sourceLanguage": "en-US"');
+  });
+
+  it('keeps shared user and role pages plus dictionary lookup infrastructure in the reusable runtime', async () => {
     const manifest = JSON.parse(
       await workspaceFile('packages/effects/backoffice-runtime/package.json'),
     ) as { name: string };
@@ -84,7 +135,37 @@ describe('independent backoffice application topology', () => {
     expect(manifest.name).toBe('@payment/backoffice-runtime');
     expect(
       await pathExists('packages/effects/backoffice-runtime/src/views/system'),
+    ).toBe(true);
+    expect(
+      await pathExists(
+        'packages/effects/backoffice-runtime/src/views/system/user/list.vue',
+      ),
+    ).toBe(true);
+    expect(
+      await pathExists(
+        'packages/effects/backoffice-runtime/src/views/system/role/list.vue',
+      ),
+    ).toBe(true);
+    expect(
+      await pathExists(
+        'packages/effects/backoffice-runtime/src/views/system/dict/data/list.vue',
+      ),
     ).toBe(false);
+    expect(
+      await pathExists(
+        'packages/effects/backoffice-runtime/src/api/system/dictionary-data.ts',
+      ),
+    ).toBe(true);
+    expect(
+      await pathExists(
+        'packages/effects/backoffice-runtime/src/composables/use-common-status-dictionary.ts',
+      ),
+    ).toBe(true);
+    const commonPages = await workspaceFile(
+      'packages/effects/backoffice-runtime/src/common-pages.ts',
+    );
+    expect(commonPages).not.toContain('READ_ONLY_DICTIONARY_DATA_PAGE_MAP');
+    expect(commonPages).not.toContain('./views/system/dict/data/list.vue');
     expect(
       await pathExists(
         'packages/effects/backoffice-runtime/src/views/dashboard/analytics',
@@ -95,48 +176,147 @@ describe('independent backoffice application topology', () => {
     ).toBe(false);
   });
 
-  it('keeps platform-only administration views in platform-admin', async () => {
+  it('uses package self-references for cross-module imports in shared system views', async () => {
+    const runtimeRoot = 'packages/effects/backoffice-runtime/src/views/system';
+    const deepParentImport = /(?:from\s+|import\s*\()\s*['"](?:\.\.\/){3,}/;
+    const violations: string[] = [];
+
+    for (const sourceFile of await sourceFilesUnder(runtimeRoot)) {
+      const source = await readFile(sourceFile, 'utf8');
+      for (const [index, line] of source.split('\n').entries()) {
+        if (deepParentImport.test(line)) {
+          violations.push(
+            `${relative(resolve(process.cwd(), runtimeRoot), sourceFile)}:${index + 1}`,
+          );
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('uses package self-references instead of application-scoped aliases inside the shared runtime', async () => {
+    const runtimeRoot = 'packages/effects/backoffice-runtime/src';
+    const runtimeManifest = JSON.parse(
+      await workspaceFile('packages/effects/backoffice-runtime/package.json'),
+    ) as { exports: Record<string, unknown>; imports?: unknown };
+    const runtimeTypeScript = await workspaceFile(
+      'packages/effects/backoffice-runtime/tsconfig.json',
+    );
+    const applicationScopedAlias =
+      /(?:from\s+|import\s*\(|vi\.mock\()\s*['"]#\//;
+    const unscopedRuntimeReference =
+      /(?:from\s+|import\s*\(|vi\.mock\()\s*['"]\/backoffice-runtime/;
+    const duplicatedPackageScope = /@payment@payment\/backoffice-runtime/;
+    const violations: string[] = [];
+
+    for (const sourceFile of await sourceFilesUnder(runtimeRoot)) {
+      const source = await readFile(sourceFile, 'utf8');
+      for (const [index, line] of source.split('\n').entries()) {
+        if (
+          applicationScopedAlias.test(line) ||
+          unscopedRuntimeReference.test(line) ||
+          duplicatedPackageScope.test(line)
+        ) {
+          violations.push(
+            `${relative(resolve(process.cwd(), runtimeRoot), sourceFile)}:${index + 1}`,
+          );
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+    expect(runtimeManifest).not.toHaveProperty('imports');
+    for (const systemApiExport of [
+      './api/system/dept',
+      './api/system/dictionary-data',
+      './api/system/dictionary-type',
+      './api/system/menu',
+      './api/system/role',
+      './api/system/role-grant',
+      './api/system/types',
+      './api/system/user',
+    ]) {
+      expect(runtimeManifest.exports).toHaveProperty(systemApiExport);
+    }
+    expect(runtimeManifest.exports).not.toHaveProperty('./api/system/*');
+    expect(runtimeTypeScript).not.toContain('"#/*"');
+  });
+
+  it('keeps only platform-specific administration views in platform-admin', async () => {
     for (const path of [
       'src/views/dashboard/analytics/index.vue',
       'src/views/demos/antd/index.vue',
       'src/views/system/dept/list.vue',
       'src/views/system/menu/list.vue',
-      'src/views/system/role/list.vue',
-      'src/views/system/user/list.vue',
+      'src/views/system/dict/list.vue',
+      'src/views/system/dict/data/list.vue',
     ]) {
       expect(await pathExists(`apps/platform-admin/${path}`)).toBe(true);
       expect(await pathExists(`apps/merchant-admin/${path}`)).toBe(false);
       expect(await pathExists(`apps/agent-admin/${path}`)).toBe(false);
     }
+
+    for (const path of [
+      'src/views/system/role/list.vue',
+      'src/views/system/user/list.vue',
+    ]) {
+      for (const application of applications) {
+        expect(await pathExists(`apps/${application.directory}/${path}`)).toBe(
+          false,
+        );
+      }
+    }
+
+    for (const application of applications.filter(
+      ({ accountDomain }) => accountDomain !== 'PLATFORM',
+    )) {
+      expect(
+        await pathExists(
+          `apps/${application.directory}/src/views/system/dict/data/list.vue`,
+        ),
+      ).toBe(false);
+    }
   });
 
-  it('keeps member governance application-owned and tenant bootstrap platform-only', async () => {
+  it('removes legacy identity navigation and exposes dictionary pages only to PLATFORM', async () => {
     for (const application of applications) {
       expect(
         await pathExists(
           `apps/${application.directory}/src/views/identity/members/index.vue`,
         ),
-      ).toBe(true);
+      ).toBe(false);
       const deployment = await workspaceFile(
         `apps/${application.directory}/src/deployment.ts`,
       );
-      expect(deployment).toContain("path: '/identity/members'");
+      expect(deployment).not.toContain('/identity/members');
+      expect(deployment).not.toContain('/identity/tenant-bootstrap');
+      expect(deployment).toContain("'/system/user/list'");
+      expect(deployment).toContain("'/system/role/list'");
+      expect(deployment).not.toContain("'SystemDictionaryData'");
+      expect(deployment).not.toContain('/system/dict/data/type/:dictType');
+
+      const isPlatform = application.accountDomain === 'PLATFORM';
+      for (const platformOnlyFragment of [
+        "'/system/dict/list'",
+        "'/system/dict/data/list'",
+        "'SystemDictionaryDataIndex'",
+        "'/system/dict/data'",
+      ]) {
+        expect(deployment.includes(platformOnlyFragment)).toBe(isPlatform);
+      }
+      expect(
+        isPlatform ||
+          !deployment.includes('READ_ONLY_DICTIONARY_DATA_PAGE_MAP'),
+      ).toBe(true);
     }
 
-    expect(
-      await pathExists(
-        'apps/platform-admin/src/views/identity/tenant-bootstrap/index.vue',
-      ),
-    ).toBe(true);
-    expect(
-      await pathExists(
-        'apps/merchant-admin/src/views/identity/tenant-bootstrap/index.vue',
-      ),
-    ).toBe(false);
-    expect(
-      await pathExists(
-        'apps/agent-admin/src/views/identity/tenant-bootstrap/index.vue',
-      ),
-    ).toBe(false);
+    for (const application of applications) {
+      expect(
+        await pathExists(
+          `apps/${application.directory}/src/views/identity/tenant-bootstrap/index.vue`,
+        ),
+      ).toBe(false);
+    }
   });
 });

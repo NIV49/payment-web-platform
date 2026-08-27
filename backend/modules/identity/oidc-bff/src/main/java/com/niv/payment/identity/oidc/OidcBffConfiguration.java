@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpLogic;
 import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.security.SaTokenSessionIssuer;
 import org.jooq.DSLContext;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -11,9 +12,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
-import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
+import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
+import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import tools.jackson.databind.ObjectMapper;
 
@@ -24,7 +28,8 @@ import java.time.Duration;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "payment.oidc", name = "enabled", havingValue = "true")
-@Import({OidcBffController.class, OidcBffExceptionHandler.class, MfaRecoveryConfiguration.class})
+@Import({OidcBffController.class, OidcBffExceptionHandler.class,
+    IdentityGovernanceQueryConfiguration.class, MfaRecoveryConfiguration.class})
 public class OidcBffConfiguration {
     @Bean
     OidcClientSettings oidcClientSettings(
@@ -52,7 +57,20 @@ public class OidcBffConfiguration {
     }
 
     @Bean
-    SpringOidcClient springOidcClient(OidcClientSettings settings, JwtDecoder oidcJwtDecoder) {
+    JwtDecoder oidcLogoutJwtDecoder(OidcClientSettings settings) {
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(settings.jwkSetUri().toString())
+            .validateType(false)
+            .jwsAlgorithm(SignatureAlgorithm.RS256)
+            .build();
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+            new JwtTimestampValidator(),
+            new JwtIssuerValidator(settings.issuer().toString())));
+        return decoder;
+    }
+
+    @Bean
+    SpringOidcClient springOidcClient(OidcClientSettings settings,
+                                      @Qualifier("oidcJwtDecoder") JwtDecoder oidcJwtDecoder) {
         return new SpringOidcClient(settings, new RestClientAuthorizationCodeTokenResponseClient(), oidcJwtDecoder);
     }
 
@@ -93,9 +111,11 @@ public class OidcBffConfiguration {
         RedisOidcStateStore state,
         OidcSessionAuthenticator sessions,
         @Value("${payment.oidc.public-scheme:https}") String publicScheme,
+        @Value("${payment.oidc.public-port:-1}") int publicPort,
         @Value("${payment.oidc.frontend-callback-path:/auth/oidc/callback}") String callbackPath) {
         return new OidcFlowService(accountDomain, entries, client, client, state, state, sessions,
-            Clock.systemUTC(), new SecureOpaqueValueGenerator(new SecureRandom()), publicScheme, callbackPath);
+            Clock.systemUTC(), new SecureOpaqueValueGenerator(new SecureRandom()), publicScheme,
+            publicPort, callbackPath);
     }
 
     @Bean
@@ -111,10 +131,11 @@ public class OidcBffConfiguration {
         RedisOidcStateStore state,
         OidcStepUpSession sessions,
         @Value("${payment.oidc.public-scheme:https}") String publicScheme,
+        @Value("${payment.oidc.public-port:-1}") int publicPort,
         @Value("${payment.oidc.frontend-callback-path:/auth/oidc/callback}") String callbackPath) {
         return new OidcStepUpFlowService(accountDomain, entries, client, client, state, state,
             sessions, Clock.systemUTC(), new SecureOpaqueValueGenerator(new SecureRandom()),
-            publicScheme, callbackPath);
+            publicScheme, publicPort, callbackPath);
     }
 
     @Bean
@@ -137,9 +158,9 @@ public class OidcBffConfiguration {
     @Bean
     OidcLogoutTokenVerifier oidcLogoutTokenVerifier(
         OidcClientSettings settings,
-        JwtDecoder oidcJwtDecoder,
+        @Qualifier("oidcLogoutJwtDecoder") JwtDecoder oidcLogoutJwtDecoder,
         @Value("${payment.oidc.logout-event-maximum-age:PT5M}") Duration maximumAge) {
-        return new OidcLogoutTokenVerifier(settings, oidcJwtDecoder, Clock.systemUTC(), maximumAge);
+        return new OidcLogoutTokenVerifier(settings, oidcLogoutJwtDecoder, Clock.systemUTC(), maximumAge);
     }
 
     @Bean

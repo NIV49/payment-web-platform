@@ -1,0 +1,207 @@
+{
+  "title": "商户管理",
+  "review": "审核",
+  "disable": "禁用",
+  "enable": "启用",
+  "terminate": "终止",
+  "edit": "编辑",
+  "create": "新增",
+  "permission": {
+    "review": "审核",
+    "disable": "禁用",
+    "enable": "启用",
+    "terminate": "终止",
+    "edit": "编辑",
+    "create": "新增商户"
+  },
+  "list": { "title": "商户列表", "loadFailed": "商户列表加载失败，请重试" },
+  "detail": {
+    "title": "商户详情",
+    "reviewTitle": "商户审核",
+    "reviewAction": "审核",
+    "reviewDecision": "审核结果",
+    "reviewUnavailable": "当前没有可审核的商户申请或资料修改",
+    "documentPreviewUnavailable": "无证件预览权限",
+    "loadFailed": "商户详情加载失败",
+    "reviewSuccess": "商户审核完成"
+  },
+  "classification": {
+    "loadFailed": "商户分类字典加载失败，当前使用内置选项",
+    "retry": "重试"
+  },
+  "profile": {
+    "title": "商户资料",
+    "notSubmitted": "尚未提交商户申请",
+    "readOnly": "当前状态下商户资料只读",
+    "loadFailed": "商户资料加载失败",
+    "registrationNumberRequired": "首次提交或变更注册国家时必须填写注册号",
+    "registrationNumberHelp": "首次提交必填；驳回重提仅在注册国家未变更时可留空保留原值。",
+    "submitFailed": "商户申请提交失败，请检查后重试",
+    "submit": "提交申请",
+    "resubmit": "重新提交",
+    "submitSuccess": "商户申请已提交"
+  },
+  "status": {
+    "PENDING_REVIEW": "待审核",
+    "REVIEW_REJECTED": "已驳回",
+    "ACTIVE": "启用",
+    "DISABLED": "禁用",
+    "TERMINATED": "已终止"
+  },
+  "fields": {
+    "merchantId": "商户 ID",
+    "merchantCode": "商户号",
+    "name": "商户名称",
+    "merchantName": "商户名称",
+    "merchantType": "商户类型",
+    "legalPersonName": "法人名称",
+    "authenticationType": "认证类型",
+    "subjectName": "主体名称",
+    "legalName": "主体名称",
+    "displayName": "商户名称",
+    "registrationCountry": "主体注册国家/地区",
+    "legalRegistrationCountry": "主体注册国家",
+    "registrationNumber": "注册号",
+    "status": "状态",
+    "merchantStatus": "商户状态",
+    "market": "市场",
+    "statusRemarks": "状态备注",
+    "merchantRemarks": "商户备注",
+    "submittedAt": "提交时间",
+    "updatedAt": "更新时间",
+    "createdAt": "创建时间",
+    "rowVersion": "当前版本",
+    "lastDecision": "最近审核结论",
+    "operation": "操作"
+  },
+  "actions": {
+    "approve": "通过",
+    "reject": "驳回",
+    "disable": "禁用",
+    "enable": "启用",
+    "terminate": "终止",
+    "statusChange": "变更商户状态",
+    "review": "生命周期操作",
+    "reasonCode": "原因",
+    "failed": "商户生命周期更新失败，请检查后重试",
+    "success": "商户生命周期已更新"
+  },
+  "onboarding": {
+    "title": "商户入驻",
+    "create": "新增商户",
+    "createTitle": "新增商户",
+    "editTitle": "编辑商户",
+    "targetTenant": "目标商户工作区",
+    "loadFailed": "商户入驻数据加载失败，请重试",
+    "submitFailed": "商户资料提交失败，请检查所有必填项后重试",
+    "submitSuccess": "商户资料已提交审核",
+    "stale": "商户资料已发生变化，当前数据已重新加载",
+    "submit": "提交审核",
+    "cancel": "取消",
+    "sections": {
+      "merchantBasic": "商户基础信息",
+      "subject": "主体信息",
+      "legalRepresentative": "法人信息"
+    },
+    "fields": {
+      "displayName": "商户名称",
+      "brandName": "品牌名称",
+      "authenticationType": "认证类型",
+      "merchantTypeCode": "商户类型",
+      "industryCode": "所属行业",
+      "brandLogoDocumentId": "品牌 Logo",
+      "legalName": "主体名称",
+      "registrationCountry": "主体注册国家/地区",
+      "marketCodes": "经营市场",
+      "registeredAddress": "注册地址",
+      "operatingAddress": "经营地址",
+      "businessLicenseDocumentId": "营业执照",
+      "legalPersonName": "法人姓名",
+      "contactEmail": "联系邮箱",
+      "contactPhone": "联系电话",
+      "legalIdTypeCode": "法人证件类型",
+      "legalIdNo": "法人证件号码",
+      "legalIdValidity": "证件有效期",
+      "legalIdFrontDocumentId": "法人证件正面",
+      "legalIdBackDocumentId": "法人证件背面",
+      "legalIdHoldingDocumentId": "法人手持证件照",
+      "remarks": "备注",
+      "registrationNumber": "主体注册号"
+    },
+    "documents": {
+      "upload": "上传",
+      "replace": "重新上传",
+      "preview": "预览",
+      "remove": "移除",
+      "invalid": "仅支持真实的 PNG 或 JPEG 图片，且文件不超过 2 MiB",
+      "tenantRequired": "请先选择目标商户工作区",
+      "uploadFailed": "文件上传失败，请重试",
+      "previewFailed": "私有文件预览失败，请重试"
+    },
+    "sensitive": {
+      "replaceLegalId": "替换法人证件号码",
+      "replaceRegistration": "替换主体注册号"
+    },
+    "pending": {
+      "title": "当前有一笔资料修改待审核，生效资料暂时只读"
+    },
+    "review": {
+      "title": "审核资料修改",
+      "approve": "通过",
+      "reject": "驳回",
+      "failed": "审核提交失败，请重试",
+      "reasons": {
+        "PROFILE_AMENDMENT_VERIFIED": "资料修改已核验",
+        "PROFILE_AMENDMENT_MISMATCH": "资料修改不匹配",
+        "DOCUMENT_UNVERIFIED": "文件无法核验",
+        "COMPLIANCE_REJECTED": "合规拒绝"
+      }
+    },
+    "reviewSuccess": "资料修改审核完成"
+  },
+  "markets": {
+    "BRA": "巴西",
+    "PHL": "菲律宾"
+  },
+  "merchantTypes": {
+    "INDIRECT": "间连商户",
+    "COMMISSION": "分佣商户",
+    "SALES": "销售商户",
+    "PLATFORM": "平台商户"
+  },
+  "authenticationTypes": {
+    "ENTERPRISE": "企业",
+    "NON_PROFIT_ORGANIZATIONS": "非盈利组织",
+    "CLIQUE": "集团",
+    "INDIVIDUAL": "个人",
+    "INDIVIDUAL_HOUSEHOLD": "个体户"
+  },
+  "industries": {
+    "FINANCIAL_SERVICES": "金融服务",
+    "ECOMMERCE": "电子商务",
+    "RETAIL": "零售",
+    "TRAVEL": "旅游",
+    "EDUCATION": "教育",
+    "OTHER": "其他"
+  },
+  "legalIdTypes": {
+    "NATIONAL_ID": "身份证件",
+    "PASSPORT": "护照",
+    "DRIVER_LICENSE": "驾驶证"
+  },
+  "reasons": {
+    "APPLICATION_SUBMITTED": "申请已提交",
+    "APPLICATION_RESUBMITTED": "申请已重新提交",
+    "PLATFORM_APPLICATION_SUBMITTED": "平台代建申请已提交",
+    "PROFILE_VERIFIED": "资料已核验",
+    "PROFILE_MISMATCH": "资料不匹配",
+    "REGISTRATION_UNVERIFIED": "注册信息无法核验",
+    "COMPLIANCE_REJECTED": "合规拒绝",
+    "COMPLIANCE_HOLD": "合规暂停",
+    "RISK_CONTROL": "风险控制",
+    "COMPLIANCE_CLEARED": "合规限制已解除",
+    "RISK_CLEARED": "风险限制已解除",
+    "BUSINESS_CLOSED": "业务关闭",
+    "COMPLIANCE_TERMINATION": "合规终止"
+  }
+}

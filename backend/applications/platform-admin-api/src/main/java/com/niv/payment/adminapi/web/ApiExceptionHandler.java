@@ -19,10 +19,16 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 
 import java.util.Objects;
+import com.niv.payment.dictionary.core.SystemDictionaryException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -34,9 +40,23 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class,
-        HttpMessageNotReadableException.class,
-        IdentityAdministrationService.InvalidCommandException.class, IllegalArgumentException.class})
+        HttpMessageNotReadableException.class, MissingServletRequestParameterException.class,
+        MissingServletRequestPartException.class,
+        MethodArgumentTypeMismatchException.class,
+        IdentityAdministrationService.InvalidCommandException.class,
+        SystemDictionaryException.InvalidRequest.class, IllegalArgumentException.class})
     ResponseEntity<ApiResponse<Void>> badRequest(Exception exception) {
+        return failure(HttpStatus.BAD_REQUEST, 40001, "INVALID_REQUEST", "Invalid request");
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<ApiResponse<Void>> multipartTooLarge(MaxUploadSizeExceededException exception) {
+        return failure(HttpStatus.PAYLOAD_TOO_LARGE, 41301, "PAYLOAD_TOO_LARGE",
+            "Request body is too large");
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    ResponseEntity<ApiResponse<Void>> malformedMultipart(MultipartException exception) {
         return failure(HttpStatus.BAD_REQUEST, 40001, "INVALID_REQUEST", "Invalid request");
     }
 
@@ -90,8 +110,9 @@ public class ApiExceptionHandler {
             "The last active system administrator cannot be disabled or removed");
     }
 
-    @ExceptionHandler(IdentityAdministrationService.ResourceNotFoundException.class)
-    ResponseEntity<ApiResponse<Void>> notFound(IdentityAdministrationService.ResourceNotFoundException exception) {
+    @ExceptionHandler({IdentityAdministrationService.ResourceNotFoundException.class,
+        SystemDictionaryException.NotFound.class})
+    ResponseEntity<ApiResponse<Void>> notFound(RuntimeException exception) {
         return failure(HttpStatus.NOT_FOUND, 40401, "RESOURCE_NOT_FOUND", exception.getMessage());
     }
 
@@ -100,9 +121,10 @@ public class ApiExceptionHandler {
         return failure(HttpStatus.NOT_FOUND, 40401, "RESOURCE_NOT_FOUND", "Resource not found");
     }
 
-    @ExceptionHandler(IdentityAdministrationService.OptimisticLockException.class)
+    @ExceptionHandler({IdentityAdministrationService.OptimisticLockException.class,
+        SystemDictionaryException.OptimisticLockConflict.class})
     ResponseEntity<ApiResponse<Void>> optimisticLockConflict(
-        IdentityAdministrationService.OptimisticLockException exception) {
+        RuntimeException exception) {
         return failure(HttpStatus.CONFLICT, 40902, "OPTIMISTIC_LOCK_CONFLICT",
             "The record has changed; reload and retry");
     }
@@ -115,6 +137,7 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler({IdentityAdministrationService.DataConflictException.class,
+        SystemDictionaryException.DataConflict.class,
         DataIntegrityViolationException.class})
     ResponseEntity<ApiResponse<Void>> dataConflict(Exception exception) {
         return failure(HttpStatus.CONFLICT, 40901, "DATA_CONFLICT", "The operation conflicts with current data");

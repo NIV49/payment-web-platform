@@ -1,5 +1,6 @@
 package com.niv.payment.permission.persistence.repository;
 
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.RoleAssignmentPolicy;
 import com.niv.payment.permission.service.RoleConfigurationCommand;
@@ -52,17 +53,25 @@ public class JooqRoleConfigurationRepository implements RoleConfigurationPort {
         DSLContext dsl,
         JooqRoleGrantAdministrationRepository grants,
         Supplier<String> traceIdSupplier) {
+        this(dsl, grants, AccountDomain.PLATFORM, traceIdSupplier);
+    }
+
+    public JooqRoleConfigurationRepository(
+        DSLContext dsl,
+        JooqRoleGrantAdministrationRepository grants,
+        AccountDomain accountDomain,
+        Supplier<String> traceIdSupplier) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
         this.grants = Objects.requireNonNull(grants, "grants");
         this.traceIdSupplier = Objects.requireNonNull(traceIdSupplier, "traceIdSupplier");
-        this.support = new JooqAdministrationSupport(dsl, traceIdSupplier);
+        this.support = new JooqAdministrationSupport(dsl, accountDomain, traceIdSupplier);
     }
 
     @Override
     @Transactional
     public RoleConfigurationModels.RoleConfiguration createAtomically(
         RoleConfigurationCreateCommand command) {
-        support.requirePlatformTenant(command.tenantId());
+        String tenantType = support.requireAccountDomainTenant(command.tenantId());
         support.lockTenant(command.tenantId(), command.actor());
         grants.requireSystemActor(command.tenantId(), command.actor().membershipId(), true);
         grants.requireTransactionalPermissions(
@@ -76,7 +85,7 @@ public class JooqRoleConfigurationRepository implements RoleConfigurationPort {
             .set(IAM_ROLE.TENANT_ID, command.tenantId())
             .set(IAM_ROLE.ROLE_CODE, roleCode(command.name(), roleId))
             .set(IAM_ROLE.ROLE_NAME, command.name())
-            .set(IAM_ROLE.APPLICABLE_TENANT_TYPE, "PLATFORM")
+            .set(IAM_ROLE.APPLICABLE_TENANT_TYPE, tenantType)
             .set(IAM_ROLE.ASSIGNABLE, true)
             .set(IAM_ROLE.SYSTEM_ROLE, false)
             .set(IAM_ROLE.STATUS, status(command.status()))

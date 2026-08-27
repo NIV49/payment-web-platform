@@ -10,6 +10,8 @@ import { IconifyIcon } from '@vben/icons';
 import { $te } from '@vben/locales';
 import { getPopupContainer } from '@vben/utils';
 
+import CommonStatusDictionaryAlert from '@payment/backoffice-runtime/components/common-status-dictionary-alert';
+import { useCommonStatusDictionary } from '@payment/backoffice-runtime/composables';
 import { breakpointsTailwind, useBreakpoints } from '@vueuse/core';
 
 import { useVbenForm, z } from '#/adapter/form';
@@ -39,6 +41,9 @@ const emit = defineEmits<{
   success: [];
 }>();
 const componentKeys = getComponentKeys();
+const commonStatus = useCommonStatusDictionary();
+const commonStatusError = commonStatus.error;
+const getStatusOptions = () => commonStatus.options.value;
 type MenuFormData = SystemMenuApi.SystemMenu & { linkSrc?: string };
 type MenuSaveFormData = SystemMenuApi.MenuSaveParams & { linkSrc?: string };
 
@@ -138,7 +143,7 @@ const schema: VbenFormSchema[] = [
     componentProps() {
       // 不需要处理多语言时就无需这么做
       return {
-        ...(titleSuffix.value && { addonAfter: titleSuffix.value }),
+        ...(titleSuffix.value && { suffix: titleSuffix.value }),
         onChange({ target: { value } }: { target: { value: string } }) {
           titleSuffix.value = value && $te(value) ? $t(value) : undefined;
         },
@@ -154,9 +159,9 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Input',
     dependencies: {
-      show: (values) => {
-        return menuTypeRequiresRoutePath(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: menuTypeRequiresRoutePath(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'path',
@@ -187,9 +192,9 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Input',
     dependencies: {
-      show: (values) => {
-        return ['embedded', 'menu'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: ['embedded', 'menu'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.activePath',
@@ -216,9 +221,9 @@ const schema: VbenFormSchema[] = [
       prefix: 'carbon',
     },
     dependencies: {
-      show: (values) => {
-        return ['catalog', 'embedded', 'link', 'menu'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: ['catalog', 'embedded', 'link', 'menu'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.icon',
@@ -230,9 +235,9 @@ const schema: VbenFormSchema[] = [
       prefix: 'carbon',
     },
     dependencies: {
-      show: (values) => {
-        return ['catalog', 'embedded', 'menu'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: ['catalog', 'embedded', 'menu'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.activeIcon',
@@ -249,19 +254,18 @@ const schema: VbenFormSchema[] = [
       options: componentKeys.map((v) => ({ value: v })),
     },
     dependencies: {
-      rules: (values) => {
-        return values.type === 'menu'
-          ? z
-              .string()
-              .refine(
-                (value) => isRegisteredMenuComponent(value, componentKeys),
-                $t('system.menu.componentInvalid'),
-              )
-          : null;
-      },
-      show: (values) => {
-        return values.type === 'menu';
-      },
+      resolve: ({ values }) => ({
+        rules:
+          values.type === 'menu'
+            ? z
+                .string()
+                .refine(
+                  (value) => isRegisteredMenuComponent(value, componentKeys),
+                  $t('system.menu.componentInvalid'),
+                )
+            : null,
+        show: values.type === 'menu',
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'component',
@@ -270,9 +274,9 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Input',
     dependencies: {
-      show: (values) => {
-        return ['embedded', 'link'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: ['embedded', 'link'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'linkSrc',
@@ -282,12 +286,10 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Input',
     dependencies: {
-      rules: (values) => {
-        return values.type === 'button' ? 'required' : null;
-      },
-      show: (values) => {
-        return ['button', 'catalog', 'embedded', 'menu'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        rules: values.type === 'button' ? 'required' : null,
+        show: ['button', 'catalog', 'embedded', 'menu'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'authCode',
@@ -299,14 +301,11 @@ const schema: VbenFormSchema[] = [
   },
   {
     component: 'RadioGroup',
-    componentProps: {
+    componentProps: () => ({
       buttonStyle: 'solid',
-      options: [
-        { label: $t('common.enabled'), value: 1 },
-        { label: $t('common.disabled'), value: 0 },
-      ],
+      options: getStatusOptions(),
       optionType: 'button',
-    },
+    }),
     defaultValue: 1,
     fieldName: 'status',
     label: $t('system.menu.status'),
@@ -322,9 +321,7 @@ const schema: VbenFormSchema[] = [
       ],
     },
     dependencies: {
-      show: (values) => {
-        return values.type !== 'button';
-      },
+      resolve: ({ values }) => ({ show: values.type !== 'button' }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.badgeType',
@@ -359,9 +356,7 @@ const schema: VbenFormSchema[] = [
       })),
     },
     dependencies: {
-      show: (values) => {
-        return values.type !== 'button';
-      },
+      resolve: ({ values }) => ({ show: values.type !== 'button' }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.badgeVariants',
@@ -370,9 +365,9 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Divider',
     dependencies: {
-      show: (values) => {
-        return !['button', 'link'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: !['button', 'link'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'divider1',
@@ -387,9 +382,7 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Checkbox',
     dependencies: {
-      show: (values) => {
-        return ['menu'].includes(values.type);
-      },
+      resolve: ({ values }) => ({ show: ['menu'].includes(values.type) }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.keepAlive',
@@ -402,9 +395,9 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Checkbox',
     dependencies: {
-      show: (values) => {
-        return ['embedded', 'menu'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: ['embedded', 'menu'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.affixTab',
@@ -417,9 +410,7 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Checkbox',
     dependencies: {
-      show: (values) => {
-        return !['button'].includes(values.type);
-      },
+      resolve: ({ values }) => ({ show: !['button'].includes(values.type) }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.hideInMenu',
@@ -432,9 +423,9 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Checkbox',
     dependencies: {
-      show: (values) => {
-        return ['catalog', 'menu'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: ['catalog', 'menu'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.hideChildrenInMenu',
@@ -447,9 +438,9 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Checkbox',
     dependencies: {
-      show: (values) => {
-        return !['button', 'link'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: !['button', 'link'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.hideInBreadcrumb',
@@ -462,9 +453,9 @@ const schema: VbenFormSchema[] = [
   {
     component: 'Checkbox',
     dependencies: {
-      show: (values) => {
-        return !['button', 'link'].includes(values.type);
-      },
+      resolve: ({ values }) => ({
+        show: !['button', 'link'].includes(values.type),
+      }),
       triggerFields: ['type'],
     },
     fieldName: 'meta.hideInTab',
@@ -559,6 +550,10 @@ const getDrawerTitle = computed(() =>
 </script>
 <template>
   <Drawer class="w-full max-w-200" :title="getDrawerTitle">
+    <CommonStatusDictionaryAlert
+      :error="commonStatusError"
+      :reload="commonStatus.reload"
+    />
     <Form class="mx-4" :layout="isHorizontal ? 'horizontal' : 'vertical'" />
   </Drawer>
 </template>

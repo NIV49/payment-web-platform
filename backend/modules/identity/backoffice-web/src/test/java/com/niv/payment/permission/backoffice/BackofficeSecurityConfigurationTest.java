@@ -5,8 +5,10 @@ import com.niv.payment.permission.domain.AuthorizationSubject;
 import com.niv.payment.permission.security.InvalidSessionException;
 import com.niv.payment.permission.security.SaTokenSessionBridge;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.Ordered;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.Set;
 
@@ -21,8 +23,21 @@ import static org.mockito.Mockito.when;
 class BackofficeSecurityConfigurationTest {
     private static final String ORIGIN = "https://merchant.example.test";
     private final SaTokenSessionBridge sessions = mock(SaTokenSessionBridge.class);
+    private final BackofficeAuthorizationEnforcer authorization =
+        mock(BackofficeAuthorizationEnforcer.class);
     private final BackofficeSecurityConfiguration.BoundaryInterceptor interceptor =
-        new BackofficeSecurityConfiguration(sessions, properties()).new BoundaryInterceptor();
+        configuration().new BoundaryInterceptor();
+
+    @Test
+    void requestBodyIsBoundedBeforeFrameworkFormParsing() {
+        BackofficeSecurityConfiguration configuration = configuration();
+
+        assertThat(configuration.backofficeSecurityHeadersFilter().getOrder())
+            .isEqualTo(Ordered.HIGHEST_PRECEDENCE);
+        assertThat(configuration.backofficeRequestBodySizeLimitFilter(
+            new ObjectMapper(), 262_144, false).getOrder())
+            .isEqualTo(Ordered.HIGHEST_PRECEDENCE + 1);
+    }
 
     @Test
     void oidcCallbackDoesNotDependOnOrigin() {
@@ -116,6 +131,22 @@ class BackofficeSecurityConfigurationTest {
     }
 
     @Test
+    void userAdministrationRequiresSessionCsrfAndTheMappedPermission() {
+        AuthorizationSubject subject = mock(AuthorizationSubject.class);
+        when(sessions.currentSubject("merchant.example.test")).thenReturn(subject);
+        MockHttpServletRequest request = request("POST", "/api/system/user");
+        request.addHeader("Origin", ORIGIN);
+        request.addHeader("X-CSRF-Token", "request-proof");
+
+        assertThat(interceptor.preHandle(
+            request, new MockHttpServletResponse(), new Object())).isTrue();
+
+        assertThat(request.getAttribute(AuthorizationSubject.class.getName())).isSameAs(subject);
+        verify(sessions).requireRequestProof("request-proof");
+        verify(authorization).requireTenantPermission(subject, "user:create");
+    }
+
+    @Test
     void sharedMerchantBoundaryRejectsPlatformTenantBootstrap() {
         MockHttpServletRequest request = request("POST", "/api/identity/tenant-bootstraps");
         request.addHeader("Origin", ORIGIN);
@@ -136,5 +167,11 @@ class BackofficeSecurityConfigurationTest {
     private static BackofficeDeploymentProperties properties() {
         return new BackofficeDeploymentProperties(AccountDomain.MERCHANT, AccountDomain.MERCHANT.loginType(),
             ORIGIN, Set.of("/dashboard/workspace/index"));
+    }
+
+    private BackofficeSecurityConfiguration configuration() {
+        return new BackofficeSecurityConfiguration(
+            sessions, properties(),
+            new BackofficeAdministrationPermissionPolicy(AccountDomain.MERCHANT), authorization);
     }
 }

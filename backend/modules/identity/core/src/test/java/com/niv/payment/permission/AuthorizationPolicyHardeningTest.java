@@ -36,7 +36,9 @@ class AuthorizationPolicyHardeningTest {
     @Test
     void wildcardPermissionAndEmptySpecifiedScopeAreRejected() {
         assertThrows(IllegalArgumentException.class, () -> PermissionCode.of("*:*:*"));
-        assertThrows(IllegalArgumentException.class, () -> PermissionCode.of("system:user:create"));
+        PermissionCode hierarchical = PermissionCode.of("merchant:document:upload");
+        assertEquals(PermissionAction.UPLOAD, hierarchical.action());
+        assertThrows(IllegalArgumentException.class, () -> PermissionCode.of("system::create"));
         assertThrows(IllegalArgumentException.class, () ->
             new DimensionScope(ScopeDimension.MERCHANT, ScopeMode.SPECIFIED, Set.of()));
     }

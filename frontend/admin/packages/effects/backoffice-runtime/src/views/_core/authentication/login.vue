@@ -10,13 +10,20 @@ import { useAuthStore } from '@payment/backoffice-runtime/store';
 
 import {
   LOGIN_DEFAULT_CREDENTIAL_FIELD,
+  resolveLoginCopy,
   resolveLoginDefaults,
+  resolveOidcLoginMode,
 } from './login-defaults';
 
 defineOptions({ name: 'Login' });
 
 const authStore = useAuthStore();
+const loginCopy = resolveLoginCopy(import.meta.env.VITE_ACCOUNT_DOMAIN);
 const productionOidc = import.meta.env.PROD;
+const oidcLogin = resolveOidcLoginMode({
+  explicitMode: import.meta.env.VITE_AUTH_MODE,
+  prod: productionOidc,
+});
 const rememberMeNamespace = import.meta.env.VITE_APP_NAMESPACE;
 let loginDefaults = resolveLoginDefaults({ dev: false });
 if (import.meta.env.DEV) {
@@ -28,7 +35,8 @@ if (import.meta.env.DEV) {
 }
 
 const formSchema = computed((): VbenFormSchema[] => {
-  if (productionOidc) return [];
+  if (import.meta.env.PROD) return [];
+  if (oidcLogin) return [];
   return [
     {
       component: 'VbenInput',
@@ -56,7 +64,11 @@ const formSchema = computed((): VbenFormSchema[] => {
 });
 
 function submit(values: Record<string, unknown>) {
-  if (productionOidc) {
+  if (import.meta.env.PROD) {
+    authStore.startOidcLogin();
+    return;
+  }
+  if (oidcLogin) {
     authStore.startOidcLogin();
     return;
   }
@@ -73,9 +85,11 @@ function submit(values: Record<string, unknown>) {
     :show-forget-password="false"
     :show-qrcode-login="false"
     :show-register="false"
-    :show-remember-me="!productionOidc"
+    :show-remember-me="!oidcLogin"
     :show-third-party-login="false"
-    :submit-button-text="productionOidc ? $t('page.auth.continue') : undefined"
+    :submit-button-text="oidcLogin ? $t('page.auth.continue') : undefined"
+    :sub-title="$t(loginCopy.subTitleKey)"
+    :title="$t(loginCopy.titleKey)"
     @submit="submit"
   />
 </template>

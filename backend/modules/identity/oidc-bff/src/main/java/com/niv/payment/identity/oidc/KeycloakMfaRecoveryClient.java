@@ -13,18 +13,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.time.Duration;
 
 final class KeycloakMfaRecoveryClient implements MfaRecoveryRelay.KeycloakActions {
     private static final Set<String> MFA_CREDENTIAL_TYPES = Set.of(
         "otp", "webauthn", "webauthn-passwordless");
     private static final String RECOVERY_CODE_TYPE = "recovery-authn-codes";
+    private static final List<String> RE_ENROLLMENT_ACTIONS = List.of("CONFIGURE_TOTP");
 
     private final RestClient http;
     private final KeycloakAdminSettings settings;
+    private final Duration actionLifespan;
 
-    KeycloakMfaRecoveryClient(RestClient http, KeycloakAdminSettings settings) {
+    KeycloakMfaRecoveryClient(RestClient http, KeycloakAdminSettings settings,
+                              Duration actionLifespan) {
         this.http = Objects.requireNonNull(http, "http");
         this.settings = Objects.requireNonNull(settings, "settings");
+        if (actionLifespan == null || actionLifespan.isZero() || actionLifespan.isNegative()
+            || actionLifespan.compareTo(Duration.ofDays(7)) > 0) {
+            throw new IllegalArgumentException("Keycloak MFA recovery action lifespan is invalid");
+        }
+        this.actionLifespan = actionLifespan;
     }
 
     @Override
@@ -42,6 +51,7 @@ final class KeycloakMfaRecoveryClient implements MfaRecoveryRelay.KeycloakAction
         credentials(task).stream()
             .filter(credential -> RECOVERY_CODE_TYPE.equals(credential.type()))
             .forEach(credential -> deleteCredential(task, credential.id()));
+        sendReEnrollmentAction(task);
     }
 
     @Override
@@ -99,6 +109,20 @@ final class KeycloakMfaRecoveryClient implements MfaRecoveryRelay.KeycloakAction
                 .retrieve().toBodilessEntity();
             return null;
         });
+    }
+
+    private void sendReEnrollmentAction(MfaRecoveryTask task) {
+        execute(() -> http.put().uri(uriBuilder -> uriBuilder
+                .scheme(settings.adminBaseUri().getScheme())
+                .host(settings.adminBaseUri().getHost())
+                .port(settings.adminBaseUri().getPort())
+                .path(settings.adminBaseUri().getPath()
+                    + "/users/{userId}/execute-actions-email")
+                .queryParam("lifespan", actionLifespan.toSeconds())
+                .build(safeIdentifier(task.subject())))
+            .headers(headers -> headers.setBearerAuth(accessToken()))
+            .contentType(MediaType.APPLICATION_JSON).body(RE_ENROLLMENT_ACTIONS)
+            .retrieve().toBodilessEntity());
     }
 
     private String accessToken() {

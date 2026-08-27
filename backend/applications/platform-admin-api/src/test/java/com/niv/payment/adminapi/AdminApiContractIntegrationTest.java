@@ -1,6 +1,7 @@
 package com.niv.payment.adminapi;
 
 import cn.dev33.satoken.config.SaTokenConfig;
+import cn.dev33.satoken.stp.StpLogic;
 import jakarta.servlet.http.Cookie;
 import com.niv.payment.permission.domain.AdministrationActor;
 import com.niv.payment.permission.persistence.repository.JooqRoleAdministrationRepository;
@@ -9,12 +10,16 @@ import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.IdentityModels;
 import com.niv.payment.permission.service.RoleConfigurationCommand;
 import com.niv.payment.permission.service.RoleAssignmentPolicy;
+import com.niv.payment.permission.security.SessionAttributeNames;
 import com.niv.payment.identity.oidc.RedisOidcSessionIndex;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -23,6 +28,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.mock.web.MockPart;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import com.jayway.jsonpath.JsonPath;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -35,6 +43,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.time.Duration;
+import java.time.Instant;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.util.Random;
+import javax.imageio.ImageIO;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -42,11 +55,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @Testcontainers
+@ExtendWith(OutputCaptureExtension.class)
 @SpringBootTest(classes = AdminApiApplication.class)
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
@@ -55,6 +70,7 @@ class AdminApiContractIntegrationTest {
     private static final String REQUEST_PROOF_HEADER = "X-CSRF-Token";
     private static final String ADMIN_LOGIN_INPUT = "Admin-Test-Password-2026";
     private static final String RESTRICTED_LOGIN_INPUT = "Low-Test-Password-2026";
+    private static final String RESET_PASSWORD_INPUT = "Abcd1234Efgh!!!!";
     private static final String LOCAL_SERVICE_SENTINEL = "disabled";
 
     @Container
@@ -76,6 +92,19 @@ class AdminApiContractIntegrationTest {
         registry.add("payment.bootstrap-password", () -> ADMIN_LOGIN_INPUT);
         registry.add("payment.security.allowed-origins", () -> ORIGIN);
         registry.add("sa-token.cookie.secure", () -> false);
+        registry.add("merchant.protection.search-hmac-keys", () ->
+            "mch-registration-search-v1=ERERERERERERERERERERERERERERERERERERERERERE=");
+        registry.add("merchant.protection.idempotency-hmac-keys", () ->
+            "mch-idempotency-v1=IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=");
+        registry.add("merchant.protection.registration-aead-keys", () ->
+            "mch-registration-aead-v1=MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=");
+        registry.add("merchant.protection.legal-id-aead-keys", () ->
+            "mch-legal-id-aead-v1=REREREREREREREREREREREREREREREREREREREREREQ=");
+        registry.add("merchant.protection.document-aead-keys", () ->
+            "mch-document-aead-v1=VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=");
+        registry.add(
+            "logging.level.org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver",
+            () -> "DEBUG");
     }
 
     @Autowired MockMvc mvc;
@@ -86,6 +115,8 @@ class AdminApiContractIntegrationTest {
     @Autowired JooqRoleConfigurationRepository roleConfigurations;
     @Autowired ApplicationContext applicationContext;
     @Autowired SaTokenConfig saTokenConfig;
+    @Autowired StpLogic stpLogic;
+    @Autowired RequestMappingHandlerMapping requestMappings;
     private final Map<String, String> requestProofs = new ConcurrentHashMap<>();
 
     @BeforeEach
@@ -171,8 +202,138 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void platformCompositionRegistersOnlyPlatformMerchantEndpoints() {
+        var paths = requestMappings.getHandlerMethods().keySet().stream()
+            .flatMap(mapping -> mapping.getPatternValues().stream())
+            .filter(path -> path.startsWith("/api/platform/merchants")
+                || path.startsWith("/api/merchant/application"))
+            .collect(java.util.stream.Collectors.toSet());
+
+        assertThat(paths).containsExactlyInAnyOrder(
+            "/api/platform/merchants",
+            "/api/platform/merchants/{merchantId}",
+            "/api/platform/merchants/{merchantId}/profile",
+            "/api/platform/merchants/{merchantId}/amendments",
+            "/api/platform/merchants/{merchantId}/amendments/pending",
+            "/api/platform/merchants/{merchantId}/amendments/{amendmentId}/review-decisions",
+            "/api/platform/merchants/{merchantId}/documents/{kind}/content",
+            "/api/platform/merchants/{merchantId}/review-decisions",
+            "/api/platform/merchants/{merchantId}/disable",
+            "/api/platform/merchants/{merchantId}/enable",
+            "/api/platform/merchants/{merchantId}/terminate");
+    }
+
+    @Test
+    void authenticatedMerchantRoutesSeparateMalformedIdentifiersFromUnknownPaths()
+        throws Exception {
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        String proof = requestProof(cookie);
+
+        for (String merchantId : List.of("abc", "0", "9223372036854775808")) {
+            mvc.perform(get("/api/platform/merchants/" + merchantId).cookie(cookie))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001))
+                .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid request"))
+                .andExpect(jsonPath("$.traceId").isString());
+        }
+
+        mvc.perform(post("/api/platform/merchants/0/disable")
+                .cookie(cookie)
+                .header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, proof)
+                .contentType("application/json")
+                .content("""
+                    {"reasonCode":"RISK_CONTROL","expectedVersion":0,
+                     "idempotencyKey":"e8df93e9-ac8d-4a62-9a3e-4165c81c9fd3"}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(40001))
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+            .andExpect(jsonPath("$.message").value("Invalid request"))
+            .andExpect(jsonPath("$.traceId").isString());
+
+        mvc.perform(post("/api/platform/merchants/42/unknown")
+                .cookie(cookie)
+                .header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, proof)
+                .contentType("application/json")
+                .content("{}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value(40301))
+            .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+    }
+
+    @Test
+    void localLoginProvidesRecentReauthenticationAndExpiryFailsClosed() throws Exception {
+        Cookie recentCookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        String recentProof = requestProof(recentCookie);
+        long merchantCount = jdbc.queryForObject("SELECT count(*) FROM merchant", Long.class);
+        long auditCount = jdbc.queryForObject("SELECT count(*) FROM merchant_audit_event", Long.class);
+        long dedupCount = jdbc.queryForObject("SELECT count(*) FROM merchant_command_dedup", Long.class);
+        String request = """
+            {"decision":"APPROVE","reasonCode":"PROFILE_VERIFIED","expectedVersion":0,
+             "idempotencyKey":"8a3d4562-b67c-4624-a2de-6d6a7e8764d5"}
+            """;
+
+        mvc.perform(post("/api/platform/merchants/42/review-decisions")
+                .cookie(recentCookie)
+                .header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, recentProof)
+                .contentType("application/json")
+                .content(request))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error").value("RESOURCE_NOT_FOUND"));
+
+        stpLogic.getSessionByLoginId(1000L)
+            .set(SessionAttributeNames.STEP_UP_AT,
+                Instant.now().minus(Duration.ofMinutes(11)).getEpochSecond());
+        mvc.perform(post("/api/platform/merchants/42/review-decisions")
+                .cookie(recentCookie)
+                .header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, recentProof)
+                .contentType("application/json")
+                .content(request))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value(40301))
+            .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
+
+        Cookie renewedCookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        mvc.perform(post("/api/platform/merchants/42/review-decisions")
+                .cookie(renewedCookie)
+                .header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, requestProof(renewedCookie))
+                .contentType("application/json")
+                .content(request))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error").value("RESOURCE_NOT_FOUND"));
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM merchant", Long.class))
+            .isEqualTo(merchantCount);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM merchant_audit_event", Long.class))
+            .isEqualTo(auditCount);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM merchant_command_dedup", Long.class))
+            .isEqualTo(dedupCount);
+    }
+
+    @Test
+    void localReviewerLoginHasRecentStepUpAndCanListOnlyUnboundMerchantTenants()
+        throws Exception {
+        Cookie reviewer = cookie(login("reviewer@platform.localhost", ADMIN_LOGIN_INPUT));
+
+        mvc.perform(get("/api/platform/merchant-onboarding/eligible-tenants")
+                .param("tenantCode", "local-merchant")
+                .cookie(reviewer))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.total").value(1))
+            .andExpect(jsonPath("$.data.items[0].tenantId").value("4000"))
+            .andExpect(jsonPath("$.data.items[0].tenantCode").value("local-merchant-candidate"))
+            .andExpect(jsonPath("$.data.items[0].tenantName").value("Local Merchant Candidate"));
+    }
+
+    @Test
     void loginUsesOpaqueMarkerAndHardenedCookie() throws Exception {
-        String cookie = login("admin", ADMIN_LOGIN_INPUT);
+        String cookie = login("admin@platform.localhost", ADMIN_LOGIN_INPUT);
         assertThat(cookie).isNotBlank();
     }
 
@@ -248,6 +409,62 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
+    void merchantDocumentUploadAboveTheJsonLimitReachesTheControllerAndMissingPartsStayBounded()
+        throws Exception {
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM iam_role_grant grant_row
+            JOIN iam_permission permission ON permission.id=grant_row.permission_id
+            JOIN iam_grant_dimension dimension ON dimension.grant_id=grant_row.id
+            WHERE grant_row.tenant_id=1 AND grant_row.role_id=2000
+              AND permission.permission_code='merchant:document:upload'
+              AND grant_row.status='ACTIVE'
+              AND grant_row.valid_from<=statement_timestamp()
+              AND grant_row.valid_until>statement_timestamp()
+              AND dimension.dimension_code='TENANT' AND dimension.scope_mode='TENANT_ALL'
+            """, Long.class)).isOne();
+        jdbc.update("""
+            INSERT INTO iam_tenant(id,tenant_code,tenant_name,tenant_type,status,account_domain)
+            VALUES(9801,'merchant-upload-target','Merchant Upload Target',
+                   'DIRECT_MERCHANT','ACTIVE','MERCHANT')
+            """);
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        byte[] image = incompressiblePng(700, 700);
+        assertThat(image.length).isGreaterThan(1024 * 1024).isLessThanOrEqualTo(2 * 1024 * 1024);
+
+        mvc.perform(multipart("/api/platform/merchant-document-uploads")
+                .part(new MockPart("targetTenantId", "9801".getBytes()))
+                .part(new MockPart("kind", "BRAND_LOGO".getBytes()))
+                .file(new MockMultipartFile("file", "untrusted.png", "image/png", image))
+                .cookie(cookie).header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.kind").value("BRAND_LOGO"))
+            .andExpect(jsonPath("$.data.mediaType").value("image/png"))
+            .andExpect(jsonPath("$.data.sizeBytes").isNumber());
+
+        mvc.perform(multipart("/api/platform/merchant-document-uploads")
+                .part(new MockPart("targetTenantId", "9801".getBytes()))
+                .part(new MockPart("kind", "BRAND_LOGO".getBytes()))
+                .cookie(cookie).header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(40001))
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+
+        byte[] oversized = incompressiblePng(900, 900);
+        assertThat(oversized.length).isGreaterThan(2 * 1024 * 1024);
+        mvc.perform(multipart("/api/platform/merchant-document-uploads")
+                .part(new MockPart("targetTenantId", "9801".getBytes()))
+                .part(new MockPart("kind", "BRAND_LOGO".getBytes()))
+                .file(new MockMultipartFile("file", "untrusted.png", "image/png", oversized))
+                .cookie(cookie).header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, requestProof(cookie)))
+            .andExpect(status().isPayloadTooLarge())
+            .andExpect(jsonPath("$.code").value(41301))
+            .andExpect(jsonPath("$.error").value("PAYLOAD_TOO_LARGE"));
+    }
+
+    @Test
     void platformLoginIgnoresOtherDomainsAndRejectsClientTenantSelection() throws Exception {
         mvc.perform(post("/api/auth/login").header("Origin", ORIGIN).contentType("application/json")
                 .content("{\"username\":\"merchant-admin\",\"password\":\""
@@ -266,16 +483,23 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void currentUserCodesAndDynamicMenuMatchVbenContract() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         mvc.perform(get("/api/user/info").cookie(cookie)).andExpect(status().isOk())
             .andExpect(jsonPath("$.data.userId").value("100"))
             .andExpect(jsonPath("$.data.homePath").value("/dashboard"))
             .andExpect(jsonPath("$.data.systemAdministrator").value(true));
         mvc.perform(get("/api/auth/codes").cookie(cookie)).andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.length()").value(20))
+            .andExpect(jsonPath("$.data.length()").value(38))
             .andExpect(jsonPath("$.data[?(@ == 'backoffice:platform-access')]").exists())
             .andExpect(jsonPath("$.data[?(@ == 'user:assign-role')]").exists())
             .andExpect(jsonPath("$.data[?(@ == 'role:grant-update')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'merchant:view')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'merchant:review')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'merchant:update')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'merchant:create')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'merchant:amend')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'merchant:document:upload')]").exists())
+            .andExpect(jsonPath("$.data[?(@ == 'merchant:document:view')]").exists())
             .andExpect(jsonPath("$.data[?(@ == 'menu:manage')]").doesNotExist());
         String dynamicMenuBody = mvc.perform(get("/api/menu/all").cookie(cookie)).andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].pid").value("0"))
@@ -292,7 +516,8 @@ class AdminApiContractIntegrationTest {
             .andExpect(jsonPath("$.data[1].children[3].meta.title").value("system.dept.title"))
             .andExpect(jsonPath("$.data[1].children[3].name").value("SystemDept"))
             .andReturn().getResponse().getContentAsString();
-        assertThat(JsonPath.<List<String>>read(dynamicMenuBody, "$.data..authCode")).isEmpty();
+        assertThat(JsonPath.<List<String>>read(dynamicMenuBody, "$.data..authCode"))
+            .containsExactly("merchant:view");
         mvc.perform(get("/api/system/user/list?page=1&pageSize=20&status=1").cookie(cookie))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].id").isString());
         mvc.perform(get("/api/system/role/list?page=1&pageSize=200&status=1").cookie(cookie))
@@ -320,12 +545,71 @@ class AdminApiContractIntegrationTest {
                 "role:view", "role:create", "role:update", "role:delete",
                 "menu:view", "menu:manage", "menu:create", "menu:update", "menu:delete",
                 "department:view", "department:manage", "department:create", "department:update",
-                "department:delete", "role:grant-update");
+                "department:delete", "role:grant-update",
+                "dictionary:view", "dictionary:create", "dictionary:update", "dictionary:delete",
+                "dictionary-data:view", "dictionary-data:create", "dictionary-data:update",
+                "dictionary-data:delete",
+                "merchant:view", "merchant:review", "merchant:disable", "merchant:enable",
+                "merchant:terminate", "merchant:create", "merchant:amend");
+    }
+
+    @Test
+    void platformDirectoryKeepsPlatformRowsInTheSessionTenantAndReturnsRemark() throws Exception {
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+
+        String body = mvc.perform(get("/api/platform/user-directory")
+                .queryParam("accountDomain", "PLATFORM")
+                .queryParam("page", "1")
+                .queryParam("pageSize", "20")
+                .cookie(cookie))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString();
+
+        List<Map<String, Object>> items = JsonPath.read(body, "$.data.items");
+        assertThat(items).allSatisfy(item -> assertThat(item.get("tenantId")).isEqualTo("1"));
+        assertThat(items).filteredOn(item -> "admin@platform.localhost".equals(item.get("username")))
+            .singleElement()
+            .satisfies(item -> assertThat(item.get("remark"))
+                .isEqualTo("Local bootstrap administrator"));
+    }
+
+    @Test
+    void platformRoleAndMenuDirectoriesExposeTheFixedSourceTenantAsSameTenant() throws Exception {
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+
+        mvc.perform(get("/api/platform/role-directory")
+                .queryParam("page", "1")
+                .queryParam("pageSize", "20")
+                .cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items[0].accountDomain").value("PLATFORM"))
+            .andExpect(jsonPath("$.data.items[0].tenantId").value("1"))
+            .andExpect(jsonPath("$.data.items[0].tenantName").isString())
+            .andExpect(jsonPath("$.data.items[0].managementMode").value("SAME_TENANT"))
+            .andExpect(jsonPath("$.data.items[0].id").isString())
+            .andExpect(jsonPath("$.data.total").isNumber());
+
+        mvc.perform(get("/api/platform/menu-directory").cookie(cookie))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].accountDomain").value("PLATFORM"))
+            .andExpect(jsonPath("$.data[0].tenantId").value("1"))
+            .andExpect(jsonPath("$.data[0].tenantName").isString())
+            .andExpect(jsonPath("$.data[0].managementMode").value("SAME_TENANT"))
+            .andExpect(jsonPath("$.data[0].id").isString());
+
+        mvc.perform(get("/api/platform/role-directory")
+                .queryParam("accountDomain", "MERCHANT")
+                .cookie(cookie))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/platform/menu-directory")
+                .queryParam("accountDomain", "AGENT")
+                .cookie(cookie))
+            .andExpect(status().isBadRequest());
     }
 
     @Test
     void cookieAuthenticatedMutationsRequireAnIndependentRequestProof() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
 
         mvc.perform(post("/api/auth/logout").cookie(cookie).header("Origin", ORIGIN))
             .andExpect(status().isForbidden());
@@ -375,10 +659,10 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void roleGrantEndpointsKeepPresentationMenusSeparateAndUseTheFrozenDimensionsContract() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         mvc.perform(get("/api/v1/iam/permissions/grantable").cookie(cookie))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.length()").value(18))
+            .andExpect(jsonPath("$.data.length()").value(23))
             .andExpect(jsonPath("$.data[0].permissionCode").isString())
             .andExpect(jsonPath("$.data[0].riskLevel").value("NORMAL"))
             .andExpect(jsonPath("$.data[0].requiredDimensions[0].code").value("TENANT"))
@@ -393,7 +677,7 @@ class AdminApiContractIntegrationTest {
         List<Long> menuIdsBefore = jdbc.queryForList(
             "SELECT menu_id FROM iam_role_menu WHERE tenant_id=1 AND role_id=? ORDER BY menu_id",
             Long.class, Long.parseLong(roleId));
-        String username = "portal-role-user-" + roleId;
+        String username = "portal-role-user-" + roleId + "@example.test";
         mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Portal Role User\","
@@ -491,7 +775,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void nonAssignableRoleGrantIsReadOnlyAndRejectsReplacement() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         jdbc.update("""
             INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
@@ -532,7 +816,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void roleMenuIdsRejectButtonsAndDisabledMenusWithoutPartialWrites() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String rejectedRoleName = "Button Menu Role";
 
         mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
@@ -592,7 +876,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void roleGrantRevocationInvalidatesMemberSessionAndRefreshesAuthorizationCodes() throws Exception {
-        Cookie admin = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie admin = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(admin).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(admin))
                 .contentType("application/json")
                 .content("{\"name\":\"Revocation Contract Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
@@ -713,7 +997,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void roleGrantEndpointsAcceptAnActorWithMultipleActiveSystemRoles() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         long roleId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         jdbc.update("""
             INSERT INTO iam_role(id,tenant_id,role_code,role_name,applicable_tenant_type,
@@ -724,7 +1008,7 @@ class AdminApiContractIntegrationTest {
         try {
             mvc.perform(get("/api/v1/iam/permissions/grantable").cookie(cookie))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(18));
+                .andExpect(jsonPath("$.data.length()").value(23));
         } finally {
             jdbc.update("DELETE FROM iam_membership_role WHERE tenant_id=1 AND membership_id=1000 AND role_id=?",
                 roleId);
@@ -734,7 +1018,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void unsupportedExistingGrantMakesTheRoleReadOnlyAndRejectsReplacement() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Unsupported Grant Role\",\"menuIds\":[],\"status\":1}"))
@@ -763,7 +1047,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void nonPortalPermissionUsingTheReservedGrantKeyFailsClosed() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Reserved Key Conflict Role\",\"menuIds\":[],\"status\":1}"))
@@ -792,7 +1076,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void duplicateGrantKeysAndPermissionsFailClosed() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String duplicateKeyRole = createRole(cookie, "Duplicate Grant Key Role");
         insertTenantGrant(duplicateKeyRole, 3001L, "duplicate-key");
         insertTenantGrant(duplicateKeyRole, 3002L, "duplicate-key");
@@ -810,7 +1094,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void disabledAdditionalPortalGrantFailsClosed() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleId = createRole(cookie, "Disabled Extra Portal Role");
         long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         long dimensionId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
@@ -830,7 +1114,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void legacyGrantReturnedByGetCanBePutBackUnchanged() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleId = createRole(cookie, "Legacy Grant Round Trip Role");
         long grantId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         insertTenantGrant(roleId, 3001L, "legacy-backoffice-access-" + grantId, grantId);
@@ -855,7 +1139,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void wrongDomainOrMalformedProtectedPortalGrantFailsClosed() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Malformed Portal Grant Role\",\"menuIds\":[],\"status\":1}"))
@@ -888,7 +1172,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void legacyCompatibilityShadowDoesNotBlockGranularGrantReplacement() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Legacy Shadow Role\",\"menuIds\":[],\"status\":1}"))
@@ -929,7 +1213,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void outboxFailureRollsBackRoleGrantReplacementAuditAndVersion() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Grant Rollback Role\",\"menuIds\":[\"6001\"],\"status\":1}"))
@@ -992,7 +1276,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void dynamicMenuExcludesButtonsAndAddsOnlyTheAuthorizedRoutesActiveAncestors() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         long catalogId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         long pageId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         long siblingId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
@@ -1042,7 +1326,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void unregisteredApiRoutesAreDeniedByDefault() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
 
         mvc.perform(get("/api/not-registered").cookie(cookie))
             .andExpect(status().isForbidden())
@@ -1062,7 +1346,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void menuWritesEnforceVbenTitleAndComponentContract() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
 
         mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
@@ -1117,11 +1401,11 @@ class AdminApiContractIntegrationTest {
     }
     @Test
     void auditEventUsesTheHttpRequestTraceId() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String traceId = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
-                    {"username":"trace-audit-user","name":"Trace Audit User","deptId":"10",
+                    {"username":"trace-audit-user@example.test","name":"Trace Audit User","deptId":"10",
                      "roleIds":[],"status":1}
                     """))
             .andExpect(status().isOk())
@@ -1136,8 +1420,8 @@ class AdminApiContractIntegrationTest {
     }
 
     @Test
-    void serverSidePepUsesTheVersionedGrantCache() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+    void temporalMerchantGrantsKeepTheVersionedSnapshotOutOfRedis() throws Exception {
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         long version = jdbc.queryForObject("""
             SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=1000
             """, Long.class);
@@ -1147,12 +1431,12 @@ class AdminApiContractIntegrationTest {
         mvc.perform(get("/api/system/user/list?page=1&pageSize=20").cookie(cookie))
             .andExpect(status().isOk());
 
-        assertThat(redis.hasKey(key)).isTrue();
+        assertThat(redis.hasKey(key)).isFalse();
     }
 
     @Test
     void committedPermissionVersionChangeInvalidatesSessionAndClearsCookie() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         long version = jdbc.queryForObject("""
             SELECT permission_version FROM iam_membership WHERE tenant_id=1 AND id=1000
             """, Long.class);
@@ -1294,7 +1578,8 @@ class AdminApiContractIntegrationTest {
 
             mvc.perform(post("/api/system/user/100/password/reset")
                     .cookie(restricted).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(restricted)).contentType("application/json")
-                    .content("{\"credentialVersion\":" + credentialVersion + "}"))
+                    .content("{\"credentialVersion\":" + credentialVersion
+                        + ",\"password\":\"" + RESET_PASSWORD_INPUT + "\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("PERMISSION_DENIED"));
 
@@ -1311,6 +1596,63 @@ class AdminApiContractIntegrationTest {
                  WHERE tenant_id=1 AND id=802
                 """);
         }
+    }
+
+    @Test
+    void passwordResetRejectsInvalidValuesWithoutLoggingThem(CapturedOutput output) throws Exception {
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        long credentialVersion = jdbc.queryForObject("""
+            SELECT row_version FROM iam_authentication_credential WHERE user_id=100
+            """, Long.class);
+        String hashBefore = jdbc.queryForObject("""
+            SELECT password_hash FROM iam_authentication_credential WHERE user_id=100
+            """, String.class);
+
+        String blankPassword = "\u2003".repeat(16);
+        List<String> invalidPasswords = List.of(
+            "Aa1!!!!",
+            "Aa1bbbbbbbbbbbbbbbbbbbbbbbb!!!!",
+            blankPassword);
+        for (String invalidPassword : invalidPasswords) {
+            mvc.perform(post("/api/system/user/100/password/reset")
+                    .cookie(cookie).header("Origin", ORIGIN)
+                    .header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json")
+                    .content("{\"credentialVersion\":" + credentialVersion
+                        + ",\"password\":\"" + invalidPassword + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001))
+                .andExpect(jsonPath("$.error").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid request"))
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString())
+                    .doesNotContain(invalidPassword));
+        }
+
+        assertThat(jdbc.queryForObject("""
+            SELECT password_hash FROM iam_authentication_credential WHERE user_id=100
+            """, String.class)).isEqualTo(hashBefore);
+        assertThat(output.getAll())
+            .doesNotContain(invalidPasswords.get(0))
+            .doesNotContain(invalidPasswords.get(1))
+            .doesNotContain(invalidPasswords.get(2));
+    }
+
+    @Test
+    void dictionaryRequestParameterBindingFailuresReturnTheStableBadRequestContract() throws Exception {
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+
+        mvc.perform(get("/api/system/dictionary-data").cookie(cookie))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(40001))
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+
+        mvc.perform(get("/api/system/dictionary-data")
+                .cookie(cookie)
+                .queryParam("dictType", "BELONG_SYSTEM")
+                .queryParam("page", "not-a-number"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(40001))
+            .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
     }
 
     @Test
@@ -1356,12 +1698,12 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void ordinaryUserManagementCannotAssignOrRemoveSystemRoles() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
 
         mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
-                    {"username":"system-role-escalation","name":"Escalation Attempt","deptId":"10",
+                    {"username":"system-role-escalation@example.test","name":"Escalation Attempt","deptId":"10",
                      "roleIds":["2000"],"status":1}
                     """))
             .andExpect(status().isUnprocessableEntity())
@@ -1371,7 +1713,7 @@ class AdminApiContractIntegrationTest {
                 .put("/api/system/user/100").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("""
-                    {"username":"admin","name":"Platform Administrator","deptId":"10",
+                    {"username":"admin@platform.localhost","name":"Platform Administrator","deptId":"10",
                      "roleIds":[],"status":1,"userVersion":0}
                     """))
             .andExpect(status().isUnprocessableEntity())
@@ -1380,13 +1722,13 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void disabledOrdinaryRoleCanBePreservedOrRemovedButCannotBeNewlyAssigned() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Disabled Assignment Role\",\"menuIds\":[],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
-        String username = "disabled-role-user-" + roleId;
+        String username = "disabled-role-user-" + roleId + "@example.test";
         String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Disabled Role User\","
@@ -1441,7 +1783,7 @@ class AdminApiContractIntegrationTest {
                  WHERE tenant_id=1 AND membership_id=?
                 """, Long.class, membershipId)).isZero();
 
-            String rejectedUsername = "new-disabled-role-user-" + roleId;
+            String rejectedUsername = "new-disabled-role-user-" + roleId + "@example.test";
             long createAuditCountBefore = jdbc.queryForObject("""
                 SELECT count(*) FROM iam_audit_event
                  WHERE tenant_id=1 AND target_type='USER' AND action_code='CREATE'
@@ -1546,17 +1888,21 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void lastActiveSystemAdministratorCannotBeDisabled() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-
-        mvc.perform(patch("/api/system/user/100/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
-                .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
-            .andExpect(status().isUnprocessableEntity())
-            .andExpect(jsonPath("$.error").value("IAM_LAST_ADMIN_PROTECTED"));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        setLocalReviewerCredentialStatus("DISABLED");
+        try {
+            mvc.perform(patch("/api/system/user/100/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                    .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("IAM_LAST_ADMIN_PROTECTED"));
+        } finally {
+            setLocalReviewerCredentialStatus("ACTIVE");
+        }
     }
 
     @Test
     void unreachableSystemAdministratorsDoNotDefeatLastAdministratorProtection() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         List<TestIdentity> unreachable = new ArrayList<>();
         // Simulate a corrupted/pre-V13 store. A healthy migrated database rejects this row,
         // while the repository still must fail closed if its database invariant is bypassed.
@@ -1566,6 +1912,7 @@ class AdminApiContractIntegrationTest {
             """);
 
         try {
+            setLocalReviewerCredentialStatus("DISABLED");
             unreachable.add(seedSystemAdministrator("DISABLED", "ACTIVE", "not-used"));
             unreachable.add(seedSystemAdministrator("ACTIVE", "LOCKED", "not-used"));
             unreachable.add(seedSystemAdministrator("ACTIVE", "ACTIVE", null));
@@ -1593,13 +1940,14 @@ class AdminApiContractIntegrationTest {
                     OR password_hash ~ '^[$]2[aby][$](1[0-4])[$][./A-Za-z0-9]{53}$'
                 )
                 """);
+            setLocalReviewerCredentialStatus("ACTIVE");
         }
     }
 
     @Test
     void userRoleIdsAreRequiredButEmptyAssignmentsAreAccepted() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String base = "{\"username\":\"no-roles\",\"name\":\"No Roles\",\"deptId\":\"10\",\"status\":1";
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        String base = "{\"username\":\"no-roles@example.test\",\"name\":\"No Roles\",\"deptId\":\"10\",\"status\":1";
         mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content(base + "}"))
             .andExpect(status().isBadRequest());
@@ -1613,7 +1961,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void userStatusUsesOptimisticVersionAndDoesNotDisableGlobalCredential() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=4 AND id=803");
         mvc.perform(patch("/api/system/user/801/status").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"status\":0,\"userVersion\":0}"))
@@ -1630,7 +1978,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void staleRoleWritesReturn409WithoutOverwritingOrDeletingTheCurrentRow() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String body = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Versioned Role\",\"menuIds\":[],\"status\":1}"))
@@ -1673,7 +2021,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void roleConfigurationCreationPersistsMenusAndGrantsAtomically() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String response = mvc.perform(post("/api/v1/iam/roles/configuration")
                 .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
                 .content("""
@@ -1726,7 +2074,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void roleConfigurationCreateAndReplaceRejectTheServerManagedGrantKey() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String reservedGrant = """
             [{"grantKey":"system-backoffice-access","permissionCode":"user:view",
               "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]
@@ -1762,7 +2110,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void roleConfigurationCreationKeepsGeneratedCodeWithinDatabaseLimit() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleName = "R".repeat(128);
         String response = mvc.perform(post("/api/v1/iam/roles/configuration")
                 .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
@@ -1785,7 +2133,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void roleConfigurationReplacesRoleMenusAndGrantsWithOneVersionChange() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Atomic Configuration Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
@@ -1801,7 +2149,7 @@ class AdminApiContractIntegrationTest {
         jdbc.update("""
             INSERT INTO iam_role_menu(tenant_id,role_id,menu_id) VALUES(1,?,?),(1,?,6031)
             """, roleId, tombstonedMenuId, roleId);
-        String username = "atomic-role-user-" + roleId;
+        String username = "atomic-role-user-" + roleId + "@example.test";
         String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Atomic Role User\","
@@ -1860,7 +2208,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void roleConfigurationRechecksAllFourPermissionsInsideTheDatabaseTransaction() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"DB Time Authorization Role\",\"menuIds\":[],\"status\":1}"))
@@ -1913,7 +2261,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void deletingRoleRevokesMembershipButPreservesConfigurationHistory() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Soft Deleted Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
@@ -1927,7 +2275,7 @@ class AdminApiContractIntegrationTest {
                        "dimensions":[{"code":"TENANT","mode":"TENANT_ALL","targets":[]}]}]}
                     """))
             .andExpect(status().isOk());
-        String username = "soft-delete-user-" + roleId;
+        String username = "soft-delete-user-" + roleId + "@example.test";
         String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Soft Delete User\","
@@ -1988,7 +2336,7 @@ class AdminApiContractIntegrationTest {
         mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"deleted-role-candidate-" + roleId
-                    + "\",\"name\":\"Deleted Role Candidate\",\"deptId\":\"10\","
+                    + "@example.test\",\"name\":\"Deleted Role Candidate\",\"deptId\":\"10\","
                     + "\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
             .andExpect(status().isNotFound());
     }
@@ -2050,7 +2398,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void staleDepartmentWritesReturn409WithoutOverwritingOrDeletingTheCurrentRow() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String body = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"pid\":\"10\",\"name\":\"Versioned Department\",\"status\":1}"))
@@ -2076,7 +2424,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void staleMenuWritesReturn409WithoutOverwritingOrDeletingTheCurrentRow() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String path = "/versioned-menu-" + jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         String body = mvc.perform(post("/api/system/menu").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
@@ -2108,8 +2456,9 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void staleUserDeleteReturns409WithoutTerminatingTheCurrentMembership() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String username = "versioned-delete-user-" + jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        String username = "versioned-delete-user-"
+            + jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class) + "@example.test";
         String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Versioned Delete User\","
@@ -2132,8 +2481,8 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void createdLocalIdentityUsesTheConfiguredInitialPasswordAndSupportsReset() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
-        String username = "recoverable-disabled-user";
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        String username = "recoverable-disabled-user@example.test";
         String body = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"username\":\"" + username + "\",\"name\":\"Recoverable Disabled User\","
@@ -2167,7 +2516,7 @@ class AdminApiContractIntegrationTest {
         long otherMembershipId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         jdbc.update("""
             INSERT INTO iam_membership(id,tenant_id,user_id,department_id,status,account_domain)
-            VALUES(?,4,?,40,'ACTIVE','PLATFORM')
+            VALUES(?,4,?,40,'TERMINATED','PLATFORM')
             """, otherMembershipId, userId);
         List<Long> sessionVersionsBefore = jdbc.queryForList("""
             SELECT session_version FROM iam_membership
@@ -2183,25 +2532,25 @@ class AdminApiContractIntegrationTest {
 
         mvc.perform(post("/api/system/user/" + userId + "/password/reset")
                 .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
-                .content("{\"credentialVersion\":" + resetCredentialVersion + "}"))
+                .content("{\"credentialVersion\":" + resetCredentialVersion
+                    + ",\"password\":\"" + RESET_PASSWORD_INPUT + "\"}"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.credentialVersion").value(resetCredentialVersion + 1));
+            .andExpect(jsonPath("$.data.credentialVersion").value(resetCredentialVersion + 1))
+            .andExpect(jsonPath("$.data.password").doesNotExist());
         String resetHash = jdbc.queryForObject(
             "SELECT password_hash FROM iam_authentication_credential WHERE user_id=?", String.class, userId);
         assertThat(resetHash).isNotEqualTo(initialHash);
-        assertThat(passwords.matches(ADMIN_LOGIN_INPUT, resetHash)).isTrue();
+        assertThat(passwords.matches(RESET_PASSWORD_INPUT, resetHash)).isTrue();
         assertThat(jdbc.queryForList("""
             SELECT session_version FROM iam_membership
              WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
             """, Long.class, userId)).containsExactly(
-                sessionVersionsBefore.get(0) + 1,
-                sessionVersionsBefore.get(1) + 1);
+                sessionVersionsBefore.getFirst() + 1);
         assertThat(jdbc.queryForList("""
             SELECT row_version FROM iam_membership
              WHERE user_id=? AND status<>'TERMINATED' ORDER BY tenant_id
             """, Long.class, userId)).containsExactly(
-                rowVersionsBefore.get(0) + 1,
-                rowVersionsBefore.get(1) + 1);
+                rowVersionsBefore.getFirst() + 1);
         assertThat(jdbc.queryForMap("""
             SELECT action_code,permission_code,after_value::text AS after_value
               FROM iam_audit_event
@@ -2211,19 +2560,61 @@ class AdminApiContractIntegrationTest {
             .containsEntry("action_code", "RESET_PASSWORD")
             .containsEntry("permission_code", "user:update")
             .containsEntry("after_value", "{}")
-            .doesNotContainValue(ADMIN_LOGIN_INPUT);
+            .doesNotContainValue(RESET_PASSWORD_INPUT);
         mvc.perform(get("/api/user/info").cookie(createdUserCookie))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error").value("SESSION_INVALID"));
         mvc.perform(post("/api/system/user/" + userId + "/password/reset")
                 .cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie)).contentType("application/json")
-                .content("{\"credentialVersion\":" + resetCredentialVersion + "}"))
+                .content("{\"credentialVersion\":" + resetCredentialVersion
+                    + ",\"password\":\"" + RESET_PASSWORD_INPUT + "\"}"))
             .andExpect(status().isConflict());
+        assertThat(login(username, RESET_PASSWORD_INPUT)).isNotBlank();
+    }
+
+    @Test
+    void passwordResetRejectsAnIdentitySharedWithAnotherTenant() throws Exception {
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
+        String hashBefore = jdbc.queryForObject(
+            "SELECT password_hash FROM iam_authentication_credential WHERE user_id=801",
+            String.class);
+        long credentialVersion = jdbc.queryForObject(
+            "SELECT row_version FROM iam_authentication_credential WHERE user_id=801",
+            Long.class);
+        List<Long> membershipVersions = jdbc.queryForList("""
+            SELECT row_version FROM iam_membership
+             WHERE user_id=801 AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class);
+        List<Long> sessionVersions = jdbc.queryForList("""
+            SELECT session_version FROM iam_membership
+             WHERE user_id=801 AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class);
+
+        mvc.perform(post("/api/system/user/801/password/reset")
+                .cookie(cookie).header("Origin", ORIGIN)
+                .header(REQUEST_PROOF_HEADER, requestProof(cookie))
+                .contentType("application/json")
+                .content("{\"credentialVersion\":" + credentialVersion
+                    + ",\"password\":\"" + RESET_PASSWORD_INPUT + "\"}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value("DATA_CONFLICT"));
+
+        assertThat(jdbc.queryForObject(
+            "SELECT password_hash FROM iam_authentication_credential WHERE user_id=801",
+            String.class)).isEqualTo(hashBefore);
+        assertThat(jdbc.queryForList("""
+            SELECT row_version FROM iam_membership
+             WHERE user_id=801 AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class)).containsExactlyElementsOf(membershipVersions);
+        assertThat(jdbc.queryForList("""
+            SELECT session_version FROM iam_membership
+             WHERE user_id=801 AND status<>'TERMINATED' ORDER BY tenant_id
+            """, Long.class)).containsExactlyElementsOf(sessionVersions);
     }
 
     @Test
     void tenantMembershipUpdateNeverMutatesGlobalIdentityOrAnotherTenant() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         jdbc.update("UPDATE iam_membership SET status='ACTIVE' WHERE tenant_id=4 AND id=803");
         var userBefore = jdbc.queryForMap("""
             SELECT display_name,status,remark,row_version FROM iam_user WHERE id=801
@@ -2256,7 +2647,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void departmentTreeRejectsCyclesAndOrphaningChildren() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Cycle Parent\",\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -2278,7 +2669,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void departmentWritesCannotCreateATreeDeeperThanThirtyTwoLevels() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         long parentId = 10L;
         for (int depth = 2; depth <= 32; depth++) {
             long id = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
@@ -2308,7 +2699,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void putCannotDisableDepartmentWithActiveChild() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Protected Parent\",\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -2327,13 +2718,13 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void putCannotDisableDepartmentWithActiveMembership() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Assigned Department\",\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String departmentId = JsonPath.read(departmentBody, "$.data.id");
         mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
-                .contentType("application/json").content("{\"username\":\"assigned-department-user\","
+                .contentType("application/json").content("{\"username\":\"assigned-department-user@example.test\","
                     + "\"name\":\"Assigned User\",\"deptId\":\"" + departmentId
                     + "\",\"roleIds\":[],\"status\":1}"))
             .andExpect(status().isOk());
@@ -2347,14 +2738,14 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void cannotActivateMembershipInDisabledDepartment() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String departmentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Disabled Department\",\"status\":0}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String departmentId = JsonPath.read(departmentBody, "$.data.id");
 
         mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
-                .contentType("application/json").content("{\"username\":\"disabled-department-user\","
+                .contentType("application/json").content("{\"username\":\"disabled-department-user@example.test\","
                     + "\"name\":\"Disabled Department User\",\"deptId\":\"" + departmentId
                     + "\",\"roleIds\":[],\"status\":1}"))
             .andExpect(status().isConflict());
@@ -2362,7 +2753,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void cannotCreateActiveDepartmentBelowDisabledParent() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String parentBody = mvc.perform(post("/api/system/dept").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json").content("{\"pid\":\"10\",\"name\":\"Disabled Parent\",\"status\":0}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -2376,7 +2767,7 @@ class AdminApiContractIntegrationTest {
 
     @Test
     void failedJooqRoleReplacementRollsBackRoleMenusAndMembershipVersion() throws Exception {
-        Cookie cookie = cookie(login("admin", ADMIN_LOGIN_INPUT));
+        Cookie cookie = cookie(login("admin@platform.localhost", ADMIN_LOGIN_INPUT));
         String roleBody = mvc.perform(post("/api/system/role").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
                 .content("{\"name\":\"Jooq Transaction Role\",\"menuIds\":[\"6000\"],\"status\":1}"))
@@ -2384,7 +2775,7 @@ class AdminApiContractIntegrationTest {
         long roleId = Long.parseLong(JsonPath.read(roleBody, "$.data.id"));
         String userBody = mvc.perform(post("/api/system/user").cookie(cookie).header("Origin", ORIGIN).header(REQUEST_PROOF_HEADER, requestProof(cookie))
                 .contentType("application/json")
-                .content("{\"username\":\"jooq-transaction-user\",\"name\":\"Jooq Transaction User\","
+                .content("{\"username\":\"jooq-transaction-user@example.test\",\"name\":\"Jooq Transaction User\","
                     + "\"deptId\":\"10\",\"roleIds\":[\"" + roleId + "\"],\"status\":1}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long userId = Long.parseLong(JsonPath.read(userBody, "$.data.id"));
@@ -2446,6 +2837,17 @@ class AdminApiContractIntegrationTest {
         return sessionValue;
     }
 
+    private static byte[] incompressiblePng(int width, int height) throws Exception {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Random random = new Random(93_001L);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) image.setRGB(x, y, random.nextInt());
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        if (!ImageIO.write(image, "png", output)) throw new IllegalStateException("PNG unavailable");
+        return output.toByteArray();
+    }
+
     private String requestProof(Cookie cookie) {
         String proof = requestProofs.get(cookie.getValue());
         if (proof == null) {
@@ -2503,7 +2905,7 @@ class AdminApiContractIntegrationTest {
                                                   String passwordHash) {
         long userId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
         long membershipId = jdbc.queryForObject("SELECT nextval('iam_id_seq')", Long.class);
-        String username = "unreachable-admin-" + userId;
+        String username = "unreachable-admin-" + userId + "@example.test";
         jdbc.update("""
             INSERT INTO iam_user(id,idp_issuer,idp_subject,display_name,status,account_domain)
             VALUES(?,'integration-test',?,?,?,'PLATFORM')
@@ -2521,6 +2923,14 @@ class AdminApiContractIntegrationTest {
             VALUES(1,?,2000,1000)
             """, membershipId);
         return new TestIdentity(userId, membershipId);
+    }
+
+    private void setLocalReviewerCredentialStatus(String status) {
+        assertThat(jdbc.update("""
+            UPDATE iam_authentication_credential SET status=?
+             WHERE user_id=101 AND username='reviewer@platform.localhost'
+               AND account_domain='PLATFORM'
+            """, status)).isOne();
     }
 
     private static Cookie cookie(String value) {

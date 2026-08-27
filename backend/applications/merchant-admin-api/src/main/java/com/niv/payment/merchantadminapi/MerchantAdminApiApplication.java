@@ -3,7 +3,12 @@ package com.niv.payment.merchantadminapi;
 import com.niv.payment.permission.backoffice.BackofficeWebConfiguration;
 import com.niv.payment.permission.backoffice.BackofficeRequestTrace;
 import com.niv.payment.permission.domain.AccountDomain;
+import com.niv.payment.merchant.persistence.MerchantAuditTrace;
+import com.niv.payment.merchant.persistence.MerchantPersistenceConfiguration;
+import com.niv.payment.merchant.web.MerchantRequestTrace;
+import com.niv.payment.merchant.web.MerchantSelfHttpConfiguration;
 import com.niv.payment.identity.oidc.OidcBffConfiguration;
+import com.niv.payment.identity.oidc.IdentityGovernanceQueryConfiguration;
 import com.niv.payment.identity.oidc.OidcClientCredential;
 import com.niv.payment.identity.oidc.OidcRequestTrace;
 import com.niv.payment.identity.oidc.KeycloakAdminClientCredential;
@@ -17,7 +22,9 @@ import org.springframework.core.env.Environment;
 
 @SpringBootConfiguration
 @EnableAutoConfiguration
-@Import({BackofficeWebConfiguration.class, OidcBffConfiguration.class})
+@Import({BackofficeWebConfiguration.class, IdentityGovernanceQueryConfiguration.class,
+    OidcBffConfiguration.class, MerchantPersistenceConfiguration.class,
+    MerchantSelfHttpConfiguration.class})
 public class MerchantAdminApiApplication {
     @Bean
     AccountDomain merchantAccountDomain() {
@@ -26,6 +33,16 @@ public class MerchantAdminApiApplication {
 
     @Bean
     OidcRequestTrace merchantOidcRequestTrace() {
+        return BackofficeRequestTrace::current;
+    }
+
+    @Bean
+    MerchantRequestTrace merchantRequestTrace() {
+        return BackofficeRequestTrace::current;
+    }
+
+    @Bean
+    MerchantAuditTrace merchantAuditTrace() {
         return BackofficeRequestTrace::current;
     }
 

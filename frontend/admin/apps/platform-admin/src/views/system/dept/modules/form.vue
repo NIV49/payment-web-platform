@@ -5,6 +5,8 @@ import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
+import CommonStatusDictionaryAlert from '@payment/backoffice-runtime/components/common-status-dictionary-alert';
+import { useCommonStatusDictionary } from '@payment/backoffice-runtime/composables';
 import { Button } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
@@ -13,17 +15,20 @@ import { createDept, updateDept } from '#/api/system/dept';
 import { $t } from '#/locales';
 
 import { useSchema } from '../data';
-import { canManageDepartment } from '../selection-contract';
+import {
+  canManageDepartment,
+  normalizeDepartmentParentId,
+} from '../selection-contract';
 
 const emit = defineEmits(['success']);
 const formData = ref<SystemDeptApi.SystemDept>();
 const currentDepartmentId = computed(() => formData.value?.id);
-const currentParentId = computed(() => {
-  const parentId = formData.value?.pid;
-  return parentId === undefined || parentId === 0
-    ? undefined
-    : String(parentId);
-});
+const currentParentId = computed(() =>
+  normalizeDepartmentParentId(formData.value?.pid),
+);
+const commonStatus = useCommonStatusDictionary();
+const commonStatusError = commonStatus.error;
+const getStatusOptions = () => commonStatus.options.value;
 const getTitle = computed(() => {
   return formData.value?.id
     ? $t('ui.actionTitle.edit', [$t('system.dept.name')])
@@ -32,7 +37,7 @@ const getTitle = computed(() => {
 
 const [Form, formApi] = useVbenForm({
   layout: 'vertical',
-  schema: useSchema(currentDepartmentId, currentParentId),
+  schema: useSchema(currentDepartmentId, currentParentId, getStatusOptions),
   showDefaultActions: false,
 });
 
@@ -71,9 +76,7 @@ const [Modal, modalApi] = useVbenModal({
       const source = modalApi.getData<SystemDeptApi.SystemDept>();
       const data = source ? { ...source } : undefined;
       if (data) {
-        if (data.pid === 0) {
-          data.pid = undefined;
-        }
+        data.pid = normalizeDepartmentParentId(data.pid);
         formData.value = data;
         formApi.setValues(formData.value);
       }
@@ -84,6 +87,10 @@ const [Modal, modalApi] = useVbenModal({
 
 <template>
   <Modal :title="getTitle">
+    <CommonStatusDictionaryAlert
+      :error="commonStatusError"
+      :reload="commonStatus.reload"
+    />
     <Form class="mx-4" />
     <template #prepend-footer>
       <div class="flex-auto">

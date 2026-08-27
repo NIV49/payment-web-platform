@@ -6,6 +6,7 @@ import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.service.AuthenticationService;
 
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.util.Base64;
 import java.util.Objects;
 
@@ -13,15 +14,18 @@ public final class SaTokenSessionIssuer implements AuthenticationService.Session
     private final StpLogic stpLogic;
     private final AccountDomain accountDomain;
     private final SecureRandom random;
+    private final Clock clock;
 
     public SaTokenSessionIssuer(StpLogic stpLogic, AccountDomain accountDomain) {
-        this(stpLogic, accountDomain, new SecureRandom());
+        this(stpLogic, accountDomain, new SecureRandom(), Clock.systemUTC());
     }
 
-    SaTokenSessionIssuer(StpLogic stpLogic, AccountDomain accountDomain, SecureRandom random) {
+    SaTokenSessionIssuer(StpLogic stpLogic, AccountDomain accountDomain, SecureRandom random,
+                         Clock clock) {
         this.stpLogic = Objects.requireNonNull(stpLogic, "stpLogic");
         this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
         this.random = Objects.requireNonNull(random, "random");
+        this.clock = Objects.requireNonNull(clock, "clock");
     }
 
     @Override
@@ -35,11 +39,12 @@ public final class SaTokenSessionIssuer implements AuthenticationService.Session
         session.set(SessionAttributeNames.USER_ID, account.userId());
         session.set(SessionAttributeNames.MEMBERSHIP_ID, account.membershipId());
         session.set(SessionAttributeNames.TENANT_ID, account.tenantId());
-        session.set(SessionAttributeNames.DEPARTMENT_ID, account.departmentId());
+        setOptional(session, SessionAttributeNames.DEPARTMENT_ID, account.departmentId());
         session.set(SessionAttributeNames.PERMISSION_VERSION, account.permissionVersion());
         session.set(SessionAttributeNames.SESSION_VERSION, account.sessionVersion());
         session.set(SessionAttributeNames.IDENTITY_VERSION, account.identityVersion());
         session.set(SessionAttributeNames.STEP_UP_VERIFIED, false);
+        session.set(SessionAttributeNames.STEP_UP_AT, clock.instant().getEpochSecond());
         session.set(SessionAttributeNames.REQUEST_PROOF, newRequestProof());
         return new AuthenticationService.LoginSession(stpLogic.getTokenValue());
     }
@@ -54,7 +59,7 @@ public final class SaTokenSessionIssuer implements AuthenticationService.Session
         session.set(SessionAttributeNames.USER_ID, principal.userId());
         session.set(SessionAttributeNames.MEMBERSHIP_ID, principal.membershipId());
         session.set(SessionAttributeNames.TENANT_ID, principal.tenantId());
-        session.set(SessionAttributeNames.DEPARTMENT_ID, principal.departmentId());
+        setOptional(session, SessionAttributeNames.DEPARTMENT_ID, principal.departmentId());
         session.set(SessionAttributeNames.PERMISSION_VERSION, principal.permissionVersion());
         session.set(SessionAttributeNames.SESSION_VERSION, principal.sessionVersion());
         session.set(SessionAttributeNames.IDENTITY_VERSION, principal.identityVersion());
@@ -65,7 +70,6 @@ public final class SaTokenSessionIssuer implements AuthenticationService.Session
         session.set(SessionAttributeNames.AUTH_TIME, principal.authTime().getEpochSecond());
         session.set(SessionAttributeNames.ACR, principal.acr());
         session.set(SessionAttributeNames.OIDC_ID_ASSERTION, principal.idToken());
-        session.set(SessionAttributeNames.STEP_UP_AT, null);
         session.set(SessionAttributeNames.STEP_UP_VERIFIED, false);
         session.set(SessionAttributeNames.REQUEST_PROOF, newRequestProof());
         return new AuthenticationService.LoginSession(stpLogic.getTokenValue());
@@ -80,5 +84,11 @@ public final class SaTokenSessionIssuer implements AuthenticationService.Session
         byte[] value = new byte[32];
         random.nextBytes(value);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
+    }
+
+    private static void setOptional(SaSession session, String name, Object value) {
+        if (value != null) {
+            session.set(name, value);
+        }
     }
 }

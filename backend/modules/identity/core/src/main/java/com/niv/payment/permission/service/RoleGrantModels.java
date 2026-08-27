@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Objects;
 
 public final class RoleGrantModels {
+    public static final int MAX_SELECTIONS = 64;
+
     private RoleGrantModels() {
     }
 

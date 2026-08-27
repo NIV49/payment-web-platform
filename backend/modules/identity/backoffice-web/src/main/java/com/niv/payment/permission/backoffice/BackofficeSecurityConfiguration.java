@@ -1,40 +1,24 @@
 package com.niv.payment.permission.backoffice;
 
-import com.niv.payment.permission.security.SaTokenSessionBridge;
+import com.niv.payment.permission.domain.AuthorizationSubject;
 import com.niv.payment.permission.security.InvalidSessionException;
+import com.niv.payment.permission.security.SaTokenSessionBridge;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.Ordered;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-import java.util.Map;
+import java.util.List;
 import java.util.Set;
 
 final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
     private static final String REQUEST_PROOF_HEADER = "X-CSRF-Token";
     private static final String BACKCHANNEL_LOGOUT_PATH = "/api/auth/oidc/backchannel-logout";
-    private static final Map<String, Set<String>> ROUTES = Map.ofEntries(
-        Map.entry("/api/auth/login", Set.of("POST")),
-        Map.entry("/api/auth/logout", Set.of("POST")),
-        Map.entry("/api/auth/csrf", Set.of("GET")),
-        Map.entry("/api/auth/oidc/start", Set.of("GET")),
-        Map.entry("/api/auth/oidc/callback", Set.of("GET")),
-        Map.entry("/api/auth/oidc/handoff", Set.of("POST")),
-        Map.entry("/api/auth/oidc/step-up/start", Set.of("POST")),
-        Map.entry("/api/auth/oidc/step-up/handoff", Set.of("POST")),
-        Map.entry("/api/identity/mfa-recoveries", Set.of("POST")),
-        Map.entry("/api/identity/members", Set.of("GET")),
-        Map.entry("/api/identity/invitation-roles", Set.of("GET")),
-        Map.entry("/api/identity/invitations", Set.of("POST")),
-        Map.entry(BACKCHANNEL_LOGOUT_PATH, Set.of("POST")),
-        Map.entry("/api/user/info", Set.of("GET")),
-        Map.entry("/api/auth/codes", Set.of("GET")),
-        Map.entry("/api/menu/all", Set.of("GET")),
-        Map.entry("/api/health", Set.of("GET")));
     private static final Set<String> PUBLIC = Set.of(
         "POST /api/auth/login",
         "GET /api/auth/oidc/start",
@@ -44,11 +28,17 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
         "GET /api/health");
 
     private final SaTokenSessionBridge sessions;
+    private final BackofficeAdministrationPermissionPolicy permissionPolicy;
+    private final BackofficeAuthorizationEnforcer authorization;
     private final String allowedOrigin;
 
     BackofficeSecurityConfiguration(SaTokenSessionBridge sessions,
-                                    BackofficeDeploymentProperties properties) {
+                                    BackofficeDeploymentProperties properties,
+                                    BackofficeAdministrationPermissionPolicy permissionPolicy,
+                                    BackofficeAuthorizationEnforcer authorization) {
         this.sessions = sessions;
+        this.permissionPolicy = permissionPolicy;
+        this.authorization = authorization;
         this.allowedOrigin = properties.allowedOrigin();
     }
 
@@ -60,7 +50,7 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**").allowedOrigins(allowedOrigin)
-            .allowedMethods("GET", "POST", "OPTIONS")
+            .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
             .allowedHeaders("Content-Type", "Accept-Language", "X-Requested-With", REQUEST_PROOF_HEADER)
             .allowCredentials(true).maxAge(3600);
     }
@@ -81,7 +71,7 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
                 BackofficeRequestTrace.end();
             }
         });
-        bean.setOrder(1);
+        bean.setOrder(Ordered.HIGHEST_PRECEDENCE);
         return bean;
     }
 
@@ -89,10 +79,14 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
     FilterRegistrationBean<jakarta.servlet.Filter> backofficeRequestBodySizeLimitFilter(
         tools.jackson.databind.ObjectMapper json,
         @org.springframework.beans.factory.annotation.Value("${payment.security.max-request-body-bytes:262144}")
-        int maximumBytes) {
+        int maximumBytes,
+        @org.springframework.beans.factory.annotation.Value(
+            "${payment.security.merchant-document-upload-enabled:false}")
+        boolean merchantDocumentUploadEnabled) {
         FilterRegistrationBean<jakarta.servlet.Filter> bean = new FilterRegistrationBean<>();
-        bean.setFilter(new BackofficeRequestBodySizeLimitFilter(json, maximumBytes));
-        bean.setOrder(2);
+        bean.setFilter(new BackofficeRequestBodySizeLimitFilter(
+            json, maximumBytes, merchantDocumentUploadEnabled));
+        bean.setOrder(Ordered.HIGHEST_PRECEDENCE + 1);
         return bean;
     }
 
@@ -102,9 +96,11 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
             if ("OPTIONS".equals(request.getMethod())) {
                 return true;
             }
-            if (!ROUTES.getOrDefault(request.getRequestURI(), Set.of()).contains(request.getMethod())) {
-                throw new BackofficeAccessDeniedException();
-            }
+            String route = request.getMethod() + " " + request.getRequestURI();
+            boolean publicRoute = PUBLIC.contains(route);
+            List<String> requiredPermissions = publicRoute
+                ? List.of()
+                : permissionPolicy.requiredPermissions(request.getMethod(), request.getRequestURI());
             if (isBackchannelLogout(request)) {
                 return true;
             }
@@ -112,8 +108,9 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
                 && !allowedOrigin.equals(request.getHeader("Origin"))) {
                 throw new BackofficeAccessDeniedException();
             }
-            if (!PUBLIC.contains(request.getMethod() + " " + request.getRequestURI())) {
-                sessions.currentSubject(request.getServerName());
+            if (!publicRoute) {
+                var subject = sessions.currentSubject(request.getServerName());
+                request.setAttribute(AuthorizationSubject.class.getName(), subject);
                 if (!Set.of("GET", "HEAD").contains(request.getMethod())) {
                     try {
                         sessions.requireRequestProof(request.getHeader(REQUEST_PROOF_HEADER));
@@ -121,6 +118,8 @@ final class BackofficeSecurityConfiguration implements WebMvcConfigurer {
                         throw new BackofficeAccessDeniedException();
                     }
                 }
+                requiredPermissions.forEach(permission ->
+                    authorization.requireTenantPermission(subject, permission));
             }
             return true;
         }

@@ -43,3 +43,19 @@ _Avoid_: Frontend filter, tenant ID supplied by the caller
 **Identity Provider**:
 The external authority that verifies credentials and issues a trusted subject identity; it is not the source of platform roles or data scope.
 _Avoid_: IAM database, permission service
+
+**Account Domain**:
+The PLATFORM, MERCHANT, or AGENT login, identity-provider, application-session, and cache boundary to which one User belongs.
+_Avoid_: Tenant selector, role, natural-person identity
+
+**Login Email**:
+A normalized email address used as a mutable login identifier within one Account Domain. It is not the User identity key; external identity mapping remains the exact issuer and subject pair.
+_Avoid_: Global person key, cross-Realm link
+
+**Tenant System Administrator**:
+A protected, non-assignable system Role Membership that may administer ordinary Users and Roles inside one Tenant. PLATFORM may provision this Membership through a dedicated cross-domain lifecycle command without joining or impersonating the target Tenant.
+_Avoid_: Platform operator Membership, ordinary role assignment
+
+**Platform Identity Management Plane**:
+The PLATFORM-only cross-domain directory and target system-administrator lifecycle surface. It can inspect account-domain affiliation and maintain protected tenant administrators, but it cannot manage target ordinary users or roles.
+_Avoid_: Cross-tenant session, tenant switcher, impersonation

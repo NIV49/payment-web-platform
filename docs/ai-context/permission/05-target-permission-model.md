@@ -40,6 +40,14 @@ allow = permission exists AND resource in scopes
 
 上述错误算法会创造从未被明确授予的权限组合。
 
+### 1.3 PLATFORM 跨域 IAM 目录不是工作区切换
+
+[ADR-0012](../../adr/0012-expose-platform-cross-domain-role-and-menu-directories.md) 接受一个受限控制面例外：受保护 PLATFORM system administrator 可以只读查询指定 MERCHANT/AGENT Tenant 的 Role 与 Menu 目录。授权主体、Session、Membership、permissionVersion 和 authorization workspace 始终保持 source PLATFORM Tenant；请求中的 target `accountDomain + tenantId` 只是服务端重新验证的读取资源定位符。
+
+该能力不使用业务资源的 `RELATED_PARTY_READ`，也不依赖 Agent/Merchant relationship。Candidate 阶段必须同时命中 `role:view` 或 `menu:view` 与受保护 PLATFORM system Role；生产权限为不可委派的 `role:cross-domain-view`、`menu:cross-domain-view`。这两项不能进入普通角色 Grant 编辑器，不能产生 target Membership，也不能授权 target Role/Menu 的 create、update、disable、delete、member assignment 或 Grant replacement。
+
+PLATFORM 查询只能使用 source Session Tenant。MERCHANT/AGENT 查询必须精确提供一个 ACTIVE 且域匹配的 target Tenant；Menu 每次只返回该 Tenant 的一棵树。把多个 Tenant 的 Role/Menu 扁平后再调用普通 CRUD，或把 target Tenant 写回当前 subject，都属于权限边界破坏。
+
 ## 2. 领域对象
 
 | 对象 | 职责 | 关键不变量 |
@@ -59,6 +67,8 @@ allow = permission exists AND resource in scopes
 | Menu | 前端导航和按钮展示 | 不是后端授权真相源 |
 | Session | Sa-Token 会话摘要 | 包含 session/permission version |
 | AuthorizationDecision | 单次授权证据 | 记录 matchedGrant/reason/traceId |
+
+Role/Menu directory item 额外携带 `accountDomain`、`tenantId`、`tenantName`、`managementMode`。前三项只是目标资源所有权事实；`managementMode=SAME_TENANT|READ_ONLY` 只是服务端提供给 UI 的防误操作信号。它们不进入 Role/Menu 可变字段，不替代 server-side Tenant join 或后端鉴权；Long `tenantId` 在 HTTP 响应中仍编码为 string。
 
 部门不参与菜单和权限码授权。菜单、权限码及完整数据授权始终通过角色分配；部门仅用于用户组织归属和 `DEPARTMENT` 数据范围计算。禁止合并“部门菜单/部门权限”与角色权限，避免产生隐式授权。该边界来自 `docs/permission-refactor-product-requirements.md` 的 11.1 至 11.4 节；当前 `backend/modules/identity/persistence-postgres/src/main/resources/db/migration/V1__permission_schema.sql` 也只通过 `iam_membership_role` 和 `iam_role_menu` 建立授权关系，不存在部门到菜单或权限的关系表。
 

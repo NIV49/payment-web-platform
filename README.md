@@ -11,7 +11,7 @@ payment-web-platform/
 │   ├── admin/   # Vben Admin、Playground 和本地 Mock 服务
 │   └── portal/  # Nuxt 4 多应用 Monorepo（待初始化）
 ├── backend/     # Maven 多模块后端工程
-├── docs/        # 平台文档
+├── docs/        # 产品生命周期、AI 上下文、契约与 ADR；同时作为 Tolaria vault
 ├── infra/       # 部署与基础设施配置
 └── .agents/     # 项目级 AI 工作流技能
 ```
@@ -69,7 +69,7 @@ java -jar applications/platform-admin-api/target/platform-admin-api-0.1.0-SNAPSH
 unset PAYMENT_BOOTSTRAP_PASSWORD
 ```
 
-`local` profile 在生产 Flyway 迁移完成后单独加载开发 fixture，创建本地用户名 `admin`，但不提供默认身份口令。启动时必须通过 `PAYMENT_BOOTSTRAP_PASSWORD` 显式提供只用于本地 fixture 的口令，且不得把值写入仓库或 shell 历史。V8 只识别并移除 V2/V3 的那组预留 fixture，保留全局 Permission Catalog、扩展权限以及无关租户/用户/审计/Outbox。预留 ID 或自然键碰撞、fixture 被修改、租户 1 出现额外依赖关系时迁移会整体回滚，必须按 [V8 迁移手册](docs/runbooks/iam-v8-fixture-isolation.md) 处理。生产 profile 不创建本地账号。API 默认监听 `http://127.0.0.1:8080/api`，前端开发服务器默认监听 `http://127.0.0.1:5999`。
+`local` profile 在生产 Flyway 迁移完成后单独加载开发 fixture，创建本地用户名 `admin`，但不提供默认身份口令。启动时必须通过 `PAYMENT_BOOTSTRAP_PASSWORD` 显式提供只用于本地 fixture 的口令，且不得把值写入仓库或 shell 历史。V8 只识别并移除 V2/V3 的那组预留 fixture，保留全局 Permission Catalog、扩展权限以及无关租户/用户/审计/Outbox。预留 ID 或自然键碰撞、fixture 被修改、租户 1 出现额外依赖关系时迁移会整体回滚；判定、备份和恢复边界见 [后端 V8 迁移说明](docs/ai-context/backend/README.md#v8-生产-fixture-隔离)。生产 profile 不创建本地账号。API 默认监听 `http://127.0.0.1:8080/api`，前端开发服务器默认监听 `http://127.0.0.1:5999`。
 
 生产默认关闭 Web 进程内的 Flyway 执行，迁移必须由独立部署 Job 先完成；该 Job/CD 编排尚未实现，因此生产仍是 **NO-GO**。应用启动门禁不会关闭：它在 Web Server 接受流量前只读核对当前二进制携带的全部版本迁移，pending、missing、failed、future 或 checksum/描述/类型漂移都会拒绝启动，并只输出脱敏原因码。门禁不会执行 `migrate` 或 `repair`。只有完成 expand/contract 迁移约束和 N/N-1 双版本兼容门禁后，才可评估是否放宽成功 future migration；当前不承诺滚动回滚。
 
@@ -87,7 +87,7 @@ Password: disabled
 
 ## AI 开发与 Judge
 
-所有开发任务先读 [仓库开发规则](AGENTS.md) 和 [AI 上下文入口](docs/ai-context/README.md)。迁移、重构、Judge 或多 Agent 能力切片还必须遵循 [Judge Charter](docs/judge-charter.md)；项目级 [payment-modernization skill](.agents/skills/payment-modernization/SKILL.md) 提供 Reimagine/Transform 路由、产物契约和门禁流程。
+产品与开发文档从 [统一文档首页](docs/README.md) 进入；所有开发任务再读 [仓库开发规则](AGENTS.md) 和 [AI 上下文入口](docs/ai-context/README.md)。`docs/` 同时是 Tolaria vault，但仓库 Markdown 仍是唯一事实源。迁移、重构、Judge 或多 Agent 能力切片还必须遵循 [Judge Charter](docs/judge-charter.md)；项目级 [payment-modernization skill](.agents/skills/payment-modernization/SKILL.md) 提供 Reimagine/Transform 路由、产物契约和门禁流程。
 
 <!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 

@@ -4,7 +4,7 @@
 
 ## 强制阅读路由
 
-1. 所有任务先读 `docs/ai-context/README.md`。
+1. 所有任务先读 `docs/README.md`、`docs/ai-context/current-status.md` 和 `docs/ai-context/README.md`；前者是产品/开发双入口，后两者给出当前唯一交付任务和工程阅读路由。
 2. 修改 `frontend/admin/**` 前，必须读：
    - `docs/ai-context/vben/README.md`
    - `docs/ai-context/frontend/README.md`
@@ -13,8 +13,11 @@
    - 对应业务领域文档；权限相关还要读 `docs/ai-context/permission/`
 4. 修改前后端接口、字段、登录、菜单或权限码时，还必须读 `docs/ai-contract/identity-admin-api-contract.md`。
 5. 跨端任务同时阅读前端、后端和契约文档。
-6. `frontend/portal` 初始化前先建立 Nuxt 4 专属上下文；Vben 规则不能直接套用到 Portal。
-7. 规划迁移、重构、Judge 或多 Agent 能力切片前，必须读 `docs/judge-charter.md`；需要执行现代化工作流时再加载 `.agents/skills/payment-modernization/SKILL.md` 及其任务相关 reference。
+6. 修改 User、Role、Menu、Department、Dictionary 的菜单可见性、页面字段、动作或权限边界时，还必须读并同步 `docs/product/system-management.md`。
+7. `frontend/portal` 初始化前先建立 Nuxt 4 专属上下文；Vben 规则不能直接套用到 Portal。
+8. 修改或清理 `docs/**` 时遵守 `docs/AGENTS.md`；仓库 Markdown 是唯一事实源，Tolaria 只作为阅读和关系浏览层。
+9. 规划迁移、重构、Judge 或多 Agent 能力切片前，必须读 `docs/judge-charter.md`；需要执行现代化工作流时再加载 `.agents/skills/payment-modernization/SKILL.md` 及其任务相关 reference。
+10. 修改 Merchant 主体、入驻、审核、状态、商户权限、商户菜单或对应前后端接口时，必须先读并在同一任务同步 `docs/adr/0013-separate-merchant-business-lifecycle-from-identity-tenancy.md`、`docs/ai-contract/merchant-lifecycle-api-contract.md`、`docs/ai-context/merchant/README.md`、`docs/product/merchant-management.md` 和 `docs/ai-context/current-status.md`。
 
 完整流程见 `docs/ai-context/development-workflow.md`。
 

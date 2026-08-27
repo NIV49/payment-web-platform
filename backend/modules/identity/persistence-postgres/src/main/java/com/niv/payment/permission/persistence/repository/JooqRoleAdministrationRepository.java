@@ -1,6 +1,7 @@
 package com.niv.payment.permission.persistence.repository;
 
 import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.port.RoleAdministrationPort;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.IdentityModels;
@@ -44,11 +45,20 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
                                             JooqIdentityQueryRepository queries,
                                             JooqRoleGrantAdministrationRepository grants,
                                             Supplier<String> traceIdSupplier) {
+        this(dsl, queries, grants, AccountDomain.PLATFORM, traceIdSupplier);
+    }
+
+    public JooqRoleAdministrationRepository(DSLContext dsl,
+                                            JooqIdentityQueryRepository queries,
+                                            JooqRoleGrantAdministrationRepository grants,
+                                            AccountDomain accountDomain,
+                                            Supplier<String> traceIdSupplier) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
         this.queries = Objects.requireNonNull(queries, "queries");
         this.grants = Objects.requireNonNull(grants, "grants");
+        Objects.requireNonNull(accountDomain, "accountDomain");
         this.traceIdSupplier = Objects.requireNonNull(traceIdSupplier, "traceIdSupplier");
-        this.support = new JooqAdministrationSupport(dsl, traceIdSupplier);
+        this.support = new JooqAdministrationSupport(dsl, accountDomain, traceIdSupplier);
     }
 
     @Override
@@ -59,7 +69,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
     @Override
     @Transactional
     public long createRole(long tenantId, AdministrationActor actor, IdentityModels.RoleCommand command) {
-        support.requirePlatformTenant(tenantId);
+        String tenantType = support.requireAccountDomainTenant(tenantId);
         support.lockTenant(tenantId, actor);
         Set<Long> menuIds = validatedMenus(tenantId, command.menuIds());
         long roleId = support.nextId();
@@ -68,7 +78,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
             .set(IAM_ROLE.TENANT_ID, tenantId)
             .set(IAM_ROLE.ROLE_CODE, roleCode(command.name(), roleId))
             .set(IAM_ROLE.ROLE_NAME, command.name().trim())
-            .set(IAM_ROLE.APPLICABLE_TENANT_TYPE, "PLATFORM")
+            .set(IAM_ROLE.APPLICABLE_TENANT_TYPE, tenantType)
             .set(IAM_ROLE.ASSIGNABLE, true)
             .set(IAM_ROLE.SYSTEM_ROLE, false)
             .set(IAM_ROLE.STATUS, status(command.status()))
@@ -84,7 +94,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
     @Transactional
     public void updateRole(long tenantId, AdministrationActor actor, long roleId,
                            IdentityModels.RoleCommand command, long expectedVersion) {
-        support.requirePlatformTenant(tenantId);
+        support.requireAccountDomainTenant(tenantId);
         support.lockTenant(tenantId, actor);
         requireOrdinaryRoleVersion(tenantId, roleId, expectedVersion);
         Set<Long> menuIds = validatedMenus(tenantId, command.menuIds());
@@ -111,7 +121,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
     @Transactional
     public void updateRoleStatus(long tenantId, AdministrationActor actor, long roleId,
                                  int newStatus, long expectedVersion) {
-        support.requirePlatformTenant(tenantId);
+        support.requireAccountDomainTenant(tenantId);
         support.lockTenant(tenantId, actor);
         requireOrdinaryRoleVersion(tenantId, roleId, expectedVersion);
         int updated = dsl.update(IAM_ROLE)
@@ -133,7 +143,7 @@ public class JooqRoleAdministrationRepository implements RoleAdministrationPort 
     @Override
     @Transactional
     public void deleteRole(long tenantId, AdministrationActor actor, long roleId, long expectedVersion) {
-        support.requirePlatformTenant(tenantId);
+        support.requireAccountDomainTenant(tenantId);
         support.lockTenant(tenantId, actor);
         requireOrdinaryRoleVersion(tenantId, roleId, expectedVersion);
         List<Long> affectedMembershipIds = dsl.select(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID)

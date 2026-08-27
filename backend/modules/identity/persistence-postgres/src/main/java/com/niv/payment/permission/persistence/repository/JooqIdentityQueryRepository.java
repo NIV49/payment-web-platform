@@ -212,7 +212,23 @@ public final class JooqIdentityQueryRepository implements IdentityQueryPort {
     }
 
     public IdentityModels.Page<IdentityModels.User> findUsers(long tenantId, IdentityModels.UserQuery query) {
-        Condition condition = userCondition(tenantId, query);
+        return findUsers(tenantId, query, userCondition(tenantId, query));
+    }
+
+    public IdentityModels.Page<IdentityModels.User> findRoleMembers(
+        long tenantId, long roleId, boolean assigned, IdentityModels.UserQuery query) {
+        var memberRole = IAM_MEMBERSHIP_ROLE.as("filtered_member_role");
+        Condition hasRole = DSL.exists(DSL.selectOne()
+            .from(memberRole)
+            .where(memberRole.TENANT_ID.eq(IAM_MEMBERSHIP.TENANT_ID)
+                .and(memberRole.MEMBERSHIP_ID.eq(IAM_MEMBERSHIP.ID))
+                .and(memberRole.ROLE_ID.eq(roleId))));
+        return findUsers(tenantId, query, userCondition(tenantId, query)
+            .and(assigned ? hasRole : DSL.not(hasRole)));
+    }
+
+    private IdentityModels.Page<IdentityModels.User> findUsers(
+        long tenantId, IdentityModels.UserQuery query, Condition condition) {
         var baseRows = dsl.select(
                 IAM_USER.ID,
                 IAM_MEMBERSHIP.ID,

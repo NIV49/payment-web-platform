@@ -286,6 +286,14 @@ flowchart LR
 
 该模块表达主体和关系，不直接承担资金记账。
 
+#### 8.2.1 MCH-001 商户主体边界
+
+[ADR-0013](./adr/0013-separate-merchant-business-lifecycle-from-identity-tenancy.md) 已接受第一条 Merchant 能力切片：Identity `Tenant` 是授权工作区，`Merchant` 是业务主体，二者永久一对一但不能合并。PLATFORM 仍由 IAM 建立 MERCHANT Tenant 和初始受保护管理员；该管理员从 MERCHANT 入口首次提交时，Merchant context 才在同一事务创建 Merchant 并绑定可信 Session Tenant。
+
+Merchant 状态只允许 `PENDING_REVIEW`、`REVIEW_REJECTED`、`ACTIVE`、`DISABLED` 和终态 `TERMINATED`，不存在 DRAFT。MERCHANT 负责提交和驳回后重提，PLATFORM 负责审核及生命周期治理；这构成账号域/角色职责隔离，不构成可验证的自然人级四眼。
+
+MCH-001 只建立 Merchant 主体、入驻、审计和控制面，不提前表达 Direct/Indirect Merchant、Market、MerchantMarket、AgentRelation、费率、限额、账户、接入或支付能力。后续关系和定价模块只能引用稳定 Merchant ID，不能借修改 `tenant_id`、Membership 或 Merchant 状态表达这些业务关系。精确字段和交互见 [Merchant Lifecycle API Contract](./ai-contract/merchant-lifecycle-api-contract.md) 与 [商户管理](./product/merchant-management.md)。
+
 ### 8.3 Product & Pricing
 
 负责：
@@ -1340,12 +1348,12 @@ flowchart TD
 
 ## 32. 参考资料
 
-- [现有系统 AI Context](./ai-context/CONTEXT.md)
-- [现有系统架构基线](./ai-context/current-baseline/09-system-architecture.md)
-- [现有风险清单](./ai-context/current-baseline/10-known-risks.md)
-- [历史包袱与兼容约束](./ai-context/current-baseline/11-legacy-constraints.md)
-- [现有重构边界](./ai-context/current-baseline/12-refactor-boundary.md)
-- [权限专项审查](./ai-context/permission-security-review.md)
+- [当前交付状态](./ai-context/current-status.md)
+- [AI 开发上下文入口](./ai-context/README.md)
+- [后端工程上下文](./ai-context/backend/README.md)
+- [当前偏差与待治理项](./ai-context/known-deviations.md)
+- [权限当前状态](./ai-context/permission/01-current-state.md)
+- [目标权限模型](./ai-context/permission/05-target-permission-model.md)
 - [权限、租户与代理商产品需求](./permission-refactor-product-requirements.md)
 - [Spring Boot System Requirements](https://docs.spring.io/spring-boot/system-requirements.html)
 - [Oracle Java SE Support Roadmap](https://www.oracle.com/java/technologies/java-se-support-roadmap.html)

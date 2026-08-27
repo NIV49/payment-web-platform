@@ -1,0 +1,210 @@
+{
+  "title": "Merchant Management",
+  "review": "Review",
+  "disable": "Disable",
+  "enable": "Enable",
+  "terminate": "Terminate",
+  "edit": "Edit",
+  "create": "Create",
+  "permission": {
+    "review": "Review",
+    "disable": "Disable",
+    "enable": "Enable",
+    "terminate": "Terminate",
+    "edit": "Edit",
+    "create": "Create Merchant"
+  },
+  "list": {
+    "title": "Merchant List",
+    "loadFailed": "Failed to load merchants. Please retry."
+  },
+  "detail": {
+    "title": "Merchant Details",
+    "reviewTitle": "Merchant Review",
+    "reviewAction": "Review",
+    "reviewDecision": "Review Result",
+    "reviewUnavailable": "There is no merchant application or profile amendment to review",
+    "documentPreviewUnavailable": "Document preview unavailable",
+    "loadFailed": "Failed to load merchant details",
+    "reviewSuccess": "Merchant review completed"
+  },
+  "classification": {
+    "loadFailed": "Failed to load merchant classification dictionaries; built-in options are in use",
+    "retry": "Retry"
+  },
+  "profile": {
+    "title": "Merchant Profile",
+    "notSubmitted": "No merchant application has been submitted",
+    "readOnly": "This merchant profile is read-only in its current state",
+    "loadFailed": "Failed to load the merchant profile",
+    "registrationNumberRequired": "Registration number is required for first submission or after changing country",
+    "registrationNumberHelp": "Required on first submission. On resubmission, leave blank to retain it only when the country is unchanged.",
+    "submitFailed": "Failed to submit the merchant application. Please retry.",
+    "submit": "Submit Application",
+    "resubmit": "Resubmit Application",
+    "submitSuccess": "Merchant application submitted"
+  },
+  "status": {
+    "PENDING_REVIEW": "Pending review",
+    "REVIEW_REJECTED": "Review rejected",
+    "ACTIVE": "Active",
+    "DISABLED": "Disabled",
+    "TERMINATED": "Terminated"
+  },
+  "fields": {
+    "merchantId": "Merchant ID",
+    "merchantCode": "Merchant Code",
+    "name": "Merchant Name",
+    "merchantName": "Merchant Name",
+    "merchantType": "Merchant Type",
+    "legalPersonName": "Legal Person Name",
+    "authenticationType": "Authentication Type",
+    "subjectName": "Subject Name",
+    "legalName": "Legal Entity Name",
+    "displayName": "Merchant Name",
+    "registrationCountry": "Entity Registration Country/Region",
+    "legalRegistrationCountry": "Legal Registration Country",
+    "registrationNumber": "Registration Number",
+    "status": "Status",
+    "merchantStatus": "Merchant Status",
+    "market": "Market",
+    "statusRemarks": "Status Remarks",
+    "merchantRemarks": "Merchant Remarks",
+    "submittedAt": "Submitted At",
+    "updatedAt": "Updated At",
+    "createdAt": "Created At",
+    "rowVersion": "Current Version",
+    "lastDecision": "Last Decision",
+    "operation": "Operation"
+  },
+  "actions": {
+    "approve": "Approve",
+    "reject": "Reject",
+    "disable": "Disable",
+    "enable": "Enable",
+    "terminate": "Terminate",
+    "statusChange": "Change Merchant Status",
+    "review": "Lifecycle Action",
+    "reasonCode": "Reason",
+    "failed": "Failed to update the merchant lifecycle. Please retry.",
+    "success": "Merchant lifecycle updated"
+  },
+  "onboarding": {
+    "title": "Merchant Onboarding",
+    "create": "Add Merchant",
+    "createTitle": "Create Merchant",
+    "editTitle": "Edit Merchant",
+    "targetTenant": "Target Merchant Workspace",
+    "loadFailed": "Failed to load merchant onboarding data. Please retry.",
+    "submitFailed": "Failed to submit the merchant profile. Check all required fields and retry.",
+    "submitSuccess": "Merchant profile submitted for review",
+    "stale": "The merchant changed while you were working. Current data has been reloaded.",
+    "submit": "Submit for Review",
+    "cancel": "Cancel",
+    "sections": {
+      "merchantBasic": "Merchant Basic",
+      "subject": "Subject",
+      "legalRepresentative": "Legal Representative"
+    },
+    "fields": {
+      "displayName": "Merchant Name",
+      "brandName": "Brand Name",
+      "authenticationType": "Authentication Type",
+      "merchantTypeCode": "Merchant Type",
+      "industryCode": "Industry",
+      "brandLogoDocumentId": "Brand Logo",
+      "legalName": "Legal Entity Name",
+      "registrationCountry": "Entity Registration Country/Region",
+      "marketCodes": "Operating Markets",
+      "registeredAddress": "Registered Address",
+      "operatingAddress": "Operating Address",
+      "businessLicenseDocumentId": "Business License",
+      "legalPersonName": "Legal Representative Name",
+      "contactEmail": "Contact Email",
+      "contactPhone": "Contact Phone",
+      "legalIdTypeCode": "Legal ID Type",
+      "legalIdNo": "Legal ID Number",
+      "legalIdValidity": "Legal ID Validity",
+      "legalIdFrontDocumentId": "Legal ID Front",
+      "legalIdBackDocumentId": "Legal ID Back",
+      "legalIdHoldingDocumentId": "Legal ID Holding Photo",
+      "remarks": "Remarks",
+      "registrationNumber": "Registration Number"
+    },
+    "documents": {
+      "upload": "Upload",
+      "replace": "Replace",
+      "preview": "Preview",
+      "remove": "Remove",
+      "invalid": "Only genuine PNG or JPEG images up to 2 MiB are accepted.",
+      "tenantRequired": "Select the target merchant workspace before uploading.",
+      "uploadFailed": "Document upload failed. Please retry.",
+      "previewFailed": "Private preview failed. Please retry."
+    },
+    "sensitive": {
+      "replaceLegalId": "Replace legal ID number",
+      "replaceRegistration": "Replace registration number"
+    },
+    "pending": {
+      "title": "A profile amendment is pending review. Effective profile fields are read-only."
+    },
+    "review": {
+      "title": "Review Profile Amendment",
+      "approve": "Approve",
+      "reject": "Reject",
+      "failed": "Review decision failed. Please retry.",
+      "reasons": {
+        "PROFILE_AMENDMENT_VERIFIED": "Profile amendment verified",
+        "PROFILE_AMENDMENT_MISMATCH": "Profile amendment mismatch",
+        "DOCUMENT_UNVERIFIED": "Document could not be verified",
+        "COMPLIANCE_REJECTED": "Compliance rejected"
+      }
+    },
+    "reviewSuccess": "Profile amendment reviewed"
+  },
+  "markets": {
+    "BRA": "Brazil",
+    "PHL": "Philippines"
+  },
+  "merchantTypes": {
+    "INDIRECT": "Indirect Merchant",
+    "COMMISSION": "Commission Merchant",
+    "SALES": "Sales Merchant",
+    "PLATFORM": "Platform Merchant"
+  },
+  "authenticationTypes": {
+    "ENTERPRISE": "Enterprise",
+    "NON_PROFIT_ORGANIZATIONS": "Non-profit Organization",
+    "CLIQUE": "Group",
+    "INDIVIDUAL": "Individual",
+    "INDIVIDUAL_HOUSEHOLD": "Sole Proprietor"
+  },
+  "industries": {
+    "FINANCIAL_SERVICES": "Financial Services",
+    "ECOMMERCE": "E-commerce",
+    "RETAIL": "Retail",
+    "TRAVEL": "Travel",
+    "EDUCATION": "Education",
+    "OTHER": "Other"
+  },
+  "legalIdTypes": {
+    "NATIONAL_ID": "National ID",
+    "PASSPORT": "Passport",
+    "DRIVER_LICENSE": "Driver License"
+  },
+  "reasons": {
+    "APPLICATION_SUBMITTED": "Application submitted",
+    "APPLICATION_RESUBMITTED": "Application resubmitted",
+    "PLATFORM_APPLICATION_SUBMITTED": "Platform-created application submitted",
+    "PROFILE_VERIFIED": "Profile verified",
+    "PROFILE_MISMATCH": "Profile mismatch",
+    "REGISTRATION_UNVERIFIED": "Registration unverified",
+    "COMPLIANCE_REJECTED": "Compliance rejected",
+    "COMPLIANCE_HOLD": "Compliance hold",
+    "RISK_CONTROL": "Risk control",
+    "COMPLIANCE_CLEARED": "Compliance cleared",
+    "RISK_CLEARED": "Risk cleared",
+    "BUSINESS_CLOSED": "Business closed",
+    "COMPLIANCE_TERMINATION": "Compliance termination"
+  }
+}

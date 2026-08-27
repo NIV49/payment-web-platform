@@ -17,7 +17,10 @@ function canAppendMenuChild(menu: SystemMenuApi.SystemMenu) {
 }
 
 function canManageMenu(menu: SystemMenuApi.SystemMenu) {
-  return !menu.deletedAt;
+  return (
+    (menu as Partial<SystemMenuApi.DirectoryMenu>).managementMode !==
+      'READ_ONLY' && !menu.deletedAt
+  );
 }
 
 function canPerformMenuAction(

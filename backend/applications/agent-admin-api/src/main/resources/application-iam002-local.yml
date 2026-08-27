@@ -1,0 +1,30 @@
+server:
+  address: 127.0.0.1
+  port: 18083
+
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:25432/payment_platform
+    username: payment_dev
+    password: ${PAYMENT_IAM002_POSTGRES_PASSWORD}
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 26379
+      password: ${PAYMENT_IAM002_REDIS_PASSWORD}
+
+payment:
+  permissions:
+    legacy-administration-cutover-complete: true
+  security:
+    allowed-origin: http://agent.localhost:16001
+  identity:
+    local-login-enabled: true
+    lifecycle:
+      enabled: false
+  oidc:
+    enabled: false
+
+sa-token:
+  cookie:
+    secure: false

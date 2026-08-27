@@ -7,7 +7,13 @@
     "forgetPassword": "Forget Password",
     "profile": "Profile",
     "continue": "Continue",
-    "oidcCallback": "Complete Sign In"
+    "oidcCallback": "Complete Sign In",
+    "platformLoginTitle": "Operations Sign In",
+    "platformLoginSubtitle": "Sign in with an operations account",
+    "merchantLoginTitle": "Merchant Sign In",
+    "merchantLoginSubtitle": "Sign in with a merchant account",
+    "agentLoginTitle": "Agent Sign In",
+    "agentLoginSubtitle": "Sign in with an agent account"
   },
   "dashboard": {
     "title": "Dashboard",

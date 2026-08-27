@@ -13,34 +13,47 @@ const deployments = {
     directory: 'agent-admin',
     namespace: 'payment-agent-admin',
     title: 'Payment Agent Admin',
+    forbiddenLiterals: [
+      '/merchant/application',
+      '/merchant/profile',
+      '/platform/merchants',
+    ],
     views: [
       ...commonViews,
       'src/views/dashboard/workspace/index.vue',
-      'src/views/identity/members/index.vue',
+      'src/views/system/role/list.vue',
+      'src/views/system/user/list.vue',
     ],
   },
   merchant: {
     directory: 'merchant-admin',
     namespace: 'payment-merchant-admin',
     title: 'Payment Merchant Admin',
+    forbiddenLiterals: ['/merchant/list', '/platform/merchants'],
     views: [
       ...commonViews,
       'src/views/dashboard/workspace/index.vue',
-      'src/views/identity/members/index.vue',
+      'src/views/merchant/profile.vue',
+      'src/views/system/role/list.vue',
+      'src/views/system/user/list.vue',
     ],
   },
   platform: {
     directory: 'platform-admin',
     namespace: 'payment-platform-admin',
     title: 'Payment Operations',
+    forbiddenLiterals: ['/merchant/application', '/merchant/profile'],
     views: [
       ...commonViews,
       'src/views/dashboard/analytics/index.vue',
       'src/views/dashboard/workspace/index.vue',
       'src/views/demos/antd/index.vue',
-      'src/views/identity/members/index.vue',
-      'src/views/identity/tenant-bootstrap/index.vue',
+      'src/views/merchant/detail/index.vue',
+      'src/views/merchant/list.vue',
+      'src/views/merchant/onboarding/index.vue',
       'src/views/system/dept/list.vue',
+      'src/views/system/dict/data/list.vue',
+      'src/views/system/dict/list.vue',
       'src/views/system/menu/list.vue',
       'src/views/system/role/list.vue',
       'src/views/system/user/list.vue',
@@ -164,6 +177,23 @@ for (const [deployment, policy] of Object.entries(deployments)) {
       .map((path) => readFile(path, 'utf8')),
   );
   const text = contents.join('\n');
+  if (
+    text.includes('/system/dict/data/type/:dictType') ||
+    /["'`]SystemDictionaryData["'`]/.test(text)
+  ) {
+    throw new Error(
+      `${deployment} artifact contains a legacy dictionary data route`,
+    );
+  }
+  if (
+    deployment !== 'platform' &&
+    (/["'`]SystemDictionaryDataIndex["'`]/.test(text) ||
+      /["'`]\/system\/dict\/data["'`]/.test(text))
+  ) {
+    throw new Error(
+      `${deployment} artifact contains a dictionary data page route`,
+    );
+  }
   if (!text.includes(policy.namespace) || !text.includes('/api')) {
     throw new Error(
       `${deployment} artifact is missing its namespace or same-origin API`,
@@ -171,6 +201,13 @@ for (const [deployment, policy] of Object.entries(deployments)) {
   }
   if (text.includes('current-password')) {
     throw new Error(`${deployment} artifact contains the local password form`);
+  }
+  for (const literal of policy.forbiddenLiterals) {
+    if (text.includes(literal)) {
+      throw new Error(
+        `${deployment} artifact crosses its Merchant lifecycle boundary: ${literal}`,
+      );
+    }
   }
 }
 

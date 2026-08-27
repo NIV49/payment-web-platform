@@ -84,7 +84,252 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
 
             self.assertEqual([], scan_repository(repository, ("docs",)))
 
-    def test_only_current_lockfile_findings_have_exact_approvals(self) -> None:
+    def test_repository_json_configuration_is_strict_and_policy_paths_are_sorted(
+        self,
+    ) -> None:
+        settings = REPOSITORY.joinpath(".vscode/settings.json").read_text(
+            encoding="utf-8"
+        )
+        policy = json.loads(
+            REPOSITORY.joinpath(
+                ".agents/payment-modernization-policy.json"
+            ).read_text(encoding="utf-8")
+        )
+
+        self.assertIsInstance(json.loads(settings), dict)
+        for field in ("rulebookPaths", "ruleCardPaths", "judgePaths"):
+            with self.subTest(field=field):
+                self.assertEqual(sorted(policy[field]), policy[field])
+
+    def test_accepts_reserved_localhost_mailboxes_without_trusting_lookalikes(
+        self,
+    ) -> None:
+        at = "@"
+        localhost = ".local" + "host"
+        reserved = (
+            "admin" + at + "platform" + localhost,
+            "operator" + at + "merchant" + localhost,
+            "reviewer" + at + "agent" + localhost,
+        )
+        lookalikes = (
+            "admin" + at + "localhost.example.com",
+            "admin" + at + "merchant.localhost.example.com",
+            "admin" + at + "merchant-localhost.com",
+        )
+
+        for mailbox in reserved:
+            with self.subTest(reserved=mailbox):
+                self.assertEqual(
+                    [], scan_text_content("fixtures/accounts.sql", mailbox)
+                )
+        for mailbox in lookalikes:
+            with self.subTest(lookalike=mailbox):
+                errors = scan_text_content("fixtures/accounts.sql", mailbox)
+                self.assertIn("EMAIL_ADDRESS", "\n".join(errors), errors)
+
+    def test_uuid_identifiers_are_not_payment_cards_but_real_pans_remain_blocked(
+        self,
+    ) -> None:
+        canonical_uuids = (
+            "-".join(("10000000", "0000", "4000", "8000", "000000000100")),
+            "-".join(("20000000", "0000", "4000", "a000", "000000000200")),
+        )
+        pan = "41111111" + "11111111"
+        pan_in_non_uuid_shape = "-".join(("00000000", "0000", "0000", "0000", pan))
+
+        for value in canonical_uuids:
+            with self.subTest(uuid=value):
+                self.assertEqual(
+                    [], scan_text_content("fixtures/identifiers.sql", value)
+                )
+
+        pan_errors = scan_text_content("fixtures/card.txt", pan)
+        disguised_errors = scan_text_content(
+            "fixtures/not-a-uuid.txt", pan_in_non_uuid_shape
+        )
+        self.assertIn("PAYMENT_CARD_NUMBER", "\n".join(pan_errors), pan_errors)
+        self.assertIn(
+            "PAYMENT_CARD_NUMBER", "\n".join(disguised_errors), disguised_errors
+        )
+
+    def test_required_environment_placeholders_are_exact_and_fail_closed(
+        self,
+    ) -> None:
+        password_key = "pass" + "word"
+        variable = "PAYMENT_DB_" + "PASSWORD"
+        required = "${" + variable + ":?missing database password}"
+        safe_values = (
+            f'{password_key}: "{required}"\n',
+            f"{password_key}: {required}\n",
+            f'{password_key}="{required}"\n',
+        )
+        unsafe_values = (
+            "${" + variable + ":-synthetic-default-secret}",
+            "prefix" + required,
+            required + "suffix",
+            "${PAYMENT_${DB_NAME}:?missing database " + "password}",
+            "${" + variable + ":?${ERROR_MESSAGE}}",
+            "${" + variable.casefold() + ":?missing database password}",
+        )
+
+        for content in safe_values:
+            with self.subTest(safe=content):
+                label = "config/application.yml" if ": " in content else ".env"
+                self.assertEqual([], scan_text_content(label, content))
+        for value in unsafe_values:
+            with self.subTest(unsafe=value):
+                errors = scan_text_content(
+                    "config/application.yml", f'{password_key}: "{value}"\n'
+                )
+                self.assertTrue(
+                    any(
+                        rule in "\n".join(errors)
+                        for rule in (
+                            "GENERIC_SECRET_ASSIGNMENT",
+                            "YAML_SECRET_SCALAR",
+                        )
+                    ),
+                    errors,
+                )
+
+    def test_source_references_are_not_hardcoded_secrets_but_literals_are(
+        self,
+    ) -> None:
+        password_key = "pass" + "word"
+        token_key = "to" + "ken"
+        unsafe_value = "synthetic-hardcoded-" + "secret"
+        safe_sources = {
+            "src/Controller.java": f"String {token_key} = values[0];\n",
+            "src/request.ts": f"{password_key}: target.{password_key},\n",
+            "src/policy.ts": (
+                f"function valid({password_key}: string) "
+                f"{{ return {password_key}; }}\n"
+            ),
+            "src/state.ts": f"const {password_key} = form.{password_key};\n",
+            "src/runtime.py": f"{password_key} = environment[password_key]\n",
+        }
+        unsafe_sources = {
+            "src/Controller.java": f'String {token_key} = "{unsafe_value}";\n',
+            "src/request.ts": f'{password_key}: "{unsafe_value}",\n',
+            "src/state.ts": f"const {password_key} = `{unsafe_value}`;\n",
+            "src/runtime.py": f'{password_key} = f"{unsafe_value}"\n',
+        }
+
+        for label, content in safe_sources.items():
+            with self.subTest(safe=label):
+                self.assertEqual([], scan_text_content(label, content))
+        for label, content in unsafe_sources.items():
+            with self.subTest(unsafe=label):
+                errors = scan_text_content(label, content)
+                self.assertIn(
+                    "GENERIC_SECRET_ASSIGNMENT", "\n".join(errors), errors
+                )
+
+    def test_computed_secret_references_are_safe_but_direct_literals_are_not(
+        self,
+    ) -> None:
+        password_key = "pass" + "word"
+        display_label = "Pass" + "word"
+        token_key = "to" + "ken"
+        secret_key = "se" + "cret"
+        safe_sources = {
+            "src/Controller.java": "\n".join(
+                (
+                    f"String {token_key} = logoutToken(key, issuer);",
+                    f"for (String {password_key} : new String[]{{",
+                    f"SignedJWT {token_key} = new SignedJWT(",
+                )
+            ),
+            "src/runtime.py": "\n".join(
+                (
+                    f'{password_key} = private.get(f"PAYMENT_{{domain}}_LOCAL_ADMIN_PASSWORD")',
+                    f'"{password_key}": {password_key},',
+                    f'{secret_key} = values[f"PAYMENT_{{domain}}_SECRET"]',
+                    f"{secret_key} = lambda key: (",
+                    f'print(f"{display_label}: {{record[\'{password_key}\']}}")',
+                )
+            ),
+            "src/runtime.cjs": "\n".join(
+                (
+                    f"{password_key}: legacy.{password_key},",
+                    f"const {token_key} = (await response.json()).access_token;",
+                    f"'{token_key}': csrfBody.data.requestProof,",
+                    (
+                        f"const {secret_key} = (await element.textContent())"
+                        ".toUpperCase().replace(/[\\s-]/g, '');"
+                    ),
+                )
+            ),
+            "src/view.ts": "\n".join(
+                (
+                    f"isCurrent: ({token_key}: {{ generation: number }}) => "
+                    f"{token_key}.generation === generation,",
+                    f"const {password_key} = generate((upperBound) => {{",
+                )
+            ),
+        }
+        literal = "synthetic-hardcoded-" + "secret"
+        unsafe_sources = {
+            "src/Controller.java": f'String {token_key} = "{literal}";\n',
+            "src/runtime.py": f'{password_key} = "{literal}"\n',
+            "src/runtime.cjs": f'{password_key}: "{literal}",\n',
+            "src/display.py": f'print(f"{display_label}: {literal}")\n',
+        }
+
+        for label, content in safe_sources.items():
+            with self.subTest(safe=label):
+                self.assertEqual([], scan_text_content(label, content))
+        for label, content in unsafe_sources.items():
+            with self.subTest(unsafe=label):
+                errors = scan_text_content(label, content)
+                self.assertIn(
+                    "GENERIC_SECRET_ASSIGNMENT", "\n".join(errors), errors
+                )
+
+    def test_arithmetic_division_is_not_an_inline_credential_pair(self) -> None:
+        arithmetic = "const counter = Math.floor(timestamp / 1000 / 30);\n"
+        credential = "admin / " + "1234"
+
+        self.assertEqual([], scan_text_content("src/runtime.cjs", arithmetic))
+        errors = scan_text_content("docs/local-login.txt", credential)
+        self.assertIn("INLINE_CREDENTIAL_PAIR", "\n".join(errors), errors)
+
+    def test_safe_secret_displays_do_not_hide_real_secret_values(self) -> None:
+        password_key = "pass" + "word"
+        unsafe_value = "synthetic-" + "secret"
+        redacted = (
+            f'return "PasswordReset[{password_key}=<redacted>]";\n'
+        )
+        english_locale = json.dumps({password_key: "Password"}) + "\n"
+        chinese_locale = json.dumps({password_key: "\u5bc6\u7801"}) + "\n"
+        unsafe_runtime = (
+            f'return "PasswordReset[{password_key}={unsafe_value}]";\n'
+        )
+        unsafe_locale = json.dumps({password_key: unsafe_value}) + "\n"
+
+        self.assertEqual([], scan_text_content("src/Reset.java", redacted))
+        self.assertEqual(
+            [],
+            scan_text_content(
+                "src/locales/langs/en-US/system.json", english_locale
+            ),
+        )
+        self.assertEqual(
+            [],
+            scan_text_content(
+                "src/locales/langs/zh-CN/system.json", chinese_locale
+            ),
+        )
+        runtime_errors = scan_text_content("src/Reset.java", unsafe_runtime)
+        locale_errors = scan_text_content(
+            "src/locales/langs/en-US/system.json", unsafe_locale
+        )
+        self.assertIn(
+            "GENERIC_SECRET_ASSIGNMENT", "\n".join(runtime_errors), runtime_errors
+        )
+        self.assertIn("JSON_SECRET_SCALAR", "\n".join(locale_errors), locale_errors)
+
+    def test_only_exact_reviewed_text_findings_have_approvals(self) -> None:
         approved_paths = {
             path
             for path, _line_number, _rule_id, _digest in (
@@ -98,19 +343,57 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
             )
         }
 
-        self.assertEqual({"frontend/admin/pnpm-lock.yaml"}, approved_paths)
-        self.assertEqual({"frontend/admin/pnpm-lock.yaml"}, context_paths)
-        self.assertEqual(3, len(sensitive_artifacts.APPROVED_FINDING_HASHES))
-        self.assertEqual(3, len(sensitive_artifacts.APPROVED_FINDING_CONTEXTS))
+        expected_paths = {
+            "docs/assets/payment-flows/platform-payment-panorama.svg",
+            "frontend/admin/pnpm-lock.yaml",
+        }
+        self.assertEqual(expected_paths, approved_paths)
+        self.assertEqual(expected_paths, context_paths)
+        self.assertEqual(4, len(sensitive_artifacts.APPROVED_FINDING_HASHES))
+        self.assertEqual(4, len(sensitive_artifacts.APPROVED_FINDING_CONTEXTS))
 
-    def test_only_trusted_favicon_clones_have_binary_approvals(self) -> None:
-        digest = "ff35213ee7dd0334db69b47a91ba549040736f1d2fe1e0de164f2fa3ec89c169"
-
+    def test_only_exact_reviewed_binary_artifacts_have_approvals(self) -> None:
         self.assertEqual(
             {
-                "frontend/admin/apps/agent-admin/public/favicon.ico": digest,
-                "frontend/admin/apps/merchant-admin/public/favicon.ico": digest,
-                "frontend/admin/apps/platform-admin/public/favicon.ico": digest,
+                "docs/assets/system-management/department.png": (
+                    "6cadc75599d83426b77426c3bc0911b74c8b5d27f08c9583271e8d3df5869d7f"
+                ),
+                "docs/assets/system-management/dictionary-data.png": (
+                    "5a19396ac6b40e1902e55594684312365b55e4976f07aa8a9200ad32a1faebf8"
+                ),
+                "docs/assets/system-management/dictionary.png": (
+                    "ec6f60f54c20dabdd440061c44264d60c152fae1e746cab6323fdb2cff33435d"
+                ),
+                "docs/assets/system-management/menu.png": (
+                    "040b13332d64720756777712e6fb308816a614922ae8ce15e2287adedf8c478b"
+                ),
+                "docs/assets/system-management/role.png": (
+                    "6e8d6df702060c3058bcd24e6f716ab839f8b8cb3fe3e6b4aea7ab05e5f89ae2"
+                ),
+                "docs/assets/system-management/user.png": (
+                    "d5ebcb74987123c46f09447f43b0a56567b11a35abda1bce92a89b7fd6c8cb8e"
+                ),
+                "docs/assets/payment-flows/channel-routing-flow.png": (
+                    "31bfafb5cca4fc3f3d69714d25b3bd8652485307c06d99b80cc01b7e6685f4bd"
+                ),
+                "docs/assets/payment-flows/collection-fund-flow.png": (
+                    "9bfd62c1b9f11fd0bfb0a9957ee47d7b65c67c0f817dd7c2d7c4a3e18af5340b"
+                ),
+                "docs/assets/payment-flows/payout-fund-flow.png": (
+                    "2e4ea8d3a3249f11ef0ba5ec451ffd8fecb39c2b974c876548c72cee10bcc6cd"
+                ),
+                "docs/assets/payment-flows/platform-payment-panorama.png": (
+                    "36c54a9ffec59d15e9701bdd71afb2f59d49fac00505184f936106cbf5d39d30"
+                ),
+                "frontend/admin/apps/agent-admin/public/favicon.ico": (
+                    "ff35213ee7dd0334db69b47a91ba549040736f1d2fe1e0de164f2fa3ec89c169"
+                ),
+                "frontend/admin/apps/merchant-admin/public/favicon.ico": (
+                    "ff35213ee7dd0334db69b47a91ba549040736f1d2fe1e0de164f2fa3ec89c169"
+                ),
+                "frontend/admin/apps/platform-admin/public/favicon.ico": (
+                    "ff35213ee7dd0334db69b47a91ba549040736f1d2fe1e0de164f2fa3ec89c169"
+                ),
             },
             sensitive_artifacts.APPROVED_BINARY_BLOB_HASHES,
         )
@@ -1072,8 +1355,8 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
         relative_path = "frontend/admin/pnpm-lock.yaml"
         content = REPOSITORY.joinpath(relative_path).read_text(encoding="utf-8")
         lines = content.splitlines()
-        email_line_number = 7474
-        dependency_line_number = 17867
+        email_line_number = 7486
+        dependency_line_number = 17879
         email_line_index = email_line_number - 1
         dependency_line_index = dependency_line_number - 1
 
@@ -1210,6 +1493,27 @@ class SensitiveArtifactValidationTest(unittest.TestCase):
                 self.assertNotIn(approved_dependency_value, rendered)
                 self.assertNotIn(changed_email, rendered)
                 self.assertNotIn(adversarial_value, rendered)
+
+    def test_platform_panorama_approval_rejects_every_binding_change(self) -> None:
+        relative_path = "docs/assets/payment-flows/platform-payment-panorama.svg"
+        content = REPOSITORY.joinpath(relative_path).read_text(encoding="utf-8")
+        approved_label = "商户 API / " + "H5"
+
+        self.assertEqual([], scan_text_content(relative_path, content))
+        changed_value = content.replace(approved_label, "商户 API / " + "H6", 1)
+        changed_context = content.replace('x="462" y="323"', 'x="463" y="323"', 1)
+        cases = (
+            ("wrong-path", "docs/assets/payment-flows/copied.svg", content),
+            ("shifted-line", relative_path, "\n" + content),
+            ("changed-value", relative_path, changed_value),
+            ("changed-context", relative_path, changed_context),
+        )
+        for name, path, candidate in cases:
+            with self.subTest(name=name):
+                self.assertIn(
+                    "INLINE_CREDENTIAL_PAIR",
+                    "\n".join(scan_text_content(path, candidate)),
+                )
 
     def test_detects_a_secret_without_echoing_its_value(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

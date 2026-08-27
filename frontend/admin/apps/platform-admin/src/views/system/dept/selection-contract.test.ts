@@ -10,9 +10,12 @@ import {
   canManageDepartment,
   canPerformDepartmentAction,
   filterDepartmentParentOptions,
+  normalizeDepartmentParentId,
 } from './selection-contract';
 
-vi.mock('#/api/request', () => ({ requestClient: {} }));
+vi.mock('@payment/backoffice-runtime/api/request', () => ({
+  requestClient: {},
+}));
 
 const department = (
   id: string,
@@ -27,6 +30,13 @@ const department = (
 });
 
 describe('department selection contract', () => {
+  it('normalizes the root parent sentinel to an empty form value', () => {
+    expect(normalizeDepartmentParentId(0)).toBeUndefined();
+    expect(normalizeDepartmentParentId('0')).toBeUndefined();
+    expect(normalizeDepartmentParentId(undefined)).toBeUndefined();
+    expect(normalizeDepartmentParentId('100')).toBe('100');
+  });
+
   it('hides deleted departments while retaining disabled management rows', () => {
     const result = filterDeletedDepartmentTree([
       department('1', { status: 0 }),

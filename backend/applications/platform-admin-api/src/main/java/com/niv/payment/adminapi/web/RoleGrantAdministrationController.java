@@ -97,8 +97,7 @@ public final class RoleGrantAdministrationController {
     }
 
     private static AdministrationActor actor(AuthorizationSubject subject) {
-        return new AdministrationActor(subject.membershipId(), subject.userId(),
-            subject.permissionVersion(), subject.sessionVersion());
+        return AdministrationActor.from(subject);
     }
 
     record GrantablePermissionResponse(String permissionCode, String resourceCode, String actionCode,
@@ -143,7 +142,8 @@ public final class RoleGrantAdministrationController {
 
     record ReplaceRoleGrantsRequest(@NotNull @Min(0) Long expectedVersion,
                                     @NotBlank @Size(max = 500) String reason,
-                                    @NotNull @Size(max = 18) List<@NotNull @Valid GrantRequest> grants) {
+                                    @NotNull @Size(max = RoleGrantModels.MAX_SELECTIONS)
+                                    List<@NotNull @Valid GrantRequest> grants) {
     }
 
     record ReplaceRoleConfigurationRequest(
@@ -154,7 +154,8 @@ public final class RoleGrantAdministrationController {
         @NotNull @Size(max = 2048)
         List<@Pattern(regexp = "[1-9][0-9]{0,18}") String> menuIds,
         @NotBlank @Size(max = 500) String reason,
-        @NotNull @Size(max = 18) List<@NotNull @Valid GrantRequest> grants) {
+        @NotNull @Size(max = RoleGrantModels.MAX_SELECTIONS)
+        List<@NotNull @Valid GrantRequest> grants) {
     }
 
     record CreateRoleConfigurationRequest(
@@ -163,7 +164,8 @@ public final class RoleGrantAdministrationController {
         @Size(max = 500) String remark,
         @NotNull @Size(max = 2048)
         List<@Pattern(regexp = "[1-9][0-9]{0,18}") String> menuIds,
-        @NotNull @Size(max = 18) List<@NotNull @Valid GrantRequest> grants) {
+        @NotNull @Size(max = RoleGrantModels.MAX_SELECTIONS)
+        List<@NotNull @Valid GrantRequest> grants) {
     }
 
     record GrantRequest(

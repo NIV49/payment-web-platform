@@ -197,6 +197,6 @@ V2 已经应用，因此没有回改历史迁移。`V4__align_vben_menu_contract
 - 所有 PAGE component 必须匹配前端导出的视图清单；
 - `/menu/all` 不允许返回语言相关的展示文案作为 title。
 
-菜单管理表单还会用 `$te()` 检查当前语言包是否存在 key。项目约定新业务 key 必须同时存在于 `zh-CN` 与 `en-US`，并由语言包 key 对称性测试守护，不能靠回退文案掩盖漏翻译。
+菜单管理表单还会用 `$te()` 检查当前语言包是否存在 key。项目约定新业务 key 必须同时存在于 `zh-CN` 与 `en-US`，并由语言包 key 对称性测试守护，不能靠回退文案掩盖漏翻译；BUTTON 标题也必须解析为字符串，不能指向对象命名空间。Merchant 按钮 key 统一为 `merchant.permission.review/disable/enable/terminate/edit/create`，由共享双语语言包直接提供字符串。
 
 偏好管理器在 `initPreferences(namespace)` 之前只使用内存驱动，初始化后才创建带应用命名空间的 LocalStorage 管理器。不要恢复无 prefix 的浏览器存储，否则 `clear()/keys()` 会越过当前应用边界。

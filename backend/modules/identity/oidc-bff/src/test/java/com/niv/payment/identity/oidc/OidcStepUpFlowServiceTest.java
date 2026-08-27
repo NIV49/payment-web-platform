@@ -59,6 +59,19 @@ class OidcStepUpFlowServiceTest {
             .isInstanceOf(OidcFlowService.LoginRejectedException.class);
     }
 
+    @Test
+    void localHttpStepUpReturnsToTheConfiguredDotLocalhostPort() {
+        Fixture fixture = new Fixture("platform.localhost", "http", 15_999);
+
+        OidcStepUpFlowService.StartResult start = fixture.service.start("platform.localhost");
+        OidcStepUpFlowService.CallbackResult callback = fixture.service.callback("code", start.state());
+
+        assertThat(callback.redirectUri().getScheme()).isEqualTo("http");
+        assertThat(callback.redirectUri().getHost()).isEqualTo("platform.localhost");
+        assertThat(callback.redirectUri().getPort()).isEqualTo(15_999);
+        assertThat(callback.redirectUri().getPath()).isEqualTo("/auth/oidc/callback");
+    }
+
     private static OidcFlowService.AuthenticatedIdentity identity(String subject, Instant authTime) {
         return new OidcFlowService.AuthenticatedIdentity(
             "https://idp.example.test/realms/PLATFORM", subject, "session-2",
@@ -66,25 +79,38 @@ class OidcStepUpFlowServiceTest {
     }
 
     private static OidcStepUpFlowService.StepUpPrincipal principal(String binding) {
+        return principal(HOST, binding);
+    }
+
+    private static OidcStepUpFlowService.StepUpPrincipal principal(String host, String binding) {
         return new OidcStepUpFlowService.StepUpPrincipal(AccountDomain.PLATFORM, 1L, 10L, 20L,
-            HOST, "https://idp.example.test/realms/PLATFORM", "subject-1", binding);
+            host, "https://idp.example.test/realms/PLATFORM", "subject-1", binding);
     }
 
     private final class Fixture {
         final InMemoryStore store = new InMemoryStore();
-        final RecordingSessions sessions = new RecordingSessions();
+        final RecordingSessions sessions;
         OidcFlowService.AuthenticatedIdentity identity = identity("subject-1", NOW);
-        final OidcStepUpFlowService service = new OidcStepUpFlowService(
-            AccountDomain.PLATFORM,
-            host -> HOST.equals(host)
-                ? Optional.of(new OidcFlowService.TrustedEntry(HOST, AccountDomain.PLATFORM, 1L))
-                : Optional.empty(),
-            (state, nonce) -> new OidcFlowService.AuthorizationRequest(
-                URI.create("https://idp.example.test/step-up"), "verifier"),
-            (code, transaction) -> identity,
-            store, store, sessions, Clock.fixed(NOW, ZoneOffset.UTC),
-            () -> "opaque-" + (store.transactions.size() + store.handoffs.size()),
-            "https", "/auth/oidc/callback");
+        final OidcStepUpFlowService service;
+
+        Fixture() {
+            this(HOST, "https", -1);
+        }
+
+        Fixture(String host, String scheme, int publicPort) {
+            sessions = new RecordingSessions(host);
+            service = new OidcStepUpFlowService(
+                AccountDomain.PLATFORM,
+                candidate -> host.equals(candidate)
+                    ? Optional.of(new OidcFlowService.TrustedEntry(host, AccountDomain.PLATFORM, 1L))
+                    : Optional.empty(),
+                (state, nonce) -> new OidcFlowService.AuthorizationRequest(
+                    URI.create("https://idp.example.test/step-up"), "verifier"),
+                (code, transaction) -> identity,
+                store, store, sessions, Clock.fixed(NOW, ZoneOffset.UTC),
+                () -> "opaque-" + (store.transactions.size() + store.handoffs.size()),
+                scheme, publicPort, "/auth/oidc/callback");
+        }
     }
 
     private static final class InMemoryStore implements OidcStepUpFlowService.TransactionStore,
@@ -114,8 +140,12 @@ class OidcStepUpFlowServiceTest {
     }
 
     private static final class RecordingSessions implements OidcStepUpFlowService.SessionStepUp {
-        private OidcStepUpFlowService.StepUpPrincipal current = principal("session-binding");
+        private OidcStepUpFlowService.StepUpPrincipal current;
         private Instant completedAt;
+
+        private RecordingSessions(String host) {
+            current = principal(host, "session-binding");
+        }
 
         @Override
         public OidcStepUpFlowService.StepUpPrincipal current(String requestHost) {

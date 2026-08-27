@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -30,19 +31,39 @@ public final class RequestBodySizeLimitFilter extends OncePerRequestFilter {
 
     private final ObjectMapper json;
     private final int maximumBytes;
+    private final boolean merchantDocumentUploadEnabled;
 
+    @Autowired
     public RequestBodySizeLimitFilter(ObjectMapper json,
-                                      @Value("${payment.security.max-request-body-bytes}") int maximumBytes) {
+                                      @Value("${payment.security.max-request-body-bytes}") int maximumBytes,
+                                      @Value("${payment.security.merchant-document-upload-enabled:false}")
+                                      boolean merchantDocumentUploadEnabled) {
         this.json = json;
         if (maximumBytes < 1 || maximumBytes == Integer.MAX_VALUE) {
             throw new IllegalArgumentException("Request body limit must be between 1 and Integer.MAX_VALUE - 1");
         }
         this.maximumBytes = maximumBytes;
+        this.merchantDocumentUploadEnabled = merchantDocumentUploadEnabled;
+    }
+
+    RequestBodySizeLimitFilter(ObjectMapper json, int maximumBytes) {
+        this(json, maximumBytes, false);
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/") || BODYLESS_METHODS.contains(request.getMethod());
+        return !request.getRequestURI().startsWith("/api/")
+            || BODYLESS_METHODS.contains(request.getMethod())
+            || isMerchantDocumentUpload(request);
+    }
+
+    private boolean isMerchantDocumentUpload(HttpServletRequest request) {
+        String contentType = request.getContentType();
+        return merchantDocumentUploadEnabled
+            && "POST".equals(request.getMethod())
+            && "/api/platform/merchant-document-uploads".equals(request.getRequestURI())
+            && contentType != null
+            && contentType.toLowerCase(java.util.Locale.ROOT).startsWith("multipart/form-data");
     }
 
     @Override

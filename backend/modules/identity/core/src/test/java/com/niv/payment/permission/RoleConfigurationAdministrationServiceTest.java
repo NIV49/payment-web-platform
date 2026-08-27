@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -104,6 +105,18 @@ class RoleConfigurationAdministrationServiceTest {
 
         assertThrows(RoleConfigurationAdministrationService.LegacyAdministrationCutoverRequiredException.class,
             () -> service.replace(command(List.of())));
+    }
+
+    @Test
+    void rejectsOversizedGrantSetsAtTheCoreCommandBoundary() {
+        List<RoleGrantModels.Selection> oversized = IntStream.range(0, 65)
+            .mapToObj(index -> selection("grant-" + index, "resource" + index + ":view"))
+            .toList();
+
+        assertThrows(IllegalArgumentException.class, () -> new RoleConfigurationCommand(
+            3L, 4L, 9L, ACTOR, "Support", 1, null, List.of(101L), "test", oversized));
+        assertThrows(IllegalArgumentException.class, () -> new RoleConfigurationCreateCommand(
+            3L, ACTOR, "Support", 1, null, List.of(101L), oversized));
     }
 
     private static RoleConfigurationCommand command(List<RoleGrantModels.Selection> grants) {

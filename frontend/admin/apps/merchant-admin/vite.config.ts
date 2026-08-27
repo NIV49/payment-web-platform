@@ -16,10 +16,11 @@ export default defineConfig(async ({ command }) => ({
           }
         : undefined,
     server: {
+      allowedHosts: ['merchant.localhost', 'merchant-e2e.localhost'],
       host: '127.0.0.1',
       proxy: {
         '/api': {
-          changeOrigin: true,
+          changeOrigin: false,
           rewrite: (path) => path.replace(/^\/api/, ''),
           target:
             env.PAYMENT_MERCHANT_ADMIN_DEV_API_TARGET ?? DEFAULT_API_TARGET,

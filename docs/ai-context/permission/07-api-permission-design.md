@@ -5,6 +5,7 @@
 - Controller 使用显式 Request/Response，不暴露 Entity；
 - 身份、membershipId、tenantId 从服务端会话上下文获取；
 - URL 中 tenantId 只用于资源定位，必须与上下文一致；
+- 唯一例外是 ADR-0012 的 PLATFORM-only Role/Menu 只读目录：target `tenantId` 仍只是资源定位，服务端必须验证 protected PLATFORM actor、target account domain 和 ACTIVE Tenant，且绝不写回当前 Session workspace；
 - 角色保存采用全量语义并带 `expectedVersion`；
 - 空数组表示明确清空，`null`/缺失表示请求无效；
 - 权限错误不泄露目标资源是否存在；
@@ -86,6 +87,8 @@ PUT /api/v1/iam/memberships/{membershipId}/roles
 - 版本冲突返回 `IAM_VERSION_CONFLICT`；
 - 同事务更新关系、版本、审计和 Outbox。
 
+当前三后台管理面已实现两个同租户窄接口：`PUT /api/system/user/{userId}/roles` 以 `userVersion` 替换单个 Membership 的角色全集；`GET/PATCH /api/system/role/{roleId}/members` 查询并原子应用最多 200 个带版本的成员差异。它们都从 Session 取得 Tenant，复用上述 RoleAssignmentPolicy，并推进 permission/session/row version；不支持 PLATFORM 跨域目录。通用 `/api/v1/iam/memberships/{membershipId}/roles` 仍是目标合同，不应误写为当前浏览器接口。
+
 ### 3.3 保存角色完整授权
 
 ```http
@@ -135,6 +138,30 @@ POST /internal/v1/authorization/check
 
 服务端根据 resourceId 加载 tenant/merchant/market/channel/owner，忽略客户端提交的同类字段。
 
+### 3.5 PLATFORM 跨域 Role/Menu 只读目录
+
+```http
+GET /api/platform/role-directory?accountDomain=MERCHANT&tenantId=2001&page=1&pageSize=20
+GET /api/platform/menu-directory?accountDomain=AGENT&tenantId=3001
+```
+
+两条路径只注册在 PLATFORM composition root。`accountDomain` 缺省为 `PLATFORM`：该值固定 source Session Tenant，不允许浏览器选择其他 PLATFORM Tenant。`MERCHANT|AGENT` 必须同时提交一个正 Long `tenantId`；服务端 join `iam_tenant` 复核其 ACTIVE 状态和真实域，不能信任请求中两个字段彼此自洽。
+
+Role directory 沿用 name/id/status/remark/time/page query 和 `{items,total}`，Menu directory 只返回一个 target Tenant 的管理树。每个 Role item/Menu node 都追加：
+
+```json
+{
+  "accountDomain": "MERCHANT",
+  "tenantId": "2001",
+  "tenantName": "Example Merchant",
+  "managementMode": "READ_ONLY"
+}
+```
+
+所有 Long ID 仍为 JSON string。`managementMode` 是服务端派生的 `SAME_TENANT|READ_ONLY` 防误操作信号，不是客户端授权证据。Candidate 权限是对应 `role:view` 或 `menu:view` 加 ACTIVE、未删除的 protected PLATFORM system Role；生产必须使用不可委派且不进入 grantable catalog 的 `role:cross-domain-view`、`menu:cross-domain-view`。MERCHANT/AGENT composition root 对相同路径默认拒绝或不注册。
+
+目录只读。target row 不能调用普通 `/system/role/**`、`/v1/iam/roles/**`、`/system/menu/**` mutation，也不能分配成员、保存菜单或替换 RoleGrant。普通接口继续只使用可信 Session Tenant，并拒绝把 `accountDomain/tenantId` 解释为 target selector。
+
 ## 4. 错误契约
 
 | Code | HTTP | 语义 |
@@ -149,6 +176,8 @@ POST /internal/v1/authorization/check
 | IAM_VERSION_CONFLICT | 409 | 基于旧版本覆盖 |
 | IAM_ROLE_NOT_ASSIGNABLE | 422 | 无权授予目标角色 |
 | IAM_LAST_ADMIN_PROTECTED | 422 | 不能移除最后管理员 |
+
+跨域目录沿用当前数字 envelope：非法域、缺失或非法 target Tenant 参数为 40001；认证缺失为 401；缺少 protected authority 为 40301；target Tenant 不存在、禁用或与域不匹配统一为不泄露目录事实的 40401。
 
 错误响应不返回“目标商户存在但不属于你”等可枚举细节。
 
@@ -186,6 +215,7 @@ fundAuthorizationService.require(
 - 遇到版本冲突重新加载完整角色/Grant；
 - 不在 LocalStorage 保存长期 Token 或完整授权范围；
 - 导出和查看使用不同权限码。
+- PLATFORM 角色/菜单页只有 `accountDomain=PLATFORM` 才装配普通 CRUD；MERCHANT/AGENT target 只调用 directory GET 并移除新增、修改、启停、删除、分配成员和 Grant 配置动作。Tag 只使用 `BELONG_SYSTEM` 的 color/order，label 始终来自应用 `zh-CN/en-US` i18n；合法域和请求值只能来自固定 `PLATFORM|MERCHANT|AGENT` allowlist。
 
 ## 7. 兼容计划
 

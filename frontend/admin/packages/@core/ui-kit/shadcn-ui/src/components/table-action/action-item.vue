@@ -64,6 +64,12 @@ function onCancel() {
       <div class="text-foreground mb-3 text-sm">
         {{ action.popConfirm.title ?? 'Are you sure?' }}
       </div>
+      <div
+        v-if="action.popConfirm.description"
+        class="text-muted-foreground mb-3 truncate text-sm"
+      >
+        {{ action.popConfirm.description }}
+      </div>
       <div class="flex justify-end gap-2">
         <VbenButton size="default" variant="outline" @click="onCancel">
           {{ action.popConfirm.cancelText ?? 'Cancel' }}

@@ -1,5 +1,6 @@
 package com.niv.payment.permission.persistence.repository;
 
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.domain.GrantSnapshot;
 import com.niv.payment.permission.port.InvalidAuthorizationSubjectException;
 import com.niv.payment.permission.port.PermissionGrantRepository;
@@ -35,10 +36,16 @@ public final class JooqPermissionGrantRepository implements PermissionGrantRepos
     private static final String ACTIVE = "ACTIVE";
 
     private final DSLContext dsl;
+    private final AccountDomain accountDomain;
     private final GrantSnapshotAssembler assembler;
 
     public JooqPermissionGrantRepository(DSLContext dsl) {
+        this(dsl, AccountDomain.PLATFORM);
+    }
+
+    public JooqPermissionGrantRepository(DSLContext dsl, AccountDomain accountDomain) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
+        this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
         this.assembler = new GrantSnapshotAssembler();
     }
 
@@ -73,14 +80,16 @@ public final class JooqPermissionGrantRepository implements PermissionGrantRepos
             .from(IAM_MEMBERSHIP)
             .join(IAM_TENANT)
                 .on(IAM_TENANT.ID.eq(IAM_MEMBERSHIP.TENANT_ID)
+                    .and(IAM_TENANT.ACCOUNT_DOMAIN.eq(accountDomain.name()))
                     .and(IAM_TENANT.STATUS.eq(ACTIVE)))
             .join(IAM_USER)
                 .on(IAM_USER.ID.eq(IAM_MEMBERSHIP.USER_ID)
+                    .and(IAM_USER.ACCOUNT_DOMAIN.eq(accountDomain.name()))
                     .and(IAM_USER.STATUS.eq(ACTIVE)))
             .join(IAM_AUTHENTICATION_CREDENTIAL)
                 .on(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(IAM_USER.ID)
-                    .and(IAM_AUTHENTICATION_CREDENTIAL.STATUS.eq(ACTIVE))
-                    .and(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH.isNotNull()))
+                    .and(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN.eq(accountDomain.name()))
+                    .and(IAM_AUTHENTICATION_CREDENTIAL.STATUS.eq(ACTIVE)))
             .leftJoin(IAM_MEMBERSHIP_ROLE)
                 .on(IAM_MEMBERSHIP_ROLE.TENANT_ID.eq(IAM_MEMBERSHIP.TENANT_ID)
                     .and(IAM_MEMBERSHIP_ROLE.MEMBERSHIP_ID.eq(IAM_MEMBERSHIP.ID)))
@@ -107,6 +116,7 @@ public final class JooqPermissionGrantRepository implements PermissionGrantRepos
                 .on(IAM_GRANT_TARGET.DIMENSION_ID.eq(IAM_GRANT_DIMENSION.ID))
             .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
                 .and(IAM_MEMBERSHIP.ID.eq(membershipId))
+                .and(IAM_MEMBERSHIP.ACCOUNT_DOMAIN.eq(accountDomain.name()))
                 .and(IAM_MEMBERSHIP.PERMISSION_VERSION.eq(permissionVersion))
                 .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE)))
             .orderBy(
@@ -121,16 +131,19 @@ public final class JooqPermissionGrantRepository implements PermissionGrantRepos
                 .from(IAM_MEMBERSHIP)
                 .join(IAM_TENANT)
                     .on(IAM_TENANT.ID.eq(IAM_MEMBERSHIP.TENANT_ID)
+                        .and(IAM_TENANT.ACCOUNT_DOMAIN.eq(accountDomain.name()))
                         .and(IAM_TENANT.STATUS.eq(ACTIVE)))
                 .join(IAM_USER)
                     .on(IAM_USER.ID.eq(IAM_MEMBERSHIP.USER_ID)
+                        .and(IAM_USER.ACCOUNT_DOMAIN.eq(accountDomain.name()))
                         .and(IAM_USER.STATUS.eq(ACTIVE)))
                 .join(IAM_AUTHENTICATION_CREDENTIAL)
                     .on(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(IAM_USER.ID)
-                        .and(IAM_AUTHENTICATION_CREDENTIAL.STATUS.eq(ACTIVE))
-                        .and(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH.isNotNull()))
+                        .and(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN.eq(accountDomain.name()))
+                        .and(IAM_AUTHENTICATION_CREDENTIAL.STATUS.eq(ACTIVE)))
                 .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
                     .and(IAM_MEMBERSHIP.ID.eq(membershipId))
+                    .and(IAM_MEMBERSHIP.ACCOUNT_DOMAIN.eq(accountDomain.name()))
                     .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE)))
                 .fetchOne(IAM_MEMBERSHIP.PERMISSION_VERSION);
             if (currentVersion != null && currentVersion != permissionVersion) {

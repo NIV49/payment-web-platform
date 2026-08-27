@@ -94,6 +94,17 @@ jobs:
           (
             set -e
             ci_python scripts/check-doc-decisions.py
+            ci_python scripts/check_doc_code_sync.py \
+              --repository-root "$CI_EXPECTED_WORKSPACE" \
+              --base-commit "$TRUSTED_POLICY_COMMIT" \
+              --commit "$CI_EXPECTED_COMMIT" \
+              --git-executable "$CI_TOOL_GIT" \
+              --git-dir "$CI_EXPECTED_GIT_DIR" \
+              --work-tree "$CI_EXPECTED_WORK_TREE" \
+              --git-common-dir "$CI_EXPECTED_GIT_COMMON_DIR" \
+              --object-directory "$CI_EXPECTED_OBJECT_DIRECTORY" \
+              --safe-path "$CI_SAFE_PATH" \
+              --safe-home "$CI_SAFE_HOME"
             ci_python scripts/check_project_skills.py
             ci_python scripts/check_sensitive_artifacts.py \
               --repository-root "$CI_EXPECTED_WORKSPACE" \
@@ -129,6 +140,18 @@ jobs:
               ci_python scripts/check-doc-decisions.py
               ci_python scripts/check_project_skills.py
             )
+            ci_python \
+              "$snapshot/scripts/check_doc_code_sync.py" \
+              --repository-root "$CI_EXPECTED_WORKSPACE" \
+              --base-commit "$TRUSTED_POLICY_COMMIT" \
+              --commit "$CI_EXPECTED_COMMIT" \
+              --git-executable "$CI_TOOL_GIT" \
+              --git-dir "$CI_EXPECTED_GIT_DIR" \
+              --work-tree "$CI_EXPECTED_WORK_TREE" \
+              --git-common-dir "$CI_EXPECTED_GIT_COMMON_DIR" \
+              --object-directory "$CI_EXPECTED_OBJECT_DIRECTORY" \
+              --safe-path "$CI_SAFE_PATH" \
+              --safe-home "$CI_SAFE_HOME"
             ci_python \
               "$snapshot/scripts/check_sensitive_artifacts.py" \
               --repository-root "$CI_EXPECTED_WORKSPACE" \

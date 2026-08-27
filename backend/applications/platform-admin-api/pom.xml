@@ -18,6 +18,18 @@
     <dependencies>
         <dependency>
             <groupId>com.niv.payment</groupId>
+            <artifactId>merchant-persistence-postgres</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.niv.payment</groupId>
+            <artifactId>merchant-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.niv.payment</groupId>
+            <artifactId>system-dictionary</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.niv.payment</groupId>
             <artifactId>identity-core</artifactId>
         </dependency>
         <dependency>

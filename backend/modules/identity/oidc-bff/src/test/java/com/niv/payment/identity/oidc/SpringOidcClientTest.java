@@ -71,7 +71,24 @@ class SpringOidcClientTest {
 
         assertRejected(validJwt("wrong-nonce", List.of("platform-admin-api"), "2"));
         assertRejected(validJwt("nonce-1", List.of("other-client"), "2"));
-        assertRejected(validJwt("nonce-1", List.of("platform-admin-api"), "1"));
+        assertThatThrownBy(() -> client(validJwt("nonce-1", List.of("platform-admin-api"), "1"))
+                .exchange("code-1", transaction("nonce-1")))
+            .isInstanceOfSatisfying(OidcFlowService.LoginRejectedException.class,
+                exception -> assertThat(exception.reason()).isEqualTo(
+                    OidcFlowService.LoginRejectedException.Reason.ID_TOKEN_ACR_INVALID));
+    }
+
+    @Test
+    void tokenExchangeFailureUsesASafeDiagnosticReason() {
+        SpringOidcClient client = new SpringOidcClient(SETTINGS,
+            request -> { throw new IllegalStateException("provider detail must not become a reason"); },
+            token -> validJwt("nonce-1", List.of("platform-admin-api"), "2"),
+            Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> client.exchange("code-1", transaction("nonce-1")))
+            .isInstanceOfSatisfying(OidcFlowService.LoginRejectedException.class,
+                exception -> assertThat(exception.reason()).isEqualTo(
+                    OidcFlowService.LoginRejectedException.Reason.TOKEN_EXCHANGE_FAILED));
     }
 
     @Test
@@ -95,6 +112,32 @@ class SpringOidcClientTest {
             "platform-admin-api", "client-secret",
             URI.create("http://api.ops.example.test/api/auth/oidc/callback"),
             URI.create("http://ops.example.test/login"), "2"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("HTTPS");
+    }
+
+    @Test
+    void localHttpRedirectAcceptsDotLocalhostButRejectsLookalikes() {
+        assertThat(new OidcClientSettings(
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM"),
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/auth"),
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/token"),
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/certs"),
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/logout"),
+            "platform-admin-api", "client-secret",
+            URI.create("http://platform.localhost:15999/api/auth/oidc/callback"),
+            URI.create("http://platform.localhost:15999/auth/login"), "2").clientId())
+            .isEqualTo("platform-admin-api");
+
+        assertThatThrownBy(() -> new OidcClientSettings(
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM"),
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/auth"),
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/token"),
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/certs"),
+            URI.create("http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/logout"),
+            "platform-admin-api", "client-secret",
+            URI.create("http://localhost.example:15999/api/auth/oidc/callback"),
+            URI.create("http://localhost.example:15999/auth/login"), "2"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("HTTPS");
     }

@@ -69,6 +69,8 @@ public final class IdentityModels {
         public RoleCommand { menuIds = List.copyOf(menuIds); }
     }
 
+    public record RoleMemberChange(long userId, long userVersion, boolean assigned) { }
+
     public record DepartmentCommand(Long parentId, String name, int status, String remark) { }
 
     public record MenuCommand(Long parentId, String type, String name, String path, String component,

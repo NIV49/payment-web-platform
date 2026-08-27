@@ -1,8 +1,2 @@
-export interface PageResult<T> {
-  items: T[];
-  total: number;
-}
-
-export function hasExplicitRoleIds(value: unknown): value is string[] {
-  return Array.isArray(value);
-}
+export type { PageResult } from '@payment/backoffice-runtime/api';
+export { hasExplicitRoleIds } from '@payment/backoffice-runtime/api';

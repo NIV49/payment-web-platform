@@ -90,6 +90,17 @@ public class SystemAdministrationController {
         return ApiResponse.success(null);
     }
 
+    @PutMapping("/user/{id}/roles")
+    ApiResponse<UserStatusResponse> replaceUserRoles(
+        @PathVariable("id") long id,
+        @Valid @RequestBody UserRoleAssignmentRequest body,
+        HttpServletRequest request) {
+        AuthorizationSubject subject = AuthUserMenuController.subject(request);
+        long version = identities.replaceUserRoles(
+            subject.tenantId(), actor(subject), id, body.roles(), body.userVersion());
+        return ApiResponse.success(new UserStatusResponse(version));
+    }
+
     @PatchMapping("/user/{id}/status")
     ApiResponse<UserStatusResponse> updateUserStatus(@PathVariable("id") long id,
         @Valid @RequestBody UserStatusRequest body, HttpServletRequest request) {
@@ -106,7 +117,7 @@ public class SystemAdministrationController {
         HttpServletRequest request) {
         AuthorizationSubject subject = AuthUserMenuController.subject(request);
         IdentityModels.PasswordResetResult result = identities.resetUserPassword(
-            subject.tenantId(), actor(subject), id, body.credentialVersion());
+            subject.tenantId(), actor(subject), id, body.credentialVersion(), body.password());
         return ApiResponse.success(new PasswordResetResponse(
             result.credentialVersion(), result.identityVersion(), result.userVersion()));
     }
@@ -128,6 +139,34 @@ public class SystemAdministrationController {
             parseTime(query.get("endTime"), true), integer(query.get("page"), 1), integer(query.get("pageSize"), 20));
         IdentityModels.Page<IdentityModels.Role> result = identities.roles(subject.tenantId(), criteria);
         return ApiResponse.success(new PageResponse<>(result.items().stream().map(this::role).toList(), result.total()));
+    }
+
+    @GetMapping("/role/{id}/members")
+    ApiResponse<PageResponse<UserResponse>> roleMembers(
+        @PathVariable("id") long id,
+        @RequestParam boolean assigned,
+        @RequestParam Map<String, String> query,
+        HttpServletRequest request) {
+        AuthorizationSubject subject = AuthUserMenuController.subject(request);
+        IdentityModels.UserQuery criteria = new IdentityModels.UserQuery(
+            query.get("username"), query.get("name"), nullableLong(query.get("userId")),
+            nullableInteger(query.get("status")), null,
+            parseTime(query.get("startTime"), false), parseTime(query.get("endTime"), true),
+            integer(query.get("page"), 1), integer(query.get("pageSize"), 20));
+        IdentityModels.Page<IdentityModels.User> result = identities.roleMembers(
+            subject.tenantId(), id, assigned, criteria);
+        return ApiResponse.success(new PageResponse<>(
+            result.items().stream().map(this::user).toList(), result.total()));
+    }
+
+    @PatchMapping("/role/{id}/members")
+    ApiResponse<Void> updateRoleMembers(
+        @PathVariable("id") long id,
+        @Valid @RequestBody RoleMembersRequest body,
+        HttpServletRequest request) {
+        AuthorizationSubject subject = AuthUserMenuController.subject(request);
+        identities.updateRoleMembers(subject.tenantId(), actor(subject), id, body.changes());
+        return ApiResponse.success(null);
     }
 
     @PostMapping("/role")
@@ -305,9 +344,7 @@ public class SystemAdministrationController {
         authorization.requireTenantPermission(subject, permission);
     }
     private static AdministrationActor actor(AuthorizationSubject subject) {
-        return new AdministrationActor(
-            subject.membershipId(), subject.userId(),
-            subject.permissionVersion(), subject.sessionVersion());
+        return AdministrationActor.from(subject);
     }
 
     @FunctionalInterface interface TreeFactory<T,R>{ R create(T item,List<R> children); }
@@ -352,7 +389,22 @@ public class SystemAdministrationController {
         }
     }
     record UserStatusRequest(@NotNull @Min(0) @Max(1) Integer status,@NotNull @Min(0) Long userVersion) { }
-    record PasswordResetRequest(@NotNull @Min(0) Long credentialVersion) { }
+    record UserRoleAssignmentRequest(
+        @NotNull @Size(max=256)
+        List<@Pattern(regexp="[1-9][0-9]{0,18}") String> roleIds,
+        @NotNull @Min(0) Long userVersion) {
+        List<Long> roles() {
+            return roleIds.stream().map(SystemAdministrationController::longId).toList();
+        }
+    }
+    record PasswordResetRequest(
+        @NotNull @Min(0) Long credentialVersion,
+        String password) {
+        @Override public String toString() {
+            return "PasswordResetRequest[credentialVersion=" + credentialVersion
+                + ", password=<redacted>]";
+        }
+    }
     record RoleRequest(@NotBlank @Size(max=128) String name,@NotNull @Size(max=2048) List<@Pattern(regexp="[1-9][0-9]{0,18}") String> menuIds,
                        @NotNull @Min(0) @Max(1) Integer status,@Size(max=500) String remark) {
         IdentityModels.RoleCommand command(){ return new IdentityModels.RoleCommand(name,
@@ -367,6 +419,20 @@ public class SystemAdministrationController {
     }
     record RoleStatusRequest(@NotNull @Min(0) @Max(1) Integer status,
                              @NotNull @Min(0) Long expectedVersion) { }
+    record RoleMembersRequest(
+        @NotNull @Size(max=200) List<@Valid RoleMemberRequest> members) {
+        List<IdentityModels.RoleMemberChange> changes() {
+            return members.stream().map(RoleMemberRequest::change).toList();
+        }
+    }
+    record RoleMemberRequest(
+        @NotBlank @Pattern(regexp="[1-9][0-9]{0,18}") String userId,
+        @NotNull @Min(0) Long userVersion,
+        @NotNull Boolean assigned) {
+        IdentityModels.RoleMemberChange change() {
+            return new IdentityModels.RoleMemberChange(longId(userId), userVersion, assigned);
+        }
+    }
     record DepartmentRequest(@Pattern(regexp="0|[1-9][0-9]*") String pid,@NotBlank @Size(max=128) String name,
                              @NotNull @Min(0) @Max(1) Integer status,@Size(max=500) String remark) {
         IdentityModels.DepartmentCommand command(){ return new IdentityModels.DepartmentCommand(parentId(pid),name,status,remark); }

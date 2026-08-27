@@ -1,0 +1,41 @@
+server:
+  address: 127.0.0.1
+  port: 18083
+
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:25432/payment_platform
+    username: payment_dev
+    password: ${PAYMENT_IAM002_POSTGRES_PASSWORD}
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 26379
+      password: ${PAYMENT_IAM002_REDIS_PASSWORD}
+
+payment:
+  permissions:
+    legacy-administration-cutover-complete: true
+  security:
+    allowed-origin: http://agent.localhost:16001
+  identity:
+    local-login-enabled: false
+    lifecycle:
+      enabled: true
+      admin-client-id: agent-identity-lifecycle
+  oidc:
+    enabled: true
+    issuer: http://127.0.0.1:18080/realms/AGENT
+    authorization-uri: http://127.0.0.1:18080/realms/AGENT/protocol/openid-connect/auth
+    token-uri: http://127.0.0.1:18080/realms/AGENT/protocol/openid-connect/token
+    jwk-set-uri: http://127.0.0.1:18080/realms/AGENT/protocol/openid-connect/certs
+    end-session-uri: http://127.0.0.1:18080/realms/AGENT/protocol/openid-connect/logout
+    client-id: agent-admin-api
+    redirect-uri: http://agent.localhost:16001/api/auth/oidc/callback
+    post-logout-redirect-uri: http://agent.localhost:16001/auth/login
+    public-scheme: http
+    public-port: 16001
+
+sa-token:
+  cookie:
+    secure: false

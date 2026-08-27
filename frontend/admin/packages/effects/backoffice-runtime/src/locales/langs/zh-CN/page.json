@@ -7,7 +7,13 @@
     "forgetPassword": "忘记密码",
     "profile": "个人中心",
     "continue": "继续登录",
-    "oidcCallback": "完成登录"
+    "oidcCallback": "完成登录",
+    "platformLoginTitle": "运维端登录",
+    "platformLoginSubtitle": "使用运维账号进入平台管理后台",
+    "merchantLoginTitle": "商户端登录",
+    "merchantLoginSubtitle": "使用商户账号进入商户管理后台",
+    "agentLoginTitle": "代理商端登录",
+    "agentLoginSubtitle": "使用代理商账号进入代理管理后台"
   },
   "dashboard": {
     "title": "概览",

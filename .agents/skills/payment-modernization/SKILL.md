@@ -113,7 +113,7 @@ Parallelize only disjoint slices. Serialize changes to the same state machine, t
 
 Rule approval uses detached signatures and therefore has two immutable commits. Commit **B** records a Rule payload with requested `status: approved`; B is still ineffective and the repository gate intentionally fails closed without proof. Two trusted reviewers independently sign Review Results bound to B and its payload digest. A later single-parent commit **C** records only regular `*.json` detached approval envelopes under the canonical artifact root, without any Rule, Judge, workflow, application, or unrelated tree change. Only the valid envelope at C makes the rule effectively approved. Do not squash, rebase, or amend B after signing. Removing or downgrading an effectively approved rule is blocked until a trusted retirement protocol exists.
 
-The initial policy intentionally contains no trusted reviewer keys, so approval fails closed. Key bootstrap or rotation requires an externally authorized governance procedure and a protected policy anchor; a normal change cannot register its own keys. Repository-local checks also require external protection. Follow [the CODEOWNERS bootstrap runbook](../../../docs/governance/codeowners-bootstrap.md); a PR-controlled workflow or newly introduced CODEOWNERS file cannot be its own root of trust.
+The current protected policy registers two stable IAM-001 reviewer public keys. They are trust anchors for signature verification, not standing approval for IAM-002, IAM-003, or later Rules; every evaluated version still requires two independently signed PASS envelopes with exact purpose, subject, commit and digest bindings. Key bootstrap or rotation requires an externally authorized governance procedure and a protected policy anchor; a normal change cannot register its own keys. Repository-local checks also require external protection. Follow [the CODEOWNERS bootstrap runbook](../../../docs/governance/codeowners-bootstrap.md); a PR-controlled workflow or newly introduced CODEOWNERS file cannot be its own root of trust.
 
 ## Queue Discipline
 
@@ -151,7 +151,7 @@ Never merge failure release, channel refund, successful-payment reversal, and in
 
 <!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
 
-The current phase implements the permission foundation only. It must cover the platform-operations, merchant, and agent back offices while keeping each tenant's authorization, organization, and data boundaries isolated.
+The permission foundation remains the required authorization baseline for the platform-operations, merchant, and agent back offices. The next approved product slice is MCH-001 Merchant business identity and application lifecycle under ADR-0013; it may build on that foundation without redefining Identity Tenant as Merchant.
 
 - Deny cross-portal access unless the subject has both an active TenantMembership in that portal's authorization-workspace tenant and explicit portal grants.
 - Keep the authorization-workspace tenant separate from the resource-owner tenant. `RELATED_PARTY_READ` from an agent workspace does not require a Membership in the merchant's tenant; it requires an explicit Grant, trusted relationship evidence, and verified resource ownership as defined by [ADR-0001](../../../docs/adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md).
@@ -162,7 +162,7 @@ The current phase implements the permission foundation only. It must cover the p
 - Empty or incomplete scope denies access.
 - Frontend visibility never replaces backend authorization.
 
-Do not introduce payment-business implementation while this phase remains active.
+MCH-001 may introduce only Merchant identity, immutable Tenant binding, application, review, lifecycle audit and the approved PLATFORM/MERCHANT surfaces. Do not introduce MerchantMarket, AgentRelation, rates, limits, settlement or fund accounts, integration configuration, payment, order, ledger or other money behavior under this slice.
 
 ## Sources
 

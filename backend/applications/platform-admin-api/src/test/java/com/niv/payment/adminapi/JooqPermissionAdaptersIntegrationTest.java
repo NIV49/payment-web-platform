@@ -137,6 +137,12 @@ class JooqPermissionAdaptersIntegrationTest {
         assertFalse(sessionVersions.findActiveVersions(
                 AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID + 1)
             .isPresent());
+        assertThrows(InvalidAuthorizationSubjectException.class,
+            () -> new JooqMembershipVersionRepository(dsl, AccountDomain.MERCHANT)
+                .findPermissionVersion(TENANT_ID, MEMBERSHIP_ID));
+        assertThrows(InvalidAuthorizationSubjectException.class,
+            () -> new JooqPermissionGrantRepository(dsl, AccountDomain.MERCHANT)
+                .load(TENANT_ID, MEMBERSHIP_ID, 17L));
 
         try {
             dsl.update(IAM_TENANT).set(IAM_TENANT.STATUS, "DISABLED")
@@ -180,6 +186,10 @@ class JooqPermissionAdaptersIntegrationTest {
             assertFalse(sessionVersions.findActiveVersions(
                 AccountDomain.PLATFORM, TENANT_ID, MEMBERSHIP_ID, USER_ID).orElseThrow()
                 .localLoginCapable());
+            assertEquals(17L,
+                permissionVersions.findPermissionVersion(TENANT_ID, MEMBERSHIP_ID));
+            assertEquals(1,
+                grants.load(TENANT_ID, MEMBERSHIP_ID, 17L).grants().size());
         } finally {
             dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
                 .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, TEST_PASSWORD_HASH)
@@ -692,6 +702,91 @@ class JooqPermissionAdaptersIntegrationTest {
 
         assertEquals(0, dsl.fetchCount(IAM_ROLE,
             IAM_ROLE.TENANT_ID.eq(TENANT_ID).and(IAM_ROLE.ROLE_NAME.eq(roleName))));
+    }
+
+    @Test
+    void federatedAdministrationWritesAllowNullPasswordAndRevalidateIdentityMapping() {
+        long observedVersion = new JooqMembershipVersionRepository(dsl)
+            .findPermissionVersion(TENANT_ID, MEMBERSHIP_ID);
+        long observedSessionVersion = currentSessionVersion();
+        String originalIssuer = dsl.select(IAM_USER.IDP_ISSUER)
+            .from(IAM_USER)
+            .where(IAM_USER.ID.eq(USER_ID))
+            .fetchSingle(IAM_USER.IDP_ISSUER);
+        String originalSubject = dsl.select(IAM_USER.IDP_SUBJECT)
+            .from(IAM_USER)
+            .where(IAM_USER.ID.eq(USER_ID))
+            .fetchSingle(IAM_USER.IDP_SUBJECT);
+        long originalIdentityVersion = dsl.select(IAM_USER.IDENTITY_VERSION)
+            .from(IAM_USER)
+            .where(IAM_USER.ID.eq(USER_ID))
+            .fetchSingle(IAM_USER.IDENTITY_VERSION);
+        String originalPasswordHash = dsl.select(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
+            .from(IAM_AUTHENTICATION_CREDENTIAL)
+            .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID))
+            .fetchSingle(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH);
+        String issuer = "https://idp.example.test/realms/platform";
+        String subject = "federated-admin-subject";
+        long identityVersion = 41L;
+        String roleName = "Federated Administration Actor";
+        var repository = new JooqRoleAdministrationRepository(
+            dsl, new JooqIdentityQueryRepository(dsl),
+            new JooqRoleGrantAdministrationRepository(dsl, () -> "federated-actor-test"),
+            () -> "federated-actor-test");
+
+        try {
+            dsl.update(IAM_USER)
+                .set(IAM_USER.IDP_ISSUER, issuer)
+                .set(IAM_USER.IDP_SUBJECT, subject)
+                .set(IAM_USER.IDENTITY_VERSION, identityVersion)
+                .where(IAM_USER.ID.eq(USER_ID))
+                .execute();
+            dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
+                .setNull(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
+                .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID))
+                .execute();
+
+            var actor = new AdministrationActor(
+                MEMBERSHIP_ID, USER_ID, observedVersion, observedSessionVersion,
+                identityVersion, issuer, subject, true);
+            long createdRoleId = repository.createRole(TENANT_ID, actor,
+                new IdentityModels.RoleCommand(roleName, List.of(), 1, null));
+            assertTrue(createdRoleId > 0);
+
+            assertThrows(InvalidAuthorizationSubjectException.class, () -> repository.createRole(
+                TENANT_ID,
+                new AdministrationActor(MEMBERSHIP_ID, USER_ID, observedVersion,
+                    observedSessionVersion, identityVersion, issuer + "/drift", subject, true),
+                new IdentityModels.RoleCommand(roleName + " Issuer Drift", List.of(), 1, null)));
+            assertThrows(InvalidAuthorizationSubjectException.class, () -> repository.createRole(
+                TENANT_ID,
+                new AdministrationActor(MEMBERSHIP_ID, USER_ID, observedVersion,
+                    observedSessionVersion, identityVersion, issuer, subject + "-drift", true),
+                new IdentityModels.RoleCommand(roleName + " Subject Drift", List.of(), 1, null)));
+            assertThrows(InvalidAuthorizationSubjectException.class, () -> repository.createRole(
+                TENANT_ID,
+                new AdministrationActor(MEMBERSHIP_ID, USER_ID, observedVersion,
+                    observedSessionVersion, identityVersion - 1, issuer, subject, true),
+                new IdentityModels.RoleCommand(roleName + " Version Drift", List.of(), 1, null)));
+        } finally {
+            dsl.deleteFrom(IAM_AUDIT_EVENT)
+                .where(IAM_AUDIT_EVENT.TRACE_ID.eq("federated-actor-test"))
+                .execute();
+            dsl.deleteFrom(IAM_ROLE)
+                .where(IAM_ROLE.TENANT_ID.eq(TENANT_ID)
+                    .and(IAM_ROLE.ROLE_NAME.like(roleName + "%")))
+                .execute();
+            dsl.update(IAM_USER)
+                .set(IAM_USER.IDP_ISSUER, originalIssuer)
+                .set(IAM_USER.IDP_SUBJECT, originalSubject)
+                .set(IAM_USER.IDENTITY_VERSION, originalIdentityVersion)
+                .where(IAM_USER.ID.eq(USER_ID))
+                .execute();
+            dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
+                .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, originalPasswordHash)
+                .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(USER_ID))
+                .execute();
+        }
     }
 
     @Test

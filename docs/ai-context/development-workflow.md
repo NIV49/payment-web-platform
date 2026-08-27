@@ -2,12 +2,13 @@
 
 ## 1. 开发前
 
-1. 用 `git status --short` 确认工作区已有修改，避免覆盖他人或上一次任务的内容。
-2. 判断改动属于前端、后端、接口契约、数据库、权限或跨端中的哪一类。
-3. 按 [上下文入口](./README.md) 阅读对应文档。
-4. 在源码中找到至少一个当前版本的同类实现；Vben 功能优先查看 `playground` 与 `packages` 的实现链，而不是只看页面文件。
-5. 涉及框架行为时阅读对应版本的官方文档，并以当前源码核验。
-6. 在编码前写清输入、输出、权限码、错误语义、数据所有者和测试边界。
+1. 先读 [Current Delivery Status](./current-status.md)，确认当前不可变版本、工作树状态、唯一交付任务和暂缓项；不得从长期 backlog 自行挑选能力扩大范围。
+2. 用 `git status --short` 确认工作区已有修改，避免覆盖他人或上一次任务的内容。
+3. 判断改动属于前端、后端、接口契约、数据库、权限或跨端中的哪一类。
+4. 按 [上下文入口](./README.md) 阅读对应文档。
+5. 在源码中找到至少一个当前版本的同类实现；Vben 功能可以查看当前 `playground` 源码与 `packages` 的实现链，但历史分析笔记不构成项目事实。
+6. 涉及框架行为时阅读对应版本的官方文档，并以当前源码核验。
+7. 在编码前写清输入、输出、权限码、错误语义、数据所有者和测试边界。
 
 ## 2. 实现中
 
@@ -60,6 +61,39 @@
 | 项目级 Agent skill | `python3 -B -I -m unittest discover -s scripts/tests -p 'test_*.py'`、`python3 -B -I scripts/check_project_skills.py`，并运行其关联的文档/规则门禁 |
 | Payment modernization 产物 | `python3 -B -I scripts/check_modernization_artifacts.py --repository-root <target-repository> --commit <full-target-SHA> --trusted-policy-commit <protected-base-SHA>`；CI 权威检查必须读取 Git 对象，canonical root 只允许 `README.md` 与 closed JSON bundle，每个 closed bundle 必须带两份独立签名 PASS；Queue Item 必须使用精确 schema v2、整段 `initialStateHistory` 唯一的 evaluated key、类型严格 canonical JSON immutable root 和状态一致的 `resolution`；每个非当前历史 key 必须有 `queueHistoryEvidence` 保留可重算 target/manifests、对应 Queue 状态与双签 Review，旧伪摘要不兼容；build/test closed 项的不可变 `originExecution` failure commit 必须是 evaluated target 的严格祖先；每次 Queue 新增/变化只能由绑定直接父树的单父、纯 JSON envelope commit 激活；positional draft 预检不能替代 |
 
+### 代码与文档同步门禁
+
+文档同步不是人工提醒。PR 和 `main` push 必须针对不可变 `base..target` 运行：
+
+```text
+python3 -B -I scripts/check_doc_code_sync.py \
+  --repository-root <repo> \
+  --base-commit <trusted-base-SHA> \
+  --commit <full-target-SHA> \
+  --git-executable <absolute-pinned-git> \
+  --git-dir <captured-absolute-git-dir> \
+  --work-tree <captured-absolute-work-tree> \
+  --git-common-dir <captured-absolute-common-dir> \
+  --object-directory <captured-absolute-object-dir> \
+  --safe-path <captured-minimal-path> \
+  --safe-home <captured-safe-home>
+```
+
+门禁按 ownership 强制：
+
+- `backend/**` 同步后端上下文和 `current-status.md`；
+- `frontend/admin/**` 同步 Admin 前端上下文和 `current-status.md`；
+- 上述要求以不可变 `base..target` 的同一提交为单位；允许一笔提交同时修改代码和文档，但不允许目标 commit 只改代码而沿用旧事实。
+- identity Admin API、system 页面、动态路由或组合根变化同步 Identity Admin API Contract；
+- system-dictionary 模块、真实读写 Controller、页面、共享组件或 composable 变化同步 System Dictionary API Contract；
+- User/Role/Menu/Department/Dictionary 的路由、页面、管理 Controller、组合根菜单或迁移变化同步 `docs/product/system-management.md`；
+- Merchant 模块、迁移、PLATFORM/MERCHANT Merchant Controller、API 或页面变化同步 Current Status、Merchant 工程上下文、Merchant Lifecycle Contract 和商户管理产品页；MCH-002 资料/市场能力还必须核对 ADR-0014 和 MCH-002 Judge；
+- `infra/**` 身份基础设施变化同步 Current Status、后端上下文和 Identity Contract；
+- `.agents/**`、CODEOWNERS、documentation workflow、治理 checker、repository guard 和依赖锁变化同步 Current Status、Development Workflow 和 Judge Charter；普通 `scripts/dev/**`、`scripts/tests/**` 不被误判为治理契约变化；
+- backend/frontend workflow 只同步其运行上下文、Current Status 和 Development Workflow，不强制改写 Judge Charter。
+
+该检查只能证明“对应文档与代码在同一版本变化”，不能证明文案语义正确。契约测试、源码路径核对和作者之外的 reviewer 继续负责语义一致性。紧急修复也不得用空白、时间戳或无关文案绕过；若行为未改变，应在对应文档写明“实现事实未改变”及证据。
+
 文档治理脚本的 Python 依赖以版本和 wheel SHA-256 完整固定在 `scripts/requirements-documentation.txt`。CI 先建立可信 repository/toolchain capture，再使用 `--require-hashes --no-deps --only-binary=:all: --no-compile --target` 从该清单准备独立的 dependency root；准备完成后立即封存目录路径、树结构、文件身份、元数据与内容摘要。受控 checker 和测试统一经 guard 的 Python runner 以 `-B -I -S` 启动，再只把已封存 root 显式加入 `sys.path`；system/user site、`.pth`、`sitecustomize` 和 `usercustomize` 都不进入 import 边界。`-B` 从解释器层禁止 bytecode 写入；policy 的 `judgePaths` 封闭登记全部 `scripts/**/*.py`。不要依赖机器全局恰好存在的 YAML/Markdown 解析库。
 
 Queue 历史协议改动必须运行真实临时 Git 仓库回归，不能只测 helper。最少覆盖：真实保留证据的合法 closed bootstrap；伪摘要、缺失 Review、签名 Queue digest/key/target 绑定错误和 target tree 漂移；引导 transcript 与真实父链中的 `A -> B -> A` key 重放；status/resolution 不一致；嵌套值 `1 -> true` 与 `2 -> 2.0` 的类型改写；合法线性多提交；merge 不能直接激活状态、分叉父状态只能经后续单父重新签名版本调和；`A -> tampered B -> restored C` 仍报告 B 的完整 SHA。
@@ -80,7 +114,7 @@ YAML boolean schema 只接受标准 bool tag 且词法必须能按锁定的 PyYA
 
 XML 隐藏通道还必须拒绝违反 XML Namespaces 保留前缀、保留 URI 或前缀 undeclaration 约束的 namespace 声明；字符引用形成的隐藏标签按结构化后代文本聚合 descriptor/value，并保持现有 expanded namespace 边界以及无命名空间 attribute 与默认命名空间 child 的配对契约。隐藏标签的 qualified name 按 XML 规则大小写敏感匹配，大小写不同或前缀不同的伪 closing 不能提前清除 scope。隐藏敏感元素的最近敏感祖先沿 scope stack 传播，后代元素的 `value/data/default/text/content` 属性不能因外层安全占位文本而逃逸；这一隐藏非标准 markup 路径有意 fail closed，即使后代属性看似普通元数据也不放宽，避免重新引入不可判定的嵌套 secret carrier。显式元素、comment/CDATA/PI carrier、隐藏标签和 assignment 共用一个全局节点预算；任一阶段超限都必须 fail closed，诊断不得回显候选值。
 
-当前 trusted reviewer registry 有意保持为空，所以任何 `approved` Rule Card 都会 fail closed，直到独立的人工作业完成 reviewer key bootstrap。含 `sourceSnapshots` 的历史证据还要求运行环境能只读访问项目登记的 legacy workspace；GitHub 托管 Ubuntu runner 不具备该本地路径时会阻断，不能跳过验证，需改用受控的 self-hosted evidence runner 或后续获批的不可变证据 attestation 方案。
+当前 policy 已登记两把稳定 reviewer 公钥，其 reviewer/key 标识源于 IAM-001 bootstrap。这些公钥只是仓库级签名验证的 trust registry，不等于对 IAM-002、IAM-003 或后续 Rule 的批准；每个新 Rule 仍须取得两份独立、purpose/subject/commit/digest 完整绑定的 detached PASS envelope。含 `sourceSnapshots` 的历史证据还要求运行环境能只读访问项目登记的 legacy workspace；GitHub 托管 Ubuntu runner 不具备该本地路径时会阻断，不能跳过验证，需改用受控的 self-hosted evidence runner 或后续获批的不可变证据 attestation 方案。
 
 仓库内脚本不能成为自己的最终信任根。必须按 [`docs/governance/codeowners-bootstrap.md`](../governance/codeowners-bootstrap.md) 先在目标分支落地 CODEOWNERS，再由仓库管理员启用并通过平台 API 核验 ruleset。首次 CODEOWNERS 提交不能自我保护；仓库测试只验证 policy、Judge、全部 workflow 和治理路径的覆盖关系，不证明平台配置已生效。CODEOWNERS 本地验证按 GitHub 语义剥离行内注释，只接受整段 `**`，拒绝重复 `/` 以及 GitHub 不支持的 `!`、`[]`、反斜杠和嵌入式 `**` 模式；尾 `/` 目录模式只匹配目录后代，不得匹配同名普通文件；末尾 `/**/` 的 globstar 按 GitHub 兼容的 gitignore 语义匹配其目录内零层或多层的直接后代，但不匹配目录本身，也不得绕过前导 `/` 的仓库根锚定。最终 owner 仍以最后一条匹配规则为准并允许 ownerless 清空。
 
@@ -90,4 +124,15 @@ XML 隐藏通道还必须拒绝违反 XML Namespaces 保留前缀、保留 URI �
 - 没有新增硬编码菜单标题、重复 DTO、绕过权限或未验证的 component 路径。
 - 相关测试已运行并记录结果；不能运行的测试说明原因和风险。
 - 新增约定、目录、接口、迁移或已知限制已同步到 `docs/ai-context`。
+- 产品阶段变化同步 `docs/product/lifecycle.md`，系统管理可见行为变化同步 `docs/product/system-management.md` 和对应截图。
 - 工作区只包含任务范围内修改，未擅自提交或覆盖用户已有改动。
+- MCH-003 新增、全量编辑、amendment、证件、受保护编号或 `DIRECT -> PLATFORM` 收敛必须同步
+  ADR-0015、Merchant Contract section 12、Rule Card 与三个 MCH-003 Judge；聚焦测试通过不能替代
+  三组合根、全量门禁、最终浏览器或不可变复审。
+- 当前 MCH-003 可变工作树已经完成 Node.js 24 前端 126 文件/963 测试、五项 typecheck、
+  三制品和独立 reviewer 的 14 文件/136 测试及 PLATFORM typecheck；创建审核复用同一
+  23 字段/5 证件全页，已分配注册国家与受保护编号联动替换也已回归。最新三组合根及 blackbox
+  `verify -am` 已 17/17 reactor `BUILD SUCCESS`，IAM 黑盒 10/10；local-bootstrap 集成测试 61/61
+  已证明 `local`/`iam002-local` 共用候选谱系、candidate10 连续重启幂等及非法序号零修复失败关闭。统一 backend `clean verify` 的
+  基础设施超时仍需在冻结后的精确 SHA 上重跑。任何当前证据都不能替代不可变 repository
+  gate 和作者之外签名复审。

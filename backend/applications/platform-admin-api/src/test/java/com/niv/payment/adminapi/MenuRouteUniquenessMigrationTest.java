@@ -70,7 +70,7 @@ class MenuRouteUniquenessMigrationTest {
         insertMenu(9_310_201L, TENANT_A, "SharedRoute", "/Shared-Route///");
         insertMenu(9_320_201L, TENANT_B, "sharedroute", "/shared-route");
 
-        migrateToLatest();
+        migrateTo("9");
 
         assertThat(singleLong("""
             SELECT count(*) FROM flyway_schema_history WHERE version = '9' AND success

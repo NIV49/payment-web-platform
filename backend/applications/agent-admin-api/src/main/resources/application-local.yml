@@ -1,4 +1,5 @@
 payment:
+  time-zone: ${PAYMENT_TIME_ZONE:Asia/Shanghai}
   identity:
     local-login-enabled: true
   oidc:

@@ -55,6 +55,19 @@ class TenantBootstrapServiceTest {
         assertEquals(AccountDomain.MERCHANT, provisioner.domain);
     }
 
+    @Test
+    void returnsAnExistingCompletedBootstrapWithoutRepeatingKeycloakProvisioning() {
+        repository.status = IdentityInvitationRepository.Status.COMPLETED;
+        repository.membershipId = 902L;
+
+        var result = service.bootstrap(platformActor(true), command(TenantType.DIRECT_MERCHANT));
+
+        assertEquals(IdentityInvitationRepository.Status.COMPLETED, result.status());
+        assertEquals(902L, result.firstAdministratorMembershipId());
+        assertFalse(provisioner.called);
+        assertFalse(repository.attached);
+    }
+
     private static TenantBootstrapCommand command(TenantType tenantType) {
         return new TenantBootstrapCommand("tenant-acme", "Acme", tenantType,
             "acme.example.test", "admin@example.test", "Acme Administrator",
@@ -67,7 +80,11 @@ class TenantBootstrapServiceTest {
 
     private static final class RecordingBootstrapRepository implements TenantBootstrapRepository {
         private boolean reserved;
+        private boolean attached;
         private AccountDomain targetDomain;
+        private IdentityInvitationRepository.Status status =
+            IdentityInvitationRepository.Status.RESERVED;
+        private Long membershipId;
 
         @Override
         public TenantReservation reserve(AuthorizationSubject actor, AccountDomain accountDomain,
@@ -76,19 +93,23 @@ class TenantBootstrapServiceTest {
             targetDomain = accountDomain;
             return new TenantReservation(901, new IdentityInvitationRepository.Reservation(903,
                 901, accountDomain, command.idempotencyKey(), command.firstAdministratorDisplayName(),
-                IdentityInvitationRepository.Status.RESERVED, null));
+                status, membershipId));
         }
 
         @Override
         public TenantBootstrap attachIdentity(TenantReservation reservation,
                                               FederatedIdentity identity) {
+            attached = true;
             return new TenantBootstrap(reservation.tenantId(), 903, 902,
                 IdentityInvitationRepository.Status.PROVISION_PENDING);
         }
 
         private void reset() {
             reserved = false;
+            attached = false;
             targetDomain = null;
+            status = IdentityInvitationRepository.Status.RESERVED;
+            membershipId = null;
         }
     }
 

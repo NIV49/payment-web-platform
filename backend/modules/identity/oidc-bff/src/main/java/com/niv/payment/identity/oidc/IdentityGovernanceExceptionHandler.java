@@ -2,6 +2,8 @@ package com.niv.payment.identity.oidc;
 
 import com.niv.payment.identity.lifecycle.MemberInvitationService;
 import com.niv.payment.identity.lifecycle.TenantBootstrapService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -10,9 +12,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @Order(-100)
 @RestControllerAdvice(assignableTypes = {
-    IdentityGovernanceController.class, TenantBootstrapController.class
+    IdentityGovernanceController.class, IdentityGovernanceQueryController.class,
+    TenantBootstrapController.class
 })
 final class IdentityGovernanceExceptionHandler {
+    private static final Logger LOG = LoggerFactory.getLogger(IdentityGovernanceExceptionHandler.class);
+
     private final OidcRequestTrace trace;
 
     IdentityGovernanceExceptionHandler(OidcRequestTrace trace) {
@@ -43,7 +48,9 @@ final class IdentityGovernanceExceptionHandler {
     }
 
     @ExceptionHandler(IdentityProvisioningException.class)
-    ResponseEntity<ErrorResponse> provisioningUnavailable() {
+    ResponseEntity<ErrorResponse> provisioningUnavailable(IdentityProvisioningException exception) {
+        LOG.warn("Identity provisioning unavailable errorCode={} traceId={}",
+            exception.errorCode(), trace.current());
         return failure(HttpStatus.SERVICE_UNAVAILABLE, 50301,
             "IDENTITY_PROVISIONING_UNAVAILABLE", "Identity provisioning is unavailable");
     }

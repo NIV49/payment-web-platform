@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">代付资金流转</title>
+  <desc id="desc">展示代付金额口径、受理后冻结、BOOKED、路由与渠道出款，以及成功、明确失败和 FAILED_UNKNOWN 三种资金结果。目标护栏要求冻结先于外部出款，UNKNOWN 不猜测。</desc>
+
+  <defs>
+    <marker id="arrow-normal" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 12 6 L 0 12 Z" fill="#176B87"/>
+    </marker>
+    <marker id="arrow-success" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 12 6 L 0 12 Z" fill="#207A4B"/>
+    </marker>
+    <marker id="arrow-failure" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 12 6 L 0 12 Z" fill="#B42318"/>
+    </marker>
+    <marker id="arrow-unknown" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 12 6 L 0 12 Z" fill="#9A6700"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1000" fill="#F7F8FA"/>
+
+  <g font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" fill="#17212B">
+    <text x="80" y="74" font-size="42" font-weight="700">代付资金流转</text>
+    <text x="80" y="110" font-size="24" fill="#4B5967">旧系统参考基线：先锁定商户资金，再执行外部出款</text>
+
+    <rect x="80" y="138" width="1440" height="112" rx="8" fill="#FFFFFF" stroke="#C7D0D9" stroke-width="2"/>
+    <text x="112" y="178" font-size="24" font-weight="700" fill="#176B87">金额口径</text>
+    <text x="112" y="207" font-size="27" font-weight="700">payAmount = settleAmount</text>
+    <text x="112" y="237" font-size="25" font-weight="700">+ merchantCommissionTotalFee</text>
+    <line x1="875" y1="158" x2="875" y2="230" stroke="#D9E0E6" stroke-width="2"/>
+    <text x="910" y="181" font-size="24" fill="#4B5967">发渠道</text>
+    <text x="910" y="220" font-size="28" font-weight="700" fill="#176B87">settleAmount</text>
+    <line x1="1180" y1="158" x2="1180" y2="230" stroke="#D9E0E6" stroke-width="2"/>
+    <text x="1215" y="181" font-size="24" fill="#4B5967">资金动作</text>
+    <text x="1215" y="220" font-size="28" font-weight="700" fill="#147D64">payAmount</text>
+
+    <text x="80" y="294" font-size="26" font-weight="700">主链</text>
+
+    <rect x="80" y="320" width="180" height="110" rx="8" fill="#FFFFFF" stroke="#176B87" stroke-width="3"/>
+    <text x="170" y="365" font-size="28" font-weight="700" text-anchor="middle">受理</text>
+    <text x="170" y="402" font-size="24" fill="#4B5967" text-anchor="middle">创建订单</text>
+
+    <path d="M 260 375 H 304" fill="none" stroke="#176B87" stroke-width="4" marker-end="url(#arrow-normal)"/>
+
+    <rect x="312" y="300" width="316" height="150" rx="8" fill="#EEF7FA" stroke="#176B87" stroke-width="3"/>
+    <text x="470" y="340" font-size="28" font-weight="700" text-anchor="middle">一期冻结</text>
+    <text x="470" y="382" font-size="25" text-anchor="middle">available  -payAmount</text>
+    <text x="470" y="420" font-size="25" text-anchor="middle">frozen  +payAmount</text>
+
+    <path d="M 628 375 H 672" fill="none" stroke="#176B87" stroke-width="4" marker-end="url(#arrow-normal)"/>
+
+    <rect x="680" y="320" width="180" height="110" rx="8" fill="#FFFFFF" stroke="#176B87" stroke-width="3"/>
+    <text x="770" y="365" font-size="28" font-weight="700" text-anchor="middle">BOOKED</text>
+    <text x="770" y="402" font-size="24" fill="#4B5967" text-anchor="middle">资金已锁定</text>
+
+    <path d="M 860 375 H 904" fill="none" stroke="#176B87" stroke-width="4" marker-end="url(#arrow-normal)"/>
+
+    <rect x="912" y="300" width="300" height="150" rx="8" fill="#FFFFFF" stroke="#176B87" stroke-width="3"/>
+    <text x="1062" y="344" font-size="28" font-weight="700" text-anchor="middle">路由 / 渠道出款</text>
+    <text x="1062" y="385" font-size="24" fill="#4B5967" text-anchor="middle">PAYMENT_PROGRESS</text>
+    <text x="1062" y="422" font-size="25" font-weight="700" fill="#176B87" text-anchor="middle">发送 settleAmount</text>
+
+    <path d="M 1212 375 H 1250" fill="none" stroke="#176B87" stroke-width="4" marker-end="url(#arrow-normal)"/>
+
+    <path d="M 1262 375 L 1362 300 L 1462 375 L 1362 450 Z" fill="#FFFFFF" stroke="#176B87" stroke-width="3"/>
+    <text x="1362" y="365" font-size="27" font-weight="700" text-anchor="middle">结果分支</text>
+    <text x="1362" y="401" font-size="24" fill="#4B5967" text-anchor="middle">按可信事实处理</text>
+
+    <path d="M 1327 424 V 486 H 295 V 526" fill="none" stroke="#207A4B" stroke-width="4" marker-end="url(#arrow-success)"/>
+    <rect x="214" y="463" width="162" height="38" rx="8" fill="#F7F8FA"/>
+    <text x="295" y="491" font-size="24" font-weight="700" fill="#207A4B" text-anchor="middle">明确成功</text>
+
+    <path d="M 1362 450 V 502 H 800 V 526" fill="none" stroke="#B42318" stroke-width="4" marker-end="url(#arrow-failure)"/>
+    <rect x="719" y="479" width="162" height="38" rx="8" fill="#F7F8FA"/>
+    <text x="800" y="507" font-size="24" font-weight="700" fill="#B42318" text-anchor="middle">明确失败</text>
+
+    <path d="M 1397 424 V 518 H 1305 V 526" fill="none" stroke="#9A6700" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrow-unknown)"/>
+    <rect x="1210" y="495" width="190" height="38" rx="8" fill="#F7F8FA"/>
+    <text x="1305" y="523" font-size="24" font-weight="700" fill="#9A6700" text-anchor="middle">结果不确定</text>
+
+    <rect x="80" y="536" width="430" height="238" rx="8" fill="#EEF8F2" stroke="#207A4B" stroke-width="3"/>
+    <text x="112" y="581" font-size="30" font-weight="700" fill="#207A4B">成功</text>
+    <line x1="112" y1="598" x2="478" y2="598" stroke="#A8D5B9" stroke-width="2"/>
+    <text x="112" y="639" font-size="26">frozen  -payAmount</text>
+    <text x="112" y="683" font-size="26" font-weight="700">PAYMENT_DONE</text>
+    <path d="M 112 708 H 152" fill="none" stroke="#207A4B" stroke-width="4" marker-end="url(#arrow-success)"/>
+    <text x="170" y="719" font-size="26">通知商户成功</text>
+    <text x="112" y="756" font-size="24" fill="#4B5967">冻结资金完成扣减，不再出款</text>
+
+    <rect x="585" y="536" width="430" height="238" rx="8" fill="#FFF1F0" stroke="#B42318" stroke-width="3"/>
+    <text x="617" y="581" font-size="30" font-weight="700" fill="#B42318">明确失败</text>
+    <line x1="617" y1="598" x2="983" y2="598" stroke="#E8B2AD" stroke-width="2"/>
+    <text x="617" y="639" font-size="26">available  +payAmount</text>
+    <text x="617" y="679" font-size="26">frozen  -payAmount</text>
+    <text x="617" y="719" font-size="26" font-weight="700">FAILED  →  通知商户失败</text>
+    <text x="617" y="756" font-size="24" fill="#4B5967">仅在确认未出款后解冻</text>
+
+    <rect x="1090" y="536" width="430" height="238" rx="8" fill="#FFF8DB" stroke="#9A6700" stroke-width="3" stroke-dasharray="10 7"/>
+    <text x="1122" y="581" font-size="30" font-weight="700" fill="#9A6700">FAILED_UNKNOWN</text>
+    <line x1="1122" y1="598" x2="1488" y2="598" stroke="#E2C76E" stroke-width="2"/>
+    <text x="1122" y="638" font-size="26" font-weight="700">保持冻结：资金动作 = 0</text>
+    <text x="1122" y="679" font-size="25">禁止自动解冻 · 禁止再次出款</text>
+    <text x="1122" y="719" font-size="25">等待可信查询 / 回调 / 人工裁决</text>
+    <text x="1122" y="756" font-size="24" fill="#4B5967">可能已出款，也可能未出款</text>
+
+    <rect x="80" y="826" width="1440" height="122" rx="8" fill="#E8F5F1" stroke="#0F766E" stroke-width="3"/>
+    <rect x="80" y="826" width="12" height="122" rx="6" fill="#0F766E"/>
+    <text x="120" y="868" font-size="28" font-weight="700" fill="#0F766E">目标护栏</text>
+    <circle cx="410" cy="883" r="26" fill="#0F766E"/>
+    <text x="410" y="892" font-size="26" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+    <text x="454" y="891" font-size="30" font-weight="700">冻结先于外部出款</text>
+    <circle cx="960" cy="883" r="26" fill="#0F766E"/>
+    <text x="960" y="892" font-size="26" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+    <text x="1004" y="891" font-size="30" font-weight="700">UNKNOWN 不猜测</text>
+    <text x="454" y="925" font-size="24" fill="#375F5A">只有资金锁定为 BOOKED，才能发起渠道出款</text>
+    <text x="1004" y="925" font-size="24" fill="#375F5A">无权威结果就保持冻结，等待证据</text>
+  </g>
+</svg>

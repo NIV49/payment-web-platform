@@ -1,0 +1,55 @@
+{
+  "ruleId": "MCH-001",
+  "status": "candidate",
+  "statement": "Merchant business lifecycle must remain separate from identity tenancy and may advance only through trusted, versioned, idempotent, audited PLATFORM or MERCHANT commands.",
+  "scope": [
+    "merchant business identity and its one-to-one Identity Tenant binding",
+    "merchant application submission and resubmission",
+    "platform merchant review and lifecycle administration",
+    "merchant lifecycle authorization and tenant isolation",
+    "merchant lifecycle concurrency, idempotency, and audit evidence"
+  ],
+  "given": [
+    "a MERCHANT account-domain Session bound to one trusted Identity Tenant",
+    "a PLATFORM account-domain Session with explicit merchant lifecycle permission",
+    "a Merchant business identity that is not an IAM User, Membership, Role, or Tenant",
+    "an append-only database migration chain and server-owned authorization boundary"
+  ],
+  "when": [
+    "a merchant reads or submits its own application",
+    "a rejected merchant corrects and resubmits its application",
+    "a platform operator lists, reads, or reviews a merchant",
+    "a platform operator disables, enables, or terminates a merchant"
+  ],
+  "then": [
+    "Merchant is a business aggregate distinct from the Identity Tenant authorization-workspace aggregate.",
+    "Each Merchant has one immutable one-to-one binding to one MERCHANT Tenant, and that binding is never reassigned or reused.",
+    "The first submission atomically creates and binds the Merchant but never creates an IAM Tenant, User, Membership, Role, Realm, or credential.",
+    "The only Merchant states are PENDING_REVIEW, REVIEW_REJECTED, ACTIVE, DISABLED, and TERMINATED; DRAFT is not a state.",
+    "Only the exact accepted transition matrix is legal, and TERMINATED is terminal.",
+    "Only first submission and correction of a REVIEW_REJECTED Merchant may change the profile through the submission endpoint.",
+    "MERCHANT submits its own application and PLATFORM reviews or governs it; Realm separation does not prove a natural-person four-eyes guarantee.",
+    "Merchant scope comes from the trusted Session or server-owned path resource and never from tenantId, merchantId, accountDomain, realm, or portal request selectors.",
+    "The exact eight merchant permissions require one assigned protected Role to hold the exact permission, preserving PLATFORM-only non-delegable governance and MERCHANT-only self-service.",
+    "Expected-version comparison, versioned idempotency result, lifecycle mutation, allowlisted-reason audit event, and lock-complete authorization recheck commit atomically in one PostgreSQL transaction; request shape permanently selects submit or resubmit, authorized replay resolves permanent deduplication before current Merchant state, submit and resubmit derive APPLICATION_SUBMITTED and APPLICATION_RESUBMITTED on the server, while PLATFORM commands accept only their exact action-specific reason; different payload reuse fails closed.",
+    "Merchant code and registration identity follow stable-code, separated search/idempotency/AEAD keys, HMAC uniqueness, mandatory AES-256-GCM ciphertext, serialized search-key rotation, country-change replacement, masking, and no-secret-log requirements.",
+    "MCH-001 excludes MerchantMarket, Agent, rate, limit, account, integration, payment, and ledger behavior; Merchant lifecycle is never physically deleted and history is retained."
+  ],
+  "counterexamples": [
+    "Merchant is implemented as an alias for Identity Tenant.",
+    "A DRAFT state is introduced before PENDING_REVIEW.",
+    "A merchant request reads or changes another merchant by submitting tenantId.",
+    "A merchant approves its own application or a PLATFORM review uses a MERCHANT Session.",
+    "A stale expectedVersion overwrites a newer merchant transition.",
+    "One idempotency key is reused with another command payload and accepted.",
+    "A lifecycle transition succeeds without an audit event in the same transaction.",
+    "MCH-001 creates rates, accounts, balances, payment behavior, or ledger truth."
+  ],
+  "evidence": [],
+  "confidence": "high",
+  "judgeTests": [
+    "MCH-001-DECISION-CONTRACT",
+    "MCH-001-BACKEND-VERIFY",
+    "MCH-001-FRONTEND-VERIFY"
+  ]
+}

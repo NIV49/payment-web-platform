@@ -1,0 +1,257 @@
+import type { SystemDeptApi } from '@payment/backoffice-runtime/api/system/dept';
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  buildUserDepartmentOptions,
+  buildUserListQuery,
+  filterDepartmentTree,
+  loadDepartmentTree,
+  resolveDepartmentId,
+  USER_LIST_SEARCH_BEHAVIOR,
+} from './query-contract';
+
+const departments: SystemDeptApi.SystemDept[] = [
+  {
+    children: [
+      {
+        id: '11',
+        name: 'Platform Engineering',
+        pid: '10',
+        rowVersion: 0,
+        status: 1,
+      },
+      {
+        id: '12',
+        name: 'Information Security',
+        pid: '10',
+        rowVersion: 0,
+        status: 1,
+      },
+    ],
+    id: '10',
+    name: 'Technology',
+    pid: '0',
+    rowVersion: 0,
+    status: 1,
+  },
+  {
+    id: '20',
+    name: 'Finance',
+    pid: '0',
+    rowVersion: 0,
+    status: 1,
+  },
+];
+
+describe('system user query contract', () => {
+  it('extracts only the scalar department id from a flattened tree item', () => {
+    expect(
+      resolveDepartmentId({
+        _id: 'tree-10',
+        level: 0,
+        value: departments[0],
+      }),
+    ).toBe('10');
+    expect(
+      resolveDepartmentId({ value: { id: { nested: '10' } } }),
+    ).toBeUndefined();
+  });
+
+  it('omits deptId when no department is selected', () => {
+    expect(
+      buildUserListQuery(
+        { currentPage: 2, pageSize: 50 },
+        { status: 1, username: 'alice' },
+        undefined,
+      ),
+    ).toEqual({
+      page: 2,
+      pageSize: 50,
+      status: 1,
+      username: 'alice',
+    });
+  });
+
+  it('uses the selected scalar department id and ignores a form deptId value', () => {
+    expect(
+      buildUserListQuery(
+        { currentPage: 1, pageSize: 20 },
+        { deptId: { value: { id: 'wrong' } }, name: 'Ada' },
+        '11',
+      ),
+    ).toEqual({
+      deptId: '11',
+      name: 'Ada',
+      page: 1,
+      pageSize: 20,
+    });
+  });
+
+  it('keeps the selected department for the PLATFORM control-plane directory', () => {
+    expect(
+      buildUserListQuery(
+        { currentPage: 1, pageSize: 20 },
+        { accountDomain: 'PLATFORM' },
+        '11',
+      ),
+    ).toEqual({
+      accountDomain: 'PLATFORM',
+      deptId: '11',
+      page: 1,
+      pageSize: 20,
+    });
+  });
+
+  it.each(['MERCHANT', 'AGENT'] as const)(
+    'drops a stale department when the control plane queries %s',
+    (accountDomain) => {
+      expect(
+        buildUserListQuery(
+          { currentPage: 1, pageSize: 20 },
+          { accountDomain },
+          '11',
+        ),
+      ).toEqual({ accountDomain, page: 1, pageSize: 20 });
+    },
+  );
+
+  it('filters recursively, preserves ancestors, and does not mutate source data', () => {
+    const before = structuredClone(departments);
+
+    const result = filterDepartmentTree(departments, 'security');
+
+    expect(result).toEqual([
+      {
+        children: [
+          {
+            id: '12',
+            name: 'Information Security',
+            pid: '10',
+            rowVersion: 0,
+            status: 1,
+          },
+        ],
+        id: '10',
+        name: 'Technology',
+        pid: '0',
+        rowVersion: 0,
+        status: 1,
+      },
+    ]);
+    expect(departments).toEqual(before);
+    expect(result).not.toBe(departments);
+    expect(result[0]).not.toBe(departments[0]);
+  });
+
+  it('returns a fresh complete tree for a blank search', () => {
+    const result = filterDepartmentTree(departments, '  ');
+
+    expect(result).toEqual(departments);
+    expect(result).not.toBe(departments);
+    expect(result[0]?.children).not.toBe(departments[0]?.children);
+  });
+
+  it('requires an explicit search action for form value changes', () => {
+    expect(USER_LIST_SEARCH_BEHAVIOR).toEqual({ submitOnChange: false });
+  });
+
+  it('exposes a failed department load and allows a successful retry', async () => {
+    const expectedError = new Error('department service unavailable');
+    const loader = async () => {
+      if (loaderCalls++ === 0) throw expectedError;
+      return departments;
+    };
+    let loaderCalls = 0;
+
+    await expect(loadDepartmentTree(loader)).resolves.toEqual({
+      departments: [],
+      error: expectedError,
+    });
+    await expect(loadDepartmentTree(loader)).resolves.toEqual({
+      departments,
+      error: undefined,
+    });
+  });
+
+  it('keeps only active department branches in the list filter', async () => {
+    const result = await loadDepartmentTree(async () => [
+      ...departments,
+      {
+        children: [
+          {
+            id: '31',
+            name: 'Hidden active child',
+            pid: '30',
+            rowVersion: 0,
+            status: 1,
+          },
+        ],
+        id: '30',
+        name: 'Disabled branch',
+        pid: '0',
+        rowVersion: 0,
+        status: 0,
+      },
+    ]);
+
+    expect(result.departments.map(({ id }) => id)).toEqual(['10', '20']);
+  });
+
+  it('pins only the current disabled department as read-only in the edit selector', () => {
+    const options = buildUserDepartmentOptions(
+      [
+        ...departments,
+        {
+          id: '30',
+          name: 'Historical department',
+          pid: '0',
+          rowVersion: 0,
+          status: 0,
+        },
+        {
+          id: '40',
+          name: 'Other disabled department',
+          pid: '0',
+          rowVersion: 0,
+          status: 0,
+        },
+      ],
+      '30',
+    );
+
+    expect(options.find(({ id }) => id === '30')).toMatchObject({
+      disabled: true,
+      id: '30',
+    });
+    expect(options.some(({ id }) => id === '40')).toBe(false);
+  });
+
+  it('removes disabled children when their active parent remains selectable', () => {
+    const options = buildUserDepartmentOptions([
+      {
+        children: [
+          {
+            id: '31',
+            name: 'Disabled child',
+            pid: '30',
+            rowVersion: 0,
+            status: 0,
+          },
+        ],
+        id: '30',
+        name: 'Active parent',
+        pid: '0',
+        rowVersion: 0,
+        status: 1,
+      },
+    ]);
+
+    expect(options).toEqual([
+      expect.objectContaining({
+        children: [],
+        id: '30',
+      }),
+    ]);
+  });
+});

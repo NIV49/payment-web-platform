@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">代收资金流转</title>
+  <desc id="desc">展示代收从商户下单到商户通知的正确业务主链、实时与非实时结算资金变化、失败或未知状态的入账边界，以及旧实现偏差和目标护栏。</desc>
+
+  <defs>
+    <marker id="arrow-code" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 12 6 L 0 12 Z" fill="#1769AA"/>
+    </marker>
+    <style>
+      text { font-family: 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; letter-spacing: 0; }
+      .title { font-size: 46px; font-weight: 700; fill: #17212B; }
+      .section { font-size: 28px; font-weight: 700; fill: #17212B; }
+      .body { font-size: 26px; fill: #263442; }
+      .body-strong { font-size: 28px; font-weight: 700; fill: #17212B; }
+      .small { font-size: 24px; fill: #44515E; }
+      .legend { font-size: 24px; font-weight: 700; }
+      .number { font-size: 24px; font-weight: 700; fill: #FFFFFF; text-anchor: middle; }
+      .center { text-anchor: middle; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="1000" fill="#F7F8FA"/>
+  <rect x="0" y="0" width="1600" height="112" fill="#FFFFFF"/>
+  <text x="60" y="70" class="title">代收资金流转</text>
+
+  <rect x="940" y="35" width="185" height="42" rx="6" fill="#EAF4FB" stroke="#1769AA" stroke-width="2"/>
+  <text x="1032" y="65" class="legend center" fill="#13527F">[CODE 现状]</text>
+  <rect x="1140" y="35" width="195" height="42" rx="6" fill="#ECFDF3" stroke="#15803D" stroke-width="2"/>
+  <text x="1237" y="65" class="legend center" fill="#11652F">[TARGET 目标]</text>
+  <rect x="1350" y="35" width="190" height="42" rx="6" fill="#FEF3F2" stroke="#B42318" stroke-width="2"/>
+  <text x="1445" y="65" class="legend center" fill="#8F1C14">[风险 / 偏差]</text>
+
+  <text x="60" y="151" class="section">[CODE 业务语义] 正确主链</text>
+
+  <line x1="255" y1="211" x2="293" y2="211" stroke="#1769AA" stroke-width="4" marker-end="url(#arrow-code)"/>
+  <line x1="515" y1="211" x2="553" y2="211" stroke="#1769AA" stroke-width="4" marker-end="url(#arrow-code)"/>
+  <line x1="775" y1="211" x2="813" y2="211" stroke="#1769AA" stroke-width="4" marker-end="url(#arrow-code)"/>
+  <line x1="1035" y1="211" x2="1073" y2="211" stroke="#1769AA" stroke-width="4" marker-end="url(#arrow-code)"/>
+  <line x1="1295" y1="211" x2="1333" y2="211" stroke="#1769AA" stroke-width="4" marker-end="url(#arrow-code)"/>
+
+  <g>
+    <rect x="45" y="174" width="210" height="74" rx="8" fill="#FFFFFF" stroke="#1769AA" stroke-width="3"/>
+    <circle cx="76" cy="211" r="17" fill="#1769AA"/>
+    <text x="76" y="219" class="number">1</text>
+    <text x="103" y="220" class="body-strong">商户下单</text>
+  </g>
+  <g>
+    <rect x="305" y="174" width="210" height="74" rx="8" fill="#FFFFFF" stroke="#1769AA" stroke-width="3"/>
+    <circle cx="336" cy="211" r="17" fill="#1769AA"/>
+    <text x="336" y="219" class="number">2</text>
+    <text x="363" y="220" class="body-strong">渠道路由</text>
+  </g>
+  <g>
+    <rect x="565" y="174" width="210" height="74" rx="8" fill="#FFFFFF" stroke="#1769AA" stroke-width="3"/>
+    <circle cx="596" cy="211" r="17" fill="#1769AA"/>
+    <text x="596" y="219" class="number">3</text>
+    <text x="623" y="220" class="body-strong">渠道收款</text>
+  </g>
+  <g>
+    <rect x="825" y="174" width="210" height="74" rx="8" fill="#FFFFFF" stroke="#1769AA" stroke-width="3"/>
+    <circle cx="856" cy="211" r="17" fill="#1769AA"/>
+    <text x="856" y="219" class="number">4</text>
+    <text x="883" y="220" class="body-strong">可信成功</text>
+  </g>
+  <g>
+    <rect x="1085" y="174" width="210" height="74" rx="8" fill="#FFFFFF" stroke="#1769AA" stroke-width="3"/>
+    <circle cx="1116" cy="211" r="17" fill="#1769AA"/>
+    <text x="1116" y="219" class="number">5</text>
+    <text x="1143" y="220" class="body-strong">商户入账</text>
+  </g>
+  <g>
+    <rect x="1345" y="174" width="210" height="74" rx="8" fill="#FFFFFF" stroke="#1769AA" stroke-width="3"/>
+    <circle cx="1376" cy="211" r="17" fill="#1769AA"/>
+    <text x="1376" y="219" class="number">6</text>
+    <text x="1403" y="220" class="body-strong">商户通知</text>
+  </g>
+
+  <rect x="220" y="274" width="1160" height="82" rx="8" fill="#FFF8E8" stroke="#B7791F" stroke-width="3"/>
+  <text x="260" y="326" class="body-strong" fill="#7A4B00">入账金额口径</text>
+  <line x1="520" y1="295" x2="520" y2="337" stroke="#D39A3A" stroke-width="2"/>
+  <text x="560" y="326" class="body-strong">settleAmount = payAmount - merchantCommissionTotalFee</text>
+
+  <text x="60" y="403" class="section">可信成功后的资金分支</text>
+
+  <rect x="60" y="425" width="710" height="166" rx="8" fill="#EAF4FB" stroke="#1769AA" stroke-width="3"/>
+  <rect x="60" y="425" width="12" height="166" fill="#1769AA"/>
+  <text x="96" y="465" class="body-strong" fill="#13527F">实时结算</text>
+  <text x="96" y="516" class="body-strong">可用 +settleAmount</text>
+  <text x="96" y="558" class="small">冻结 0  /  待结算 0  /  写代收入账账簿</text>
+
+  <rect x="830" y="425" width="710" height="166" rx="8" fill="#EAF4FB" stroke="#1769AA" stroke-width="3"/>
+  <rect x="830" y="425" width="12" height="166" fill="#1769AA"/>
+  <text x="866" y="465" class="body-strong" fill="#13527F">非实时结算</text>
+  <text x="866" y="516" class="body-strong">冻结 +settleAmount  且  待结算 +settleAmount</text>
+  <text x="866" y="558" class="small">settleingBalance 是冻结中的待结算分类</text>
+
+  <rect x="60" y="614" width="710" height="132" rx="8" fill="#FFFFFF" stroke="#6B7785" stroke-width="3"/>
+  <rect x="60" y="614" width="12" height="132" fill="#6B7785"/>
+  <text x="96" y="655" class="body-strong">[业务边界] 失败 / UNKNOWN</text>
+  <text x="96" y="698" class="body-strong">不成功入账</text>
+  <text x="310" y="698" class="small">可用 0  /  冻结 0  /  待结算 0</text>
+
+  <rect x="830" y="614" width="710" height="132" rx="8" fill="#FFFFFF" stroke="#1769AA" stroke-width="3"/>
+  <rect x="830" y="614" width="12" height="132" fill="#1769AA"/>
+  <text x="866" y="655" class="body-strong" fill="#13527F">到期结算</text>
+  <text x="866" y="697" class="body-strong">可用 +settleAmount</text>
+  <text x="866" y="730" class="small">冻结 -settleAmount  /  待结算 -settleAmount</text>
+
+  <rect x="60" y="770" width="1480" height="112" rx="8" fill="#FEF3F2" stroke="#B42318" stroke-width="4"/>
+  <rect x="60" y="770" width="14" height="112" fill="#B42318"/>
+  <text x="100" y="811" class="body-strong" fill="#8F1C14">[风险 / 旧实现偏差]</text>
+  <text x="390" y="811" class="body-strong" fill="#8F1C14">CACHE_ACCOUNTING 仅落缓存后，订单可先 PAYMENT_DONE 并通知</text>
+  <text x="100" y="855" class="small" fill="#8F1C14">余额和最终账簿可能滞后；这是旧实现风险，不是正确主链。</text>
+
+  <rect x="60" y="906" width="1480" height="66" rx="8" fill="#ECFDF3" stroke="#15803D" stroke-width="4"/>
+  <text x="100" y="949" class="body-strong" fill="#11652F">[TARGET 护栏]</text>
+  <line x1="340" y1="924" x2="340" y2="954" stroke="#15803D" stroke-width="3"/>
+  <text x="390" y="949" class="body-strong" fill="#11652F">资金事务完成 -&gt; PAYMENT_DONE -&gt; 通知</text>
+</svg>

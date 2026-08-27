@@ -80,7 +80,7 @@ public record OidcClientSettings(URI issuer,
         }
         String host = value.getHost().toLowerCase(Locale.ROOT);
         if (!("localhost".equals(host) || "::1".equals(host) || "[::1]".equals(host)
-            || host.startsWith("127."))) {
+            || host.startsWith("127.") || host.endsWith(".localhost"))) {
             throw new IllegalArgumentException(name + " must use HTTPS outside loopback development");
         }
     }

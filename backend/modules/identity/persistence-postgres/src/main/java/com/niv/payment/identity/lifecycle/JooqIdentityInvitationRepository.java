@@ -30,9 +30,11 @@ import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_I
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_IDENTITY_LIFECYCLE_RELAY_STATE;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MEMBERSHIP_ROLE;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_MENU;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_PERMISSION;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_ROLE;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_ROLE_GRANT;
+import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_ROLE_MENU;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_TENANT;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_TENANT_ENTRY_HOST;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_USER;
@@ -140,6 +142,8 @@ public final class JooqIdentityInvitationRepository implements IdentityInvitatio
                 command.tenantType(), true, false);
             addPortalGrant(tx, targetDomain, tenantId, systemRoleId);
             addPortalGrant(tx, targetDomain, tenantId, memberRoleId);
+            addDictionaryReadCapability(tx, targetDomain, tenantId, systemRoleId);
+            addMerchantSelfServiceCapability(tx, targetDomain, tenantId, systemRoleId);
             tx.insertInto(IAM_IDENTITY_INVITATION)
                 .set(IAM_IDENTITY_INVITATION.ID, invitationId)
                 .set(IAM_IDENTITY_INVITATION.INVITATION_KIND, TENANT_FIRST_ADMIN)
@@ -825,6 +829,153 @@ public final class JooqIdentityInvitationRepository implements IdentityInvitatio
             .set(IAM_GRANT_DIMENSION.GRANT_ID, grantId)
             .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, "TENANT")
             .set(IAM_GRANT_DIMENSION.SCOPE_MODE, "TENANT_ALL")
+            .execute();
+    }
+
+    private static void addDictionaryReadCapability(DSLContext tx, AccountDomain accountDomain,
+                                                    long tenantId, long protectedRoleId) {
+        if (accountDomain == AccountDomain.PLATFORM) {
+            throw new IllegalArgumentException(
+                "Tenant bootstrap dictionary access is limited to merchant and agent domains");
+        }
+        Long permissionId = tx.select(IAM_PERMISSION.ID).from(IAM_PERMISSION)
+            .where(IAM_PERMISSION.PERMISSION_CODE.eq("dictionary-data:view")
+                .and(IAM_PERMISSION.STATUS.eq(ACTIVE)))
+            .fetchOne(IAM_PERMISSION.ID);
+        if (permissionId == null) {
+            throw new IllegalStateException("Canonical dictionary data view permission is missing");
+        }
+
+        long grantId = nextId(tx);
+        tx.insertInto(IAM_ROLE_GRANT)
+            .set(IAM_ROLE_GRANT.ID, grantId)
+            .set(IAM_ROLE_GRANT.TENANT_ID, tenantId)
+            .set(IAM_ROLE_GRANT.ROLE_ID, protectedRoleId)
+            .set(IAM_ROLE_GRANT.PERMISSION_ID, permissionId)
+            .set(IAM_ROLE_GRANT.GRANT_KEY, "dictionary-data-view")
+            .set(IAM_ROLE_GRANT.STATUS, ACTIVE)
+            .execute();
+        tx.insertInto(IAM_GRANT_DIMENSION)
+            .set(IAM_GRANT_DIMENSION.ID, nextId(tx))
+            .set(IAM_GRANT_DIMENSION.GRANT_ID, grantId)
+            .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, "TENANT")
+            .set(IAM_GRANT_DIMENSION.SCOPE_MODE, "TENANT_ALL")
+            .execute();
+
+    }
+
+    private static void addMerchantSelfServiceCapability(DSLContext tx,
+                                                         AccountDomain accountDomain,
+                                                         long tenantId,
+                                                         long protectedRoleId) {
+        if (accountDomain != AccountDomain.MERCHANT) {
+            return;
+        }
+
+        List<String> permissionCodes = List.of(
+            "merchant:self-view", "merchant:submit", "merchant:resubmit");
+        OffsetDateTime validFrom = tx.select(
+                org.jooq.impl.DSL.field("statement_timestamp()", OffsetDateTime.class))
+            .fetchSingle().value1();
+        for (String permissionCode : permissionCodes) {
+            Long permissionId = tx.select(IAM_PERMISSION.ID).from(IAM_PERMISSION)
+                .where(IAM_PERMISSION.PERMISSION_CODE.eq(permissionCode)
+                    .and(IAM_PERMISSION.STATUS.eq(ACTIVE)))
+                .fetchOne(IAM_PERMISSION.ID);
+            if (permissionId == null) {
+                throw new IllegalStateException(
+                    "Canonical Merchant self-service permission is missing: " + permissionCode);
+            }
+            addFiniteTenantGrant(tx, tenantId, protectedRoleId, permissionId,
+                "system-" + permissionCode.replace(':', '-'), validFrom);
+        }
+        addMerchantSelfServiceMenus(tx, tenantId, protectedRoleId);
+    }
+
+    private static void addFiniteTenantGrant(DSLContext tx, long tenantId, long roleId,
+                                             long permissionId, String grantKey,
+                                             OffsetDateTime validFrom) {
+        long grantId = nextId(tx);
+        tx.insertInto(IAM_ROLE_GRANT)
+            .set(IAM_ROLE_GRANT.ID, grantId)
+            .set(IAM_ROLE_GRANT.TENANT_ID, tenantId)
+            .set(IAM_ROLE_GRANT.ROLE_ID, roleId)
+            .set(IAM_ROLE_GRANT.PERMISSION_ID, permissionId)
+            .set(IAM_ROLE_GRANT.GRANT_KEY, grantKey)
+            .set(IAM_ROLE_GRANT.STATUS, ACTIVE)
+            .set(IAM_ROLE_GRANT.VALID_FROM, validFrom)
+            .set(IAM_ROLE_GRANT.VALID_UNTIL, validFrom.plusYears(10))
+            .execute();
+        tx.insertInto(IAM_GRANT_DIMENSION)
+            .set(IAM_GRANT_DIMENSION.ID, nextId(tx))
+            .set(IAM_GRANT_DIMENSION.GRANT_ID, grantId)
+            .set(IAM_GRANT_DIMENSION.DIMENSION_CODE, "TENANT")
+            .set(IAM_GRANT_DIMENSION.SCOPE_MODE, "TENANT_ALL")
+            .execute();
+    }
+
+    private static void addMerchantSelfServiceMenus(DSLContext tx, long tenantId,
+                                                    long protectedRoleId) {
+        Long displayPermissionId = tx.select(IAM_PERMISSION.ID).from(IAM_PERMISSION)
+            .where(IAM_PERMISSION.PERMISSION_CODE.eq("merchant:self-view")
+                .and(IAM_PERMISSION.STATUS.eq(ACTIVE)))
+            .fetchOne(IAM_PERMISSION.ID);
+        if (displayPermissionId == null) {
+            throw new IllegalStateException(
+                "Canonical Merchant self-service permission is missing: merchant:self-view");
+        }
+
+        long pageId = nextId(tx);
+        tx.insertInto(IAM_MENU)
+            .set(IAM_MENU.ID, pageId)
+            .set(IAM_MENU.TENANT_ID, tenantId)
+            .set(IAM_MENU.MENU_TYPE, "PAGE")
+            .set(IAM_MENU.MENU_NAME, "Merchant Profile")
+            .set(IAM_MENU.ROUTE_NAME, "MerchantProfile")
+            .set(IAM_MENU.ROUTE_PATH, "/merchant/profile")
+            .set(IAM_MENU.COMPONENT_PATH, "/merchant/profile")
+            .set(IAM_MENU.DISPLAY_PERMISSION_ID, displayPermissionId)
+            .set(IAM_MENU.SORT_ORDER, 200)
+            .set(IAM_MENU.AUTH_CODE, "merchant:self-view")
+            .set(IAM_MENU.STATUS, ACTIVE)
+            .set(IAM_MENU.META_JSON,
+                JSONB.valueOf("{\"title\":\"merchant.profile.title\",\"icon\":\"lucide:store\"}"))
+            .set(IAM_MENU.SYSTEM_MANAGED, true)
+            .execute();
+        bindMenu(tx, tenantId, protectedRoleId, pageId);
+
+        addMerchantButton(tx, tenantId, protectedRoleId, pageId, "MerchantSubmit",
+            "Merchant Submit", "merchant:submit", "merchant.submit", 201);
+        addMerchantButton(tx, tenantId, protectedRoleId, pageId, "MerchantResubmit",
+            "Merchant Resubmit", "merchant:resubmit", "merchant.resubmit", 202);
+    }
+
+    private static void addMerchantButton(DSLContext tx, long tenantId, long protectedRoleId,
+                                          long parentId, String routeName, String menuName,
+                                          String permissionCode, String titleKey,
+                                          int sortOrder) {
+        long menuId = nextId(tx);
+        tx.insertInto(IAM_MENU)
+            .set(IAM_MENU.ID, menuId)
+            .set(IAM_MENU.TENANT_ID, tenantId)
+            .set(IAM_MENU.PARENT_ID, parentId)
+            .set(IAM_MENU.MENU_TYPE, "BUTTON")
+            .set(IAM_MENU.MENU_NAME, menuName)
+            .set(IAM_MENU.ROUTE_NAME, routeName)
+            .set(IAM_MENU.SORT_ORDER, sortOrder)
+            .set(IAM_MENU.AUTH_CODE, permissionCode)
+            .set(IAM_MENU.STATUS, ACTIVE)
+            .set(IAM_MENU.META_JSON, JSONB.valueOf("{\"title\":\"" + titleKey + "\"}"))
+            .set(IAM_MENU.SYSTEM_MANAGED, true)
+            .execute();
+        bindMenu(tx, tenantId, protectedRoleId, menuId);
+    }
+
+    private static void bindMenu(DSLContext tx, long tenantId, long roleId, long menuId) {
+        tx.insertInto(IAM_ROLE_MENU)
+            .set(IAM_ROLE_MENU.TENANT_ID, tenantId)
+            .set(IAM_ROLE_MENU.ROLE_ID, roleId)
+            .set(IAM_ROLE_MENU.MENU_ID, menuId)
             .execute();
     }
 

@@ -15,7 +15,8 @@ const artifactPolicies = {
     title: 'Payment Agent Admin',
     views: [
       'src/views/dashboard/workspace/index.vue',
-      'src/views/identity/members/index.vue',
+      'src/views/system/role/list.vue',
+      'src/views/system/user/list.vue',
     ],
   },
   merchant: {
@@ -24,7 +25,9 @@ const artifactPolicies = {
     title: 'Payment Merchant Admin',
     views: [
       'src/views/dashboard/workspace/index.vue',
-      'src/views/identity/members/index.vue',
+      'src/views/merchant/profile.vue',
+      'src/views/system/role/list.vue',
+      'src/views/system/user/list.vue',
     ],
   },
   platform: {
@@ -35,9 +38,12 @@ const artifactPolicies = {
       'src/views/dashboard/analytics/index.vue',
       'src/views/dashboard/workspace/index.vue',
       'src/views/demos/antd/index.vue',
-      'src/views/identity/members/index.vue',
-      'src/views/identity/tenant-bootstrap/index.vue',
+      'src/views/merchant/detail/index.vue',
+      'src/views/merchant/list.vue',
+      'src/views/merchant/onboarding/index.vue',
       'src/views/system/dept/list.vue',
+      'src/views/system/dict/data/list.vue',
+      'src/views/system/dict/list.vue',
       'src/views/system/menu/list.vue',
       'src/views/system/role/list.vue',
       'src/views/system/user/list.vue',
@@ -198,6 +204,123 @@ describe('independent backoffice production safety', () => {
     }
   });
 
+  it.each([
+    {
+      marker: "const legacyName='SystemDictionaryData';",
+      scenario: 'single-quoted route name',
+    },
+    {
+      marker: 'const legacyName=`SystemDictionaryData`;',
+      scenario: 'template-literal route name',
+    },
+    {
+      marker: "const legacyPath='/system/dict/data/type/:dictType';",
+      scenario: 'single-quoted route path',
+    },
+    {
+      marker: 'const legacyPath=`/system/dict/data/type/:dictType`;',
+      scenario: 'template-literal route path',
+    },
+  ])(
+    'rejects an artifact that still contains the legacy dictionary data $scenario',
+    async ({ marker }) => {
+      const root = await mkdtemp(join(tmpdir(), 'dictionary-route-artifacts-'));
+      try {
+        await createArtifactFixture(root);
+        const verifier = resolve(
+          process.cwd(),
+          'scripts/deploy/verify-three-artifacts.mjs',
+        );
+        const agentEntry = join(
+          artifactDirectory(root, 'agent-admin'),
+          'assets/main.js',
+        );
+        await writeFile(
+          agentEntry,
+          `const namespace='payment-agent-admin'; const api='/api'; ${marker}\n`,
+        );
+
+        await expect(
+          execFileAsync(process.execPath, [verifier, root]),
+        ).rejects.toThrow(/legacy dictionary data route/i);
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.each(['agent-admin', 'merchant-admin'])(
+    'rejects a %s artifact that contains the dictionary data page',
+    async (directory) => {
+      const root = await mkdtemp(join(tmpdir(), 'dictionary-page-artifacts-'));
+      try {
+        await createArtifactFixture(root);
+        const artifactRoot = artifactDirectory(root, directory);
+        const manifestPath = join(artifactRoot, '.vite/manifest.json');
+        const manifest = JSON.parse(
+          await readFile(manifestPath, 'utf8'),
+        ) as Record<string, unknown>;
+        manifest['src/views/system/dict/data/list.vue'] = {
+          file: 'assets/forbidden-dictionary-data.js',
+        };
+        await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+        await writeFile(
+          join(artifactRoot, 'assets/forbidden-dictionary-data.js'),
+          'export {};\n',
+        );
+
+        await expect(
+          execFileAsync(process.execPath, [
+            resolve(process.cwd(), 'scripts/deploy/verify-three-artifacts.mjs'),
+            root,
+          ]),
+        ).rejects.toThrow(/view boundary mismatch/i);
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.each([
+    [
+      'agent-admin',
+      "const routeName='SystemDictionaryDataIndex'; const routePath='/system/dict/data';",
+    ],
+    [
+      'agent-admin',
+      'const routeName=`SystemDictionaryDataIndex`; const routePath=`/system/dict/data`;',
+    ],
+    [
+      'merchant-admin',
+      "const routeName='SystemDictionaryDataIndex'; const routePath='/system/dict/data';",
+    ],
+    [
+      'merchant-admin',
+      'const routeName=`SystemDictionaryDataIndex`; const routePath=`/system/dict/data`;',
+    ],
+  ])(
+    'rejects a %s artifact that contains the direct dictionary data route',
+    async (directory, marker) => {
+      const root = await mkdtemp(join(tmpdir(), 'dictionary-route-artifacts-'));
+      try {
+        await createArtifactFixture(root);
+        await writeFile(
+          join(artifactDirectory(root, directory), 'assets/main.js'),
+          `const namespace='payment'; const api='/api'; ${marker}\n`,
+        );
+
+        await expect(
+          execFileAsync(process.execPath, [
+            resolve(process.cwd(), 'scripts/deploy/verify-three-artifacts.mjs'),
+            root,
+          ]),
+        ).rejects.toThrow(/dictionary data page route/i);
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
   it('cleans only the selected application output during its build', async () => {
     const root = await mkdtemp(join(tmpdir(), 'iam002-vite-build-'));
     try {
@@ -236,6 +359,41 @@ describe('independent backoffice production safety', () => {
     }
   });
 
+  it.each([
+    ['agent-admin', '/merchant/application'],
+    ['agent-admin', '/platform/merchants'],
+    ['merchant-admin', '/platform/merchants'],
+    ['platform-admin', '/merchant/application'],
+  ])(
+    'rejects %s when its artifact contains the cross-domain Merchant literal %s',
+    async (directory, forbiddenLiteral) => {
+      const root = await mkdtemp(
+        join(tmpdir(), 'merchant-boundary-artifacts-'),
+      );
+      try {
+        await createArtifactFixture(root);
+        const policy = Object.values(artifactPolicies).find(
+          (candidate) => candidate.directory === directory,
+        );
+        if (!policy)
+          throw new Error(`Missing artifact policy for ${directory}`);
+        await writeFile(
+          join(artifactDirectory(root, directory), 'assets/main.js'),
+          `const namespace='${policy.namespace}'; const api='/api'; const forbidden='${forbiddenLiteral}';\n`,
+        );
+
+        await expect(
+          execFileAsync(process.execPath, [
+            resolve(process.cwd(), 'scripts/deploy/verify-three-artifacts.mjs'),
+            root,
+          ]),
+        ).rejects.toThrow(/Merchant lifecycle boundary/i);
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
   it('does not load the Baidu analytics script in any application', async () => {
     for (const policy of Object.values(artifactPolicies)) {
       const productEntry = await readWorkspaceFile(
@@ -263,7 +421,11 @@ describe('independent backoffice production safety', () => {
     );
 
     expect(loginView).toContain('if (import.meta.env.DEV)');
-    expect(loginView).toContain('if (productionOidc) return [];');
+    expect(loginView).toContain('const productionOidc = import.meta.env.PROD;');
+    expect(loginView).toContain('if (import.meta.env.PROD) return [];');
+    expect(loginView).toContain('if (oidcLogin) return [];');
+    expect(loginView).toContain('explicitMode: import.meta.env.VITE_AUTH_MODE');
+    expect(loginView).toContain('prod: productionOidc');
     expect(loginView).toContain('authStore.startOidcLogin()');
     expect(loginView).not.toContain('resolveLoginDefaults();');
     expect(loginDefaults).not.toContain('import.meta.env');

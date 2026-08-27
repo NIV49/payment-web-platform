@@ -6,7 +6,11 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.DatabasePopulatorUtils;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
@@ -16,23 +20,31 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 @Component
-@Profile("local")
+@Profile({"local", "iam002-local"})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
     private static final String FIXTURE_SCRIPT = "db/local/iam-local-bootstrap.sql";
+    private static final String PERSISTED_STAGE_BEGIN = "-- IAM002_PERSISTED_MCH003_BEGIN";
+    private static final String PERSISTED_STAGE_END = "-- IAM002_PERSISTED_MCH003_END";
+    private static final String DICTIONARY_SAMPLE_SCRIPT =
+        "db/local/system-dictionary-sample.sql";
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final BCryptPasswordEncoder passwordEncoder;
     private final String bootstrapPassword;
+    private final boolean persistedLocalRuntime;
 
     LocalIdentityFixtureBootstrap(DataSource dataSource,
                                   JdbcTemplate jdbc,
                                   PlatformTransactionManager transactionManager,
                                   BCryptPasswordEncoder passwordEncoder,
+                                  Environment environment,
                                   @Value("${payment.bootstrap-password}")
                                   String bootstrapPassword) {
         this.dataSource = dataSource;
@@ -40,6 +52,7 @@ final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
         this.transactions = new TransactionTemplate(transactionManager);
         this.passwordEncoder = passwordEncoder;
         this.bootstrapPassword = bootstrapPassword;
+        this.persistedLocalRuntime = environment.acceptsProfiles(Profiles.of("iam002-local"));
     }
 
     @Override
@@ -50,15 +63,24 @@ final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
         }
 
         transactions.executeWithoutResult(ignored -> {
-            ResourceDatabasePopulator fixture = new ResourceDatabasePopulator(
-                new ClassPathResource(FIXTURE_SCRIPT));
+            ResourceDatabasePopulator fixture = new ResourceDatabasePopulator(fixtureResource());
             fixture.setSeparator("@@");
             fixture.setContinueOnError(false);
             DatabasePopulatorUtils.execute(fixture, dataSource);
 
-            initializeCredential(100, "admin");
-            initializeCredential(200, "merchant-admin");
-            initializeCredential(300, "agent-admin");
+            if (!persistedLocalRuntime) {
+                ResourceDatabasePopulator dictionarySample = new ResourceDatabasePopulator(
+                    new ClassPathResource(DICTIONARY_SAMPLE_SCRIPT));
+                dictionarySample.setContinueOnError(false);
+                DatabasePopulatorUtils.execute(dictionarySample, dataSource);
+            }
+
+            if (!persistedLocalRuntime) {
+                initializeCredential(100, "admin@platform.localhost");
+                initializeCredential(200, "admin@merchant.localhost");
+                initializeCredential(300, "admin@agent.localhost");
+            }
+            initializeOrSynchronizeReviewerCredential();
 
             FixtureReadiness ready = jdbc.queryForObject("""
                 SELECT (
@@ -82,10 +104,11 @@ final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
                        AND department.id = 10 AND department.department_code = 'head-office'
                        AND department.status = 'ACTIVE'
                        AND membership.id = 1000 AND membership.status = 'ACTIVE'
-                       AND user_account.id = 100 AND user_account.idp_issuer = 'local'
+                       AND user_account.id = 100
+                       AND user_account.idp_issuer IN ('local', 'local:platform')
                        AND user_account.account_domain = 'PLATFORM'
-                       AND user_account.idp_subject = 'admin' AND user_account.status = 'ACTIVE'
-                       AND credential.username = 'admin' AND credential.status = 'ACTIVE'
+                       AND user_account.idp_subject = 'admin@platform.localhost' AND user_account.status = 'ACTIVE'
+                       AND credential.username = 'admin@platform.localhost' AND credential.status = 'ACTIVE'
                        AND credential.account_domain = 'PLATFORM'
                        AND credential.password_hash IS NOT NULL
                        AND role.id = 2000 AND role.role_code = 'platform-admin'
@@ -105,10 +128,56 @@ final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
                 (SELECT count(*) FROM iam_menu
                   WHERE tenant_id = 1
                     AND (id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
-                         OR id BETWEEN 6020 AND 6040)) AS menus,
+                         OR id BETWEEN 6020 AND 6040
+                         OR route_name IN ('MerchantManagement', 'MerchantList',
+                             'MerchantReview', 'MerchantDisable', 'MerchantEnable',
+                             'MerchantTerminate', 'MerchantEdit', 'MerchantCreate'))) AS menus,
                 (SELECT count(*) FROM iam_role_menu
-                  WHERE tenant_id = 1 AND role_id = 2000
-                    AND menu_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)) AS role_menus,
+                  WHERE tenant_id = 1 AND role_id = 2000 AND (
+                    menu_id IN (6000, 6001, 6002, 6003, 6004, 6010, 6011, 6012)
+                    OR menu_id IN (SELECT id FROM iam_menu
+                                    WHERE tenant_id=1 AND route_name IN (
+                                      'MerchantManagement', 'MerchantList', 'MerchantReview',
+                                      'MerchantDisable', 'MerchantEnable', 'MerchantTerminate',
+                                      'MerchantEdit', 'MerchantCreate'))
+                  )) AS role_menus,
+                (SELECT count(*)
+                   FROM iam_user reviewer
+                   JOIN iam_authentication_credential credential ON credential.user_id=reviewer.id
+                   JOIN iam_membership membership ON membership.user_id=reviewer.id
+                   JOIN iam_membership_role assignment
+                     ON assignment.tenant_id=membership.tenant_id
+                    AND assignment.membership_id=membership.id
+                  WHERE reviewer.id=101
+                    AND reviewer.idp_issuer IN ('local', 'local:platform')
+                    AND reviewer.idp_subject='reviewer@platform.localhost'
+                    AND reviewer.account_domain='PLATFORM' AND reviewer.status='ACTIVE'
+                    AND credential.username='reviewer@platform.localhost'
+                    AND credential.account_domain='PLATFORM' AND credential.status='ACTIVE'
+                    AND credential.password_hash IS NOT NULL
+                    AND membership.id=1001 AND membership.tenant_id=1
+                    AND membership.account_domain='PLATFORM' AND membership.status='ACTIVE'
+                    AND membership.permission_version>=1
+                    AND assignment.role_id=2000) AS reviewer_rows,
+                (SELECT count(*) FROM iam_tenant tenant
+                  WHERE (tenant.tenant_code='local-merchant-candidate'
+                         OR tenant.tenant_code ~
+                            '^local-merchant-candidate-([2-9]|[1-9][0-9]{1,5})$')
+                    AND tenant.tenant_name=CASE
+                      WHEN tenant.tenant_code='local-merchant-candidate'
+                        THEN 'Local Merchant Candidate'
+                      ELSE 'Local Merchant Candidate ' || substring(tenant.tenant_code FROM 26)
+                    END
+                    AND tenant.tenant_type='DIRECT_MERCHANT'
+                    AND tenant.account_domain='MERCHANT' AND tenant.status='ACTIVE'
+                    AND NOT EXISTS (SELECT 1 FROM iam_department WHERE tenant_id=tenant.id)
+                    AND NOT EXISTS (SELECT 1 FROM iam_membership WHERE tenant_id=tenant.id)
+                    AND NOT EXISTS (SELECT 1 FROM iam_role WHERE tenant_id=tenant.id)
+                    AND NOT EXISTS (SELECT 1 FROM merchant WHERE tenant_id=tenant.id)
+                ) AS candidate_rows,
+                (SELECT count(*) FROM merchant
+                  WHERE tenant_id=2 AND account_domain='MERCHANT'
+                ) AS bound_merchant_rows,
                 (SELECT count(*)
                    FROM iam_membership membership
                    JOIN iam_tenant tenant ON tenant.id = membership.tenant_id
@@ -122,12 +191,12 @@ final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
                   WHERE (tenant.id = 2 AND tenant.account_domain = 'MERCHANT'
                          AND membership.id = 2100 AND membership.account_domain = 'MERCHANT'
                          AND user_account.id = 200 AND user_account.account_domain = 'MERCHANT'
-                         AND credential.username = 'merchant-admin'
+                         AND credential.username = 'admin@merchant.localhost'
                          AND credential.account_domain = 'MERCHANT' AND role.id = 2200)
                      OR (tenant.id = 3 AND tenant.account_domain = 'AGENT'
                          AND membership.id = 3100 AND membership.account_domain = 'AGENT'
                          AND user_account.id = 300 AND user_account.account_domain = 'AGENT'
-                         AND credential.username = 'agent-admin'
+                         AND credential.username = 'admin@agent.localhost'
                          AND credential.account_domain = 'AGENT' AND role.id = 3200)
                     AND tenant.status = 'ACTIVE'
                     AND membership.status = 'ACTIVE'
@@ -193,12 +262,36 @@ final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
                     result.getLong("targets"),
                     result.getLong("menus"),
                     result.getLong("role_menus"),
+                    result.getLong("reviewer_rows"),
+                    result.getLong("candidate_rows"),
+                    result.getLong("bound_merchant_rows"),
                     result.getLong("isolated_identities"),
                     result.getLong("isolated_role_menus")));
             if (ready == null || !ready.complete()) {
                 throw new IllegalStateException("The local identity fixture is incomplete or inactive");
             }
         });
+    }
+
+    private Resource fixtureResource() {
+        ClassPathResource fixture = new ClassPathResource(FIXTURE_SCRIPT);
+        if (!persistedLocalRuntime) {
+            return fixture;
+        }
+        try {
+            String script = fixture.getContentAsString(StandardCharsets.UTF_8);
+            int begin = script.indexOf(PERSISTED_STAGE_BEGIN);
+            int end = script.indexOf(PERSISTED_STAGE_END);
+            if (begin < 0 || end <= begin) {
+                throw new IllegalStateException(
+                    "The iam002-local persisted fixture stage markers are missing or invalid");
+            }
+            String stage = script.substring(begin + PERSISTED_STAGE_BEGIN.length(), end);
+            return new ByteArrayResource(stage.getBytes(StandardCharsets.UTF_8),
+                FIXTURE_SCRIPT + "#iam002-local-persisted");
+        } catch (IOException exception) {
+            throw new IllegalStateException("The local identity fixture could not be read", exception);
+        }
     }
 
     private void initializeCredential(long userId, String username) {
@@ -230,21 +323,61 @@ final class LocalIdentityFixtureBootstrap implements ApplicationRunner {
         }
     }
 
+    private void initializeOrSynchronizeReviewerCredential() {
+        long userId = 101L;
+        String username = "reviewer@platform.localhost";
+        String storedPasswordHash = jdbc.queryForObject("""
+            SELECT password_hash
+              FROM iam_authentication_credential
+             WHERE user_id = ? AND username = ? AND status = 'ACTIVE'
+            """, String.class, userId, username);
+        if (storedPasswordHash == null) {
+            initializeCredential(userId, username);
+            return;
+        }
+        if (passwordEncoder.matches(bootstrapPassword, storedPasswordHash)) {
+            return;
+        }
+
+        int updated = jdbc.update("""
+            UPDATE iam_authentication_credential
+               SET password_hash = ?, updated_at = now(), row_version = row_version + 1
+             WHERE user_id = ? AND username = ? AND status = 'ACTIVE'
+               AND password_hash = ?
+            """, passwordEncoder.encode(bootstrapPassword), userId, username, storedPasswordHash);
+        int revoked = jdbc.update("""
+            UPDATE iam_membership
+               SET session_version = session_version + 1,
+                   updated_at = now(), row_version = row_version + 1
+             WHERE tenant_id = 1 AND user_id = ? AND status = 'ACTIVE'
+            """, userId);
+        if (updated != 1 || revoked != 1) {
+            throw new IllegalStateException(
+                "The local reviewer credential could not be synchronized atomically");
+        }
+    }
+
     private record FixtureReadiness(long identityRows,
                                     long grants,
                                     long dimensions,
                                     long targets,
                                     long menus,
                                     long roleMenus,
+                                    long reviewerRows,
+                                    long candidateRows,
+                                    long boundMerchantRows,
                                     long isolatedIdentities,
                                     long isolatedRoleMenus) {
         boolean complete() {
             return identityRows == 1
-                && grants == 20
-                && dimensions == 20
+                && grants == 38
+                && dimensions == 38
                 && targets == 0
-                && menus == 29
-                && roleMenus == 8
+                && menus == 37
+                && roleMenus == 16
+                && reviewerRows == 1
+                && candidateRows == 1
+                && boundMerchantRows == 1
                 && isolatedIdentities == 2
                 && isolatedRoleMenus == 4;
         }

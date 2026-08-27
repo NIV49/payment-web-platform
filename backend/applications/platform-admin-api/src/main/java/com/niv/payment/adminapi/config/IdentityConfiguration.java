@@ -20,6 +20,8 @@ import com.niv.payment.permission.persistence.repository.JooqMembershipSessionVe
 import com.niv.payment.permission.persistence.repository.JooqMembershipVersionRepository;
 import com.niv.payment.permission.persistence.repository.JooqMenuAdministrationRepository;
 import com.niv.payment.permission.persistence.repository.JooqPermissionGrantRepository;
+import com.niv.payment.permission.persistence.repository.JooqPlatformAdministrationDirectoryRepository;
+import com.niv.payment.permission.persistence.repository.JooqPlatformUserGovernanceRepository;
 import com.niv.payment.permission.persistence.repository.JooqRoleAdministrationRepository;
 import com.niv.payment.permission.persistence.repository.JooqRoleGrantAdministrationRepository;
 import com.niv.payment.permission.persistence.repository.JooqRoleConfigurationRepository;
@@ -29,9 +31,12 @@ import com.niv.payment.permission.security.SaTokenSessionIssuer;
 import com.niv.payment.permission.security.StpLogicSaTokenFacade;
 import com.niv.payment.permission.service.AuthenticationService;
 import com.niv.payment.permission.service.IdentityAdministrationService;
+import com.niv.payment.permission.service.PlatformUserGovernanceService;
+import com.niv.payment.permission.service.PlatformAdministrationDirectoryService;
 import com.niv.payment.permission.service.RoleGrantAdministrationService;
 import com.niv.payment.permission.service.RoleConfigurationAdministrationService;
 import com.niv.payment.identity.oidc.OidcBffConfiguration;
+import com.niv.payment.identity.oidc.IdentityGovernanceQueryConfiguration;
 import com.niv.payment.identity.oidc.OidcClientCredential;
 import com.niv.payment.identity.oidc.OidcRequestTrace;
 import com.niv.payment.identity.oidc.KeycloakAdminClientCredential;
@@ -45,19 +50,39 @@ import org.springframework.core.env.Profiles;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import tools.jackson.databind.ObjectMapper;
+import com.niv.payment.dictionary.cache.RedisDictionaryBatchCache;
+import com.niv.payment.dictionary.cache.SpringDictionaryRedisStore;
+import com.niv.payment.dictionary.core.SystemDictionaryService;
+import com.niv.payment.dictionary.persistence.JooqDictionaryCatalogRepository;
 
 import java.time.Duration;
 
 @Configuration
-@org.springframework.context.annotation.Import(OidcBffConfiguration.class)
+@org.springframework.context.annotation.Import({
+    IdentityGovernanceQueryConfiguration.class, OidcBffConfiguration.class
+})
 public class IdentityConfiguration {
+    @Bean
+    JooqDictionaryCatalogRepository dictionaryCatalogRepository(DSLContext dsl) {
+        return new JooqDictionaryCatalogRepository(dsl, RequestTrace::current);
+    }
+
+    @Bean
+    SystemDictionaryService systemDictionaryService(
+        JooqDictionaryCatalogRepository repository, StringRedisTemplate redis, ObjectMapper json,
+        @Value("${payment.dictionary.cache-ttl:PT10M}") Duration cacheTtl) {
+        return new SystemDictionaryService(repository, new RedisDictionaryBatchCache(
+            new SpringDictionaryRedisStore(redis), json, cacheTtl));
+    }
+
     @Bean
     AuthenticationModeGuard authenticationModeGuard(
         Environment environment,
         @Value("${payment.identity.local-login-enabled:false}") boolean localLoginEnabled,
         @Value("${payment.oidc.enabled:false}") boolean oidcEnabled) {
         return new AuthenticationModeGuard(
-            environment.acceptsProfiles(Profiles.of("local")), localLoginEnabled, oidcEnabled);
+            environment.acceptsProfiles(Profiles.of("local", "iam002-local")),
+            localLoginEnabled, oidcEnabled);
     }
 
     @Bean
@@ -95,14 +120,49 @@ public class IdentityConfiguration {
     }
 
     @Bean
+    JooqPlatformUserGovernanceRepository platformUserGovernanceRepository(
+        DSLContext dsl, BCryptPasswordEncoder passwordEncoder, Environment environment) {
+        String fixtureCredential = environment.getProperty("payment.bootstrap-password");
+        boolean localPasswordResetEnabled = environment.getProperty(
+            "payment.identity.local-login-enabled", Boolean.class, false);
+        return new JooqPlatformUserGovernanceRepository(dsl, RequestTrace::current,
+            () -> fixtureCredential == null || fixtureCredential.isBlank()
+                ? null
+                : passwordEncoder.encode(fixtureCredential),
+            () -> localPasswordResetEnabled, passwordEncoder::encode);
+    }
+
+    @Bean
+    JooqPlatformAdministrationDirectoryRepository platformAdministrationDirectoryRepository(
+        DSLContext dsl, JooqIdentityQueryRepository queries) {
+        return new JooqPlatformAdministrationDirectoryRepository(dsl, queries);
+    }
+
+    @Bean
+    PlatformAdministrationDirectoryService platformAdministrationDirectoryService(
+        JooqPlatformAdministrationDirectoryRepository repository) {
+        return new PlatformAdministrationDirectoryService(repository);
+    }
+
+    @Bean
+    PlatformUserGovernanceService platformUserGovernanceService(
+        JooqPlatformUserGovernanceRepository repository) {
+        return new PlatformUserGovernanceService(repository);
+    }
+
+    @Bean
     JooqUserAdministrationRepository userAdministrationRepository(
         DSLContext dsl, JooqIdentityQueryRepository queries, BCryptPasswordEncoder passwordEncoder,
         Environment environment) {
         String fixtureCredential = environment.getProperty("payment.bootstrap-password");
-        return new JooqUserAdministrationRepository(dsl, queries, RequestTrace::current,
+        boolean localPasswordResetEnabled = environment.getProperty(
+            "payment.identity.local-login-enabled", Boolean.class, false);
+        return new JooqUserAdministrationRepository(dsl, queries, AccountDomain.PLATFORM,
+            RequestTrace::current,
             () -> fixtureCredential == null || fixtureCredential.isBlank()
                 ? null
-                : passwordEncoder.encode(fixtureCredential));
+                : passwordEncoder.encode(fixtureCredential),
+            () -> localPasswordResetEnabled, passwordEncoder::encode);
     }
 
     @Bean
@@ -141,7 +201,7 @@ public class IdentityConfiguration {
         @Value("${payment.permissions.legacy-administration-cutover-complete:false}")
         boolean legacyAdministrationCutoverComplete) {
         return new RoleGrantAdministrationService(
-            repository, repository, legacyAdministrationCutoverComplete);
+            repository, repository, legacyAdministrationCutoverComplete, AccountDomain.PLATFORM);
     }
 
     @Bean
@@ -150,7 +210,7 @@ public class IdentityConfiguration {
         @Value("${payment.permissions.legacy-administration-cutover-complete:false}")
         boolean legacyAdministrationCutoverComplete) {
         return new RoleConfigurationAdministrationService(
-            repository, legacyAdministrationCutoverComplete);
+            repository, legacyAdministrationCutoverComplete, AccountDomain.PLATFORM);
     }
 
     @Bean
@@ -167,8 +227,8 @@ public class IdentityConfiguration {
     DefaultAuthorizationService authorizationService(DSLContext dsl, StringRedisTemplate redis,
                                                      ObjectMapper json) {
         CachedPermissionGrantLoader loader = new CachedPermissionGrantLoader(
-            new JooqMembershipVersionRepository(dsl),
-            new JooqPermissionGrantRepository(dsl),
+            new JooqMembershipVersionRepository(dsl, AccountDomain.PLATFORM),
+            new JooqPermissionGrantRepository(dsl, AccountDomain.PLATFORM),
             new RedisPermissionGrantCache(AccountDomain.PLATFORM, new SpringStringRedisValueStore(redis),
                 new JacksonGrantSnapshotCodec(json), Duration.ofMinutes(5)));
         return new DefaultAuthorizationService(loader, new DefaultScopeMatcher(
