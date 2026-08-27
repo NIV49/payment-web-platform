@@ -4,20 +4,38 @@ import type {
   VxeTableGridOptions,
 } from '#/adapter/vxe-table';
 
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { Page, useVbenDrawer } from '@vben/common-ui';
 import { IconifyIcon, Plus } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import { MenuBadge } from '@vben-core/menu-ui';
 
+import AccountDomainDictionaryAlert from '@payment/backoffice-runtime/components/account-domain-dictionary-alert';
+import CommonStatusDictionaryAlert from '@payment/backoffice-runtime/components/common-status-dictionary-alert';
+import {
+  useAccountDomainDictionary,
+  useCommonStatusDictionary,
+} from '@payment/backoffice-runtime/composables';
+import {
+  createPlatformDirectoryRequestGuard,
+  hasExactPlatformDirectoryResponseContext,
+  splitPlatformDirectoryQuery,
+  usePlatformDirectoryFilterSchema,
+} from '@payment/backoffice-runtime/views/system/platform-directory';
 import { Button, message } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { PERMISSION_CODES } from '#/api';
 import { isOptimisticLockConflict } from '#/api/error-contract';
-import { deleteMenu, getMenuList, SystemMenuApi } from '#/api/system/menu';
+import {
+  deleteMenu,
+  getMenuList,
+  getPlatformMenuDirectory,
+  SystemMenuApi,
+} from '#/api/system/menu';
 import { $t } from '#/locales';
 
 import { hasPermissionDependencies } from '../permission-dependencies';
@@ -26,9 +44,43 @@ import Form from './modules/form.vue';
 import { canPerformMenuAction } from './permission-contract';
 
 const { hasAccessByCodes } = useAccess();
-const canCreateMenu = computed(() =>
-  hasPermissionDependencies([PERMISSION_CODES.menuCreate], hasAccessByCodes),
+const userStore = useUserStore();
+const canUsePlatformControlPlane =
+  userStore.userInfo?.systemAdministrator === true;
+const selectedDirectoryDomain = ref<'AGENT' | 'MERCHANT' | 'PLATFORM'>(
+  'PLATFORM',
 );
+const commonStatus = useCommonStatusDictionary();
+const commonStatusError = commonStatus.error;
+const getStatusOptions = () => commonStatus.options.value;
+const accountDomainDictionary = useAccountDomainDictionary({
+  enabled: canUsePlatformControlPlane,
+});
+const accountDomainDictionaryError = accountDomainDictionary.error;
+const getAccountDomainOptions = () => accountDomainDictionary.options.value;
+const directoryRequestGuard = createPlatformDirectoryRequestGuard();
+const canCreateMenu = computed(
+  () =>
+    isWritableDirectory() &&
+    hasPermissionDependencies([PERMISSION_CODES.menuCreate], hasAccessByCodes),
+);
+
+function isWritableDirectory() {
+  return (
+    !canUsePlatformControlPlane || selectedDirectoryDomain.value === 'PLATFORM'
+  );
+}
+
+function getGridColumns() {
+  return useColumns(
+    onActionClick,
+    hasAccessByCodes,
+    getStatusOptions,
+    canUsePlatformControlPlane,
+    getAccountDomainOptions,
+    isWritableDirectory(),
+  );
+}
 
 const [FormDrawer, formDrawerApi] = useVbenDrawer({
   connectedComponent: Form,
@@ -36,8 +88,18 @@ const [FormDrawer, formDrawerApi] = useVbenDrawer({
 });
 
 const [Grid, gridApi] = useVbenVxeGrid({
+  formOptions: canUsePlatformControlPlane
+    ? {
+        schema: usePlatformDirectoryFilterSchema(
+          getAccountDomainOptions,
+          onAccountDomainChange,
+          onTenantChange,
+        ),
+        submitOnChange: false,
+      }
+    : undefined,
   gridOptions: {
-    columns: useColumns(onActionClick, hasAccessByCodes),
+    columns: getGridColumns(),
     height: 'auto',
     keepSource: true,
     pagerConfig: {
@@ -45,8 +107,16 @@ const [Grid, gridApi] = useVbenVxeGrid({
     },
     proxyConfig: {
       ajax: {
-        query: async (_params) => {
-          return await getMenuList();
+        query: async (_params, formValues) => {
+          if (!canUsePlatformControlPlane) return await getMenuList();
+          const { target } = splitPlatformDirectoryQuery(formValues);
+          if (!target) return [];
+          const request = directoryRequestGuard.begin(target);
+          const response = await getPlatformMenuDirectory(target);
+          return directoryRequestGuard.isCurrent(request) &&
+            hasExactPlatformDirectoryResponseContext(response, target)
+            ? response
+            : [];
         },
       },
     },
@@ -93,6 +163,23 @@ function onActionClick({
 function onRefresh() {
   gridApi.query();
 }
+
+function onAccountDomainChange(value: unknown) {
+  if (value !== 'PLATFORM' && value !== 'MERCHANT' && value !== 'AGENT') return;
+  selectedDirectoryDomain.value = value;
+  invalidateDirectoryRequest();
+  void gridApi.formApi.setFieldValue('tenantId', undefined);
+  gridApi.setGridOptions({ columns: getGridColumns() });
+}
+
+function onTenantChange(_value: unknown) {
+  invalidateDirectoryRequest();
+}
+
+function invalidateDirectoryRequest() {
+  directoryRequestGuard.invalidate();
+  void gridApi.grid.reloadData([]);
+}
 function onEdit(row: SystemMenuApi.SystemMenu) {
   if (!canPerformMenuAction(row, PERMISSION_CODES.menuUpdate, hasAccessByCodes))
     return;
@@ -133,6 +220,14 @@ function onDelete(row: SystemMenuApi.SystemMenu) {
 <template>
   <Page auto-content-height>
     <FormDrawer @success="onRefresh" />
+    <CommonStatusDictionaryAlert
+      :error="commonStatusError"
+      :reload="commonStatus.reload"
+    />
+    <AccountDomainDictionaryAlert
+      :error="accountDomainDictionaryError"
+      :reload="accountDomainDictionary.reload"
+    />
     <Grid :table-title="$t('system.menu.list')">
       <template #toolbar-tools>
         <Button

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -95,5 +96,43 @@ class RequestDtoValidationTest {
 
         assertThat(validator.validate(nullGrant)).isNotEmpty();
         assertThat(validator.validate(nullDimension)).isNotEmpty();
+    }
+
+    @Test
+    void roleGrantListsAcceptThePlatformCatalogAndRejectAnOversizedPayload() {
+        List<RoleGrantAdministrationController.GrantRequest> platformCatalog = grants(23);
+        List<RoleGrantAdministrationController.GrantRequest> oversized = grants(65);
+
+        assertThat(validator.validate(
+            new RoleGrantAdministrationController.ReplaceRoleGrantsRequest(
+                0L, "catalog update", platformCatalog))).isEmpty();
+        assertThat(validator.validate(
+            new RoleGrantAdministrationController.ReplaceRoleConfigurationRequest(
+                0L, "Role", 1, null, List.of("6000"), "catalog update", platformCatalog))).isEmpty();
+        assertThat(validator.validate(
+            new RoleGrantAdministrationController.CreateRoleConfigurationRequest(
+                "Role", 1, null, List.of("6000"), platformCatalog))).isEmpty();
+
+        assertThat(validator.validate(
+            new RoleGrantAdministrationController.ReplaceRoleGrantsRequest(
+                0L, "catalog update", oversized))).isNotEmpty();
+        assertThat(validator.validate(
+            new RoleGrantAdministrationController.ReplaceRoleConfigurationRequest(
+                0L, "Role", 1, null, List.of("6000"), "catalog update", oversized))).isNotEmpty();
+        assertThat(validator.validate(
+            new RoleGrantAdministrationController.CreateRoleConfigurationRequest(
+                "Role", 1, null, List.of("6000"), oversized))).isNotEmpty();
+    }
+
+    private static List<RoleGrantAdministrationController.GrantRequest> grants(int count) {
+        return IntStream.range(0, count)
+            .mapToObj(index -> new RoleGrantAdministrationController.GrantRequest(
+                "grant-" + index,
+                "resource" + index + ":view",
+                List.of(new RoleGrantAdministrationController.DimensionRequest(
+                    com.niv.payment.permission.domain.ScopeDimension.TENANT,
+                    com.niv.payment.permission.domain.ScopeMode.TENANT_ALL,
+                    List.of()))))
+            .toList();
     }
 }

@@ -2,6 +2,7 @@ package com.niv.payment.permission.service;
 
 import com.niv.payment.permission.domain.ScopeDimension;
 import com.niv.payment.permission.domain.ScopeMode;
+import com.niv.payment.permission.domain.AccountDomain;
 
 import java.util.HashSet;
 import java.util.Objects;
@@ -11,11 +12,27 @@ import java.util.Set;
 public final class RoleConfigurationAdministrationService {
     private final RoleConfigurationPort port;
     private final boolean legacyAdministrationCutoverComplete;
+    private final Set<String> grantableCodes;
 
     public RoleConfigurationAdministrationService(
         RoleConfigurationPort port, boolean legacyAdministrationCutoverComplete) {
+        this(port, legacyAdministrationCutoverComplete,
+            RoleGrantAdministrationService.GRANTABLE_CODES);
+    }
+
+    public RoleConfigurationAdministrationService(
+        RoleConfigurationPort port, boolean legacyAdministrationCutoverComplete,
+        AccountDomain accountDomain) {
+        this(port, legacyAdministrationCutoverComplete,
+            RoleGrantAdministrationService.grantableCodes(accountDomain));
+    }
+
+    private RoleConfigurationAdministrationService(
+        RoleConfigurationPort port, boolean legacyAdministrationCutoverComplete,
+        Set<String> grantableCodes) {
         this.port = Objects.requireNonNull(port, "port");
         this.legacyAdministrationCutoverComplete = legacyAdministrationCutoverComplete;
+        this.grantableCodes = Set.copyOf(grantableCodes);
     }
 
     public RoleConfigurationModels.RoleConfiguration replace(RoleConfigurationCommand command) {
@@ -45,7 +62,7 @@ public final class RoleConfigurationAdministrationService {
             if (RoleGrantAdministrationService.PROTECTED_PORTAL_GRANT_KEY.equals(grant.grantKey())) {
                 throw new IllegalArgumentException("Grant key is reserved for server-managed access");
             }
-            if (!RoleGrantAdministrationService.GRANTABLE_CODES.contains(grant.permission().value())) {
+            if (!grantableCodes.contains(grant.permission().value())) {
                 throw new IllegalArgumentException("Permission is not grantable from this administration surface");
             }
             if (grant.dimension() != ScopeDimension.TENANT || grant.mode() != ScopeMode.TENANT_ALL) {

@@ -57,7 +57,7 @@ class ProductionIdentityFoundationMigrationTest {
     void freshSchemaCreatesProductionIdentityFoundationWithoutContractingUsername() throws Exception {
         flyway(null).migrate();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("27");
+        assertThat(currentSuccessfulVersion()).isEqualTo("43");
         assertThat(singleLong("""
             SELECT count(*) FROM information_schema.columns
              WHERE table_schema='public' AND table_name='iam_user'
@@ -304,7 +304,7 @@ class ProductionIdentityFoundationMigrationTest {
               (21004,'external-agent',NULL,'DISABLED','AGENT');
             """);
 
-        flyway(null).migrate();
+        flyway("23").migrate();
 
         assertThat(singleString("""
             SELECT idp_provisioning_status FROM iam_user WHERE id=21003

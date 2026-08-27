@@ -16,10 +16,11 @@ export default defineConfig(async ({ command }) => ({
           }
         : undefined,
     server: {
+      allowedHosts: ['platform.localhost'],
       host: '127.0.0.1',
       proxy: {
         '/api': {
-          changeOrigin: true,
+          changeOrigin: false,
           rewrite: (path) => path.replace(/^\/api/, ''),
           target:
             env.PAYMENT_PLATFORM_ADMIN_DEV_API_TARGET ?? DEFAULT_API_TARGET,

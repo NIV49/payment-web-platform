@@ -2,7 +2,7 @@
 
 > 状态：Judge 治理流程已确认
 > 适用项目：`payment-web-platform`
-> 第一阶段范围：权限底座
+> 当前能力范围：权限底座与经 accepted ADR 批准的独立产品切片
 > 长期范围：支付平台全部领域
 
 <!-- decision-status id=IAM-GLOBAL-USER-MULTI-TENANT status=accepted ref=docs/adr/0008-isolate-three-backoffice-account-domains-and-sessions.md -->
@@ -30,7 +30,8 @@ Agent 声称“完成”不构成完成。只有指定版本通过 Judge，任�
 5. 所有失败进入结构化机器队列，修复后必须由独立 Judge 复验。
 6. 重复问题必须沉淀为版本化规则和永久回归测试。
 7. 审查和验证必须针对不可变 commit，不得针对变化中的共享工作区。
-8. 第一阶段只实现权限 Judge，但框架必须能扩展到支付、账本、渠道、回调和清结算。
+8. 权限 Judge 是所有后台能力的固定基础；新增产品切片必须由 accepted ADR、独立 Rule/Judge 和不可变门禁扩展，不能把未批准业务规则写进权限实现。
+9. 代码、契约和上下文必须在同一不可变版本更新。CI 使用 ownership 映射拒绝“代码变化但对应上下文/契约未变化”；该结构门禁不能替代语义审查，reviewer 仍须根据源码、测试和 ADR 判断文档是否真实。
 
 ## 3. 事实优先级
 
@@ -65,15 +66,16 @@ Agent 声称“完成”不构成完成。只有指定版本通过 Judge，任�
 
 新旧结果一致不代表自动通过；结果仍必须符合 Rulebook。
 
-## 5. 第一阶段权限 Judge
+## 5. 权限基础 Judge 与产品切片扩展
 
-第一阶段不实现支付业务。Judge 覆盖：
+权限基础不实现支付、账本或资金行为。MCH-001 按 ADR-0013 固定 Merchant 主体与入驻生命周期；MCH-002 按 ADR-0014 增加 PLATFORM 资料维护和多个经营市场，但不回写 MCH-001 历史。其余产品切片仍须另行批准。MCH-002 Judge 必须同时执行 `scripts/check_mch002_merchant_profile.py`、backend `clean verify`、frontend unit/type/production-safety/build，并把 protected `merchant:update`、recent step-up、ACTIVE/DISABLED、no-op、V34 非推测迁移、幂等审计和真实浏览器交互绑定到同一不可变 Candidate。权限 Judge 覆盖：
 
 - 运维端、商户端、代理商端的租户内授权、组织和数据边界默认隔离；
 - 三端登录入口、接口和缓存必须阻止缺少当前后台授权工作区 ACTIVE TenantMembership 或显式后台授权的跨后台访问；
 - 授权工作区 Tenant 与资源归属 Tenant 必须分开：代理商在自身工作区执行 `RELATED_PARTY_READ` 不要求加入商户 Tenant，而要求显式 Grant、可信代理关系和真实资源归属证据，见 [ADR-0001](adr/0001-separate-authorization-workspace-from-resource-owner-tenant.md)；
 - PLATFORM、MERCHANT、AGENT 使用独立应用 User、可信服务端工作区入口、Cookie、session realm/login type 和缓存命名空间；同域多 Membership 不被禁止，但客户端不得用 `tenantId` 或等价输入选择工作区，服务端无法唯一解析时失败关闭，见 [ADR-0008](adr/0008-isolate-three-backoffice-account-domains-and-sessions.md)；
 - 生产目标使用三套独立前端应用和三套独立后端服务；共享 Keycloak 的三 Realm 只属于逻辑隔离。Cookie 写请求的 CSRF、OIDC callback、back-channel logout、身份版本、`issuer + subject` 映射及 MFA 恢复全撤销边界见 [ADR-0009](adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md)。IAM-002 当前仍是 candidate，运行时实现和正式签名 gate 尚未关闭；
+- 三端统一 User/Role Management 不改变账号域边界。PLATFORM 跨域写只允许维护目标 MERCHANT/AGENT 的受保护系统管理员，普通 User/Role 写入仍由当前 Session Tenant 决定；邮箱是登录属性而不是身份映射键。边界见 [ADR-0010](adr/0010-centralize-tenant-administrator-provisioning-with-delegated-user-governance.md)，IAM-003 当前仍是 candidate；
 - 用户、部门、角色、菜单、权限码和数据范围闭环；
 - 部门只负责组织归属和数据范围，不直接分配菜单或权限；
 - 菜单、权限码和完整授权始终通过角色分配；
@@ -182,7 +184,7 @@ Queue Item v2 的 `initialStateHistory` 是首次持久状态的签名引导日�
 
 每个签名 Queue fingerprint 的首次出现或后续变化只能由单父 envelope commit 激活：该 commit 的完整 tree delta 只能包含 `.agents/payment-modernization/artifacts/` 下的 regular `*.json`，且承载该变化的 bundle 必须令 `evaluatedSnapshot.targetCommitSha` 精确等于直接父 commit。这样两名 reviewer 绑定的是实际 gate tree；Queue bootstrap/transition 不得同时夹带源码，旧 evaluated target 也不得跨过未审中间树继续激活。
 
-Reviewer 公钥、角色、稳定 target repository ID、Rulebook/Judge 路径由 `.agents/payment-modernization-policy.json` 固定。PR 以受保护基准分支 SHA、`main` push 以上一次 main SHA 作为外部 policy anchor；bundle 不能用自己先登记的公钥自签。当前 registry 为空，因此规则批准有意保持不可用，直到独立人工流程完成 key bootstrap。Rulebook 以长度分帧、按路径排序的实际内容 SHA-256 摘要作为身份；人工标签只用于展示。
+Reviewer 公钥、角色、稳定 target repository ID、Rulebook/Judge 路径由 `.agents/payment-modernization-policy.json` 固定。PR 以受保护基准分支 SHA、`main` push 以上一次 main SHA 作为外部 policy anchor；bundle 不能用自己先登记的公钥自签。当前 policy 已登记两把 reviewer 公钥，稳定标识来自 IAM-001 bootstrap；该登记只建立签名验证 trust，不自动授权 IAM-002、IAM-003 或未来 Rule。任何新批准仍必须由两名独立 reviewer 生成与该 Rule 的 purpose、subject、commit、Rulebook/Judge digest 精确绑定的 detached PASS envelope。Rulebook 以长度分帧、按路径排序的实际内容 SHA-256 摘要作为身份；人工标签只用于展示。
 
 ## 9. 运行隔离与幂等
 
@@ -296,3 +298,14 @@ Judge 未通过时，不得以进度、Agent 共识、人工感觉或“旧系�
 - 不允许实现者自行修改裁判标准；
 - 不让多个 Agent 同时修改同一状态机、表或契约；
 - 不在 Judge 红队试点通过前启动大规模自动迁移。
+
+## MCH-003 Judge set
+
+ADR-0015 and Merchant Contract section 12 are the accepted MCH-003 Rulebook. Its Candidate Rule Card
+binds exactly `MCH-003-DECISION-CONTRACT`, `MCH-003-BACKEND-VERIFY` and
+`MCH-003-FRONTEND-VERIFY`. The decision checker fixes endpoints, permissions, all 23 inputs, DTOs,
+independent amendment state, reviewer separation, document/legal-ID protection, DIRECT replay
+compatibility and UI interaction. It also fixes the single document path's optional `amendmentId`
+scope: pending review must read the exact pending attachment and never fall back to current evidence.
+Backend remains full `clean verify`; frontend remains unit, type,
+production-safety and `build:all`. PASS applies only to the evaluated immutable SHA.

@@ -9,8 +9,9 @@
 | finite `valid_until` 管理写授权 | RoleGrant 与角色 configuration PUT 已锁后重验；User、普通 Role lifecycle、Menu、Department 仍有 HTTP PEP 与写锁之间的纯时间 TOCTOU | 为其余管理写入口补同等数据库时间重验，或使用绑定 actor/permission/resource 的可验证短时授权凭据 |
 | RoleGrant 写闭环 | 第一阶段原子角色配置 UI/API、版本推进、审计、Outbox、锁后入口权限重验已实现；默认 production cutover 开关仍关闭 | 清零 N-1 旧调用方、完成双版本验证和生产审批后显式打开 cutover；不得从 menuIds 或 BUTTON 暗推 Grant |
 | 权限与安全审计 | 角色 configuration 已写真实 before/after/reason；多数其他成功 IAM 写仍是空 JSON | 补齐其他资源 before/after、拒绝事件、登录失败、reason、检索/告警和跨进程 correlation |
-| 身份与敏感操作 | 三端 OIDC BFF、生产前端、十分钟 step-up、MFA 恢复和邀请 lifecycle 已实现；新身份在 Keycloak 动作邮件与本端激活完成前不可登录 | 真实 SMTP/TOTP/恢复码演练、已有 Realm 漂移治理、可信审批与 break-glass 双人流程 |
-| IAM-002 身份撤销 | 三端已逐请求比较 `identity_version`、强制独立 CSRF、接入签名 back-channel logout；MFA 恢复会推进版本并顺序撤销四类凭证/Session | 完成真实 TOTP/恢复码故障演练、告警、已有 Realm 漂移治理和正式签名 gate |
+| 身份与敏感操作 | 三端 OIDC BFF、生产前端、十分钟 step-up、MFA 恢复和邀请 lifecycle 已实现；隔离本地 Keycloak/Mailpit 的邀请、required actions、TOTP 和恢复码已通过 | 生产 SMTP/故障恢复、已有 Realm 漂移治理、可信审批与 break-glass 双人流程 |
+| IAM-002 身份撤销 | 三端已逐请求比较 `identity_version`、强制独立 CSRF、接入签名 back-channel logout；隔离本地浏览器验收已证明四类 MFA 撤销和 Keycloak logout 使旧应用 Session 失效 | 完成生产告警、故障重试、已有 Realm 漂移治理和正式签名 gate |
+| PLATFORM Role/Menu 跨域目录 | ADR-0012 已接受只读控制面；Core、PLATFORM HTTP/Repository、前端 API 和 Role/Menu target/只读页均已有 Candidate，普通 Role/Menu API 继续按 Session Tenant 查询 | 每次变化后对精确不可变 commit 重跑正式门禁；生产再落库不可委派专用权限并补 MERCHANT/AGENT 组合根负向门禁 |
 | 关系数据权限 | Core 只有 fail-closed 模型，未连接真实商户/市场/渠道/客户/历史关系 | Provider、历史快照和真实业务查询中的 tenant + scope 集成测试 |
 | Outbox 投递 | 身份邀请与 MFA 恢复有专用 relay；permission-change Outbox 仍没有 relay 进程，通用身份生命周期也未覆盖 ENABLE/DISABLE/DEPROVISION | 补齐剩余投递、Inbox/幂等、重放、告警和恢复演练 |
 | Payment/Ledger 可执行规格 | 只有目标架构约束，没有可实施的资金链规格 | 状态机、金额/币种/精度、幂等、账本分录、调账/对账、API/事件、迁移和回滚演练 |
@@ -21,7 +22,7 @@
 
 V21-V27 已增加 `identity_version`、IdP provisioning 状态、可信 Host 登记表、独立身份生命周期 Outbox/relay state、账号域用户名唯一约束、四步 MFA 恢复状态机、成员邀请和租户首管理员初始化。V1 已有的 `(idp_issuer, idp_subject)` 唯一约束继续作为唯一身份映射键；旧全局 username 唯一约束仍保留，因此当前只是 expand 阶段，尚不允许跨域同名账号落库。
 
-Schema 本身不等于生产身份能力。当前三端 Session 已携带并逐请求比较 `identity_version`，本地账密会话继续要求可登录摘要；外部会话还精确复核 `entryHost` 与数据库当前 `issuer + subject`。三端 Cookie 写请求使用 Session 内同步凭据和 `X-CSRF-Token`，三个独立组合根都已显式装配自己的 OIDC client 配置与 back-channel logout，校验签名 JWT、issuer、audience、iat、jti、event、sid/sub 和重放后撤销映射到的应用 Session。三套生产前端已切换为 OIDC 跳转与 handoff 兑换，step-up 独立事务已绑定原主体、Host 和应用 Session，并逐请求按 `stepUpAt` 重算十分钟有效期。V24 MFA 恢复请求会立即推进 identity/session version 并阻断登录，专用 relay 只有在 Keycloak MFA Credential、Recovery Code、Keycloak Session 和应用 Session 四步都完成后才恢复 `PROVISIONED`。V25-V27 的邀请 relay 对新身份依次执行 Keycloak enable、验证邮箱/改密/TOTP 动作邮件和本端激活；已有同 Realm ACTIVE 身份只复用其 `issuer + subject` 并新增目标 Membership。平台可初始化 MERCHANT/AGENT 租户首管理员，但租户与 Host 在 relay 完成前保持禁用。三份 Realm bootstrap 已在全新 Keycloak 26.7.0 实例成功导入，三个 lifecycle service account 都完成 token exchange；但已有 Realm 更新/漂移治理、真实 SMTP/TOTP/恢复码演练、监控和正式签名尚未完成，因此 IAM-002 继续 **candidate / NO-GO / Required**。
+Schema 本身不等于生产身份能力。当前三端 Session 已携带并逐请求比较 `identity_version`，本地账密会话继续要求可登录摘要；外部会话还精确复核 `entryHost` 与数据库当前 `issuer + subject`。三端 Cookie 写请求使用 Session 内同步凭据和 `X-CSRF-Token`，三个独立组合根都已显式装配自己的 OIDC client 配置与 back-channel logout，校验签名 JWT、issuer、audience、iat、jti、event、sid/sub 和重放后撤销映射到的应用 Session。三套生产前端已切换为 OIDC 跳转与 handoff 兑换，step-up 独立事务已绑定原主体、Host 和应用 Session，并逐请求按 `stepUpAt` 重算十分钟有效期。V24 MFA 恢复请求会立即推进 identity/session version 并阻断登录，专用 relay 只有在 Keycloak MFA Credential、Recovery Code、Keycloak Session 和应用 Session 四步都完成后才恢复 `PROVISIONED`，随后由 Keycloak 发送 `CONFIGURE_TOTP` action email。V25-V27 的邀请 relay 对新身份依次执行 Keycloak enable、验证邮箱/改密/TOTP 动作邮件和本端激活；已有同 Realm ACTIVE 身份只复用其 `issuer + subject` 并新增目标 Membership。平台可初始化 MERCHANT/AGENT 租户首管理员，但租户与 Host 在 relay 完成前保持禁用。三份 Realm bootstrap、三个 lifecycle service account 以及邀请、TOTP、恢复码、四类撤销和 back-channel logout 已在隔离本地 Keycloak/Mailpit/三服务浏览器环境通过；但已有 Realm 更新/漂移治理、生产 SMTP/密钥/告警/备份恢复、break-glass 和正式签名尚未完成，因此 IAM-002 继续 **candidate / NO-GO / Required**。
 
 V22 使用非事务 `CREATE UNIQUE INDEX CONCURRENTLY`，因此所有 Flyway 执行端必须关闭 PostgreSQL transactional advisory lock。失败恢复要先检查同名索引有效性，只能删除精确的 invalid index 后重试；不得用 `repair` 代替 DDL 状态核验。删除旧全局 username 约束必须另建 contract 迁移，并以旧实例清零和双版本真实数据库证据为前提。
 
@@ -161,7 +162,7 @@ IAM Admin 请求已经通过 `AdminAuthorizationEnforcer` 进入 `DefaultAuthori
 
 ## P1 候选实现：生产邀请与激活尚未完成真实环境闭环
 
-IAM-002 候选实现已增加平台租户首管理员初始化、三账号域租户管理员邀请、禁用 Keycloak User 创建、`VERIFY_EMAIL`/`UPDATE_PASSWORD`/`CONFIGURE_TOTP` required actions、action email、幂等 relay、应用身份激活和独立生命周期 Outbox。应用不生成或保存密码、邀请 Token、TOTP Secret、恢复码或邮箱明文；现有同 Realm ACTIVE 身份只能按精确 `issuer + subject` 映射后复用。Keycloak required actions 与 LoA 2 登录门禁阻止未完成首次设置的身份进入应用，但应用端不会把“邮件已发送”误判为“用户已完成 required actions”。真实 Keycloak Admin API、SMTP 投递、首次登录 required actions、失败重试/告警和三服务协同尚未完成集成演练，因此该能力仍是 candidate，不能替代正式 repository gate 或生产放行。
+IAM-002 候选实现已增加平台租户首管理员初始化、三账号域租户管理员邀请、禁用 Keycloak User 创建、`VERIFY_EMAIL`/`UPDATE_PASSWORD`/`CONFIGURE_TOTP` required actions、action email、幂等 relay、应用身份激活和独立生命周期 Outbox。应用不生成或保存密码、邀请 Token、TOTP Secret、恢复码或邮箱明文；现有同 Realm ACTIVE 身份只能按精确 `issuer + subject` 映射后复用。Keycloak required actions 与 LoA 2 登录门禁阻止未完成首次设置的身份进入应用，但应用端不会把“邮件已发送”误判为“用户已完成 required actions”。隔离本地运行时已通过真实 Keycloak Admin API、Mailpit 投递、首次登录 required actions、TOTP 和三服务协同；生产 SMTP、失败重试/告警和已有 Realm 配置治理仍未演练，因此该能力仍是 candidate，不能替代正式 repository gate 或生产放行。
 
 ## P2：Portal 尚未初始化
 
@@ -175,10 +176,30 @@ IAM-002 候选实现已增加平台租户首管理员初始化、三账号域租
 
 IAM-001 已增加 `admin-api`、`merchant-admin-api`、`agent-admin-api` 三个独立组合根，以及同一 Vben 源码生成的三个隔离部署产物。服务端分别固定账号域、Origin、Cookie、session realm/login type 与 Redis/cache namespace；登录 DTO 删除 `tenantId` 并拒绝未知字段。每个 ACTIVE Membership 还必须经角色取得本端 `backoffice:{platform|merchant|agent}-access` RoleGrant，不能从部门、导航或 Membership 状态推导入口权限。V18 以前向迁移为 Tenant/User/Credential/Membership 固化账号域和复合外键，跨域或无法唯一归属数据会阻断迁移而不会猜测修复；升级前使用 `backend/scripts/iam001-account-domain-preflight.sql` 输出稳定问题清单，非空即停止。V19 为历史和新建角色维护服务端专用的 canonical 入口 Grant；V20 保语义重命名历史普通 Permission 对保留 key 的合法占用，并对 portal 异常存量及同角色目标 key 占用失败关闭。18 项租户授权编辑器不能查看、授予或删除 canonical Grant，运行期再现保留 key、重复 key/Permission 或额外 portal 存量时只读。前端对所有部署保护核心/fallback/local 路由；退出或换用户会同时推进 session 与 route generation，使已在途的旧用户信息、权限码和菜单不能在清理后重新写入 store 或 Router；同一前端实例还 single-flight 重复 login 并串行 login/logout，避免乱序 Cookie 响应。登录/退出的专用请求客户端不安装全局 401 session-recovery，错误登录和已失效退出不会递归进入 store logout。local bootstrap 以真实登录相同的角色/Grant 条件复核 MERCHANT/AGENT fixture；三端构建分别清理自己的输出目录，制品门禁拒绝 manifest 未引用的残留 JS/CSS。IAM-001 mutation 只在绑定的 JUnit classname/method 产生唯一断言 failure、每个 JUnit suite 的 failure 汇总与正文一致且整份报告无 error/skip 时计为检出；基础设施 error、skip、错误方法失败、非 JUnit root、汇总不一致或不可解析报告一律失败关闭。
 
-MERCHANT/AGENT 第一阶段仅开放登录、退出、当前用户、动态菜单、权限码和健康检查，不包含支付或 IAM 管理写接口。进程级黑盒已覆盖错误账号域、跨端 Cookie/cache、非 ACTIVE Membership、改密/撤权旧会话、未知路由和并发撤权。剩余偏差是生产 IdP/MFA/身份生命周期、同账号域跨标签页认证写请求排序、真实部署安全演练和正式受信 reviewer 签署；本地技术 PASS 不能替代 Judge closed。
+IAM-001 最初只开放 MERCHANT/AGENT 的登录、退出、当前用户、动态菜单、权限码和健康检查；IAM-003 candidate 已在不改变账号域边界的前提下增加当前 Session Tenant 的 User/Role 管理，仍不包含支付能力或 PLATFORM 专属 API。进程级黑盒已覆盖错误账号域、跨端 Cookie/cache、非 ACTIVE Membership、改密/撤权旧会话、未知路由和并发撤权。剩余偏差是生产 IdP/MFA/身份生命周期、同账号域跨标签页认证写请求排序、真实部署安全演练和正式受信 reviewer 签署；本地技术 PASS 不能替代 Judge closed。
 
 ## 已定版、分阶段实现：生产 OIDC 与身份撤销边界
 
-[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 已接受三套独立前端应用、三套独立后端服务及生产 OIDC 目标。前端已拆为三个独立构建和部署单元，各自拥有成员治理页面，平台另有租户首管理员初始化页面；共享 `backoffice-runtime` 不含应用专属页面。三个后端组合根已分别显式装配自己的 OIDC client、逐请求身份版本、独立 CSRF、back-channel logout、十分钟 step-up、MFA 恢复和邀请 lifecycle relay。三 Realm bootstrap 已通过全新 Keycloak 26.7.0 导入验证，但生产配置更新/漂移治理、真实 SMTP/TOTP/恢复码演练、告警和正式签名 gate 仍未闭环。IAM-002 仍为 candidate；局部实现和单元/集成测试不能替代正式 repository gate 与受信 Review Result。
+[ADR-0009](../adr/0009-separate-backoffice-applications-and-production-identity-boundaries.md) 已接受三套独立前端应用、三套独立后端服务及生产 OIDC 目标。前端已拆为三个独立构建和部署单元；三端从共享 `backoffice-runtime` 装配同形用户管理/角色管理页面，应用仍各自拥有独立 deployment、路由白名单和构建产物。三个后端组合根已分别显式装配自己的 OIDC client、逐请求身份版本、独立 CSRF、back-channel logout、十分钟 step-up、MFA 恢复和邀请 lifecycle relay。隔离本地环境默认以三端同形、文案分域且预填独立凭据的密码表单支持日常开发，并已通过三端真实浏览器登录；显式 OIDC 模式也已通过三 Realm Keycloak 26.7.0、Mailpit、三个独立前后端进程的完整浏览器验收。生产配置更新/漂移治理、SMTP/密钥/告警/备份恢复、break-glass 和正式签名 gate 仍未闭环。IAM-002 仍为 candidate；本地技术 PASS 不能替代正式 repository gate 与受信 Review Result。
 
 六条目标边界是：共享 Keycloak 的三 Realm 只构成逻辑隔离；本地 Session 必须同时响应 back-channel logout 与身份版本；OIDC callback 和 server-to-server logout 不依赖 Origin；Cookie 写请求必须使用独立 CSRF token；User 只按精确 `issuer + subject` 映射；MFA 恢复只有在 Credential、Recovery Code、Keycloak Session 和应用 Session 全部撤销后才能完成。任何部分恢复失败保持 `RECOVERY_PENDING` 和登录阻断，通过幂等重试继续收敛。
+
+## Required：IAM-003 委派用户治理尚未收敛
+
+[ADR-0010](../adr/0010-centralize-tenant-administrator-provisioning-with-delegated-user-governance.md) 已接受统一三端“用户管理/角色管理”、PLATFORM 跨域只读目录，以及 PLATFORM 仅维护目标 MERCHANT/AGENT 系统管理员的管理面。普通用户和普通角色仍由各自 Session Tenant 的管理员维护；User 不增加 merchantId/agentId，目标归属继续由 Membership 表达；新账号必须使用规范化邮箱，但身份键仍严格为 `issuer + subject`。
+
+本地 candidate 已收敛三项实现偏差：User/Role Controller 与域感知仓储在三个 composition root 分别装配；三端导航统一为用户管理/角色管理并移除成员治理、租户首管页面；默认本地与 Keycloak 管理员账号改为规范化邮箱。PLATFORM 目录可按账号域和 Tenant 只读查询，跨域写只能创建/维护既有 MERCHANT/AGENT Tenant 的受保护系统管理员；普通用户与普通角色仍只能由目标 Session Tenant 管理，PLATFORM actor 不写入目标 `assigned_by`，target audit 的 `operator_membership_id` 保持 NULL。
+
+`infra/local/iam002/converge-delegated-user-governance.sql` 只为固定本地 MERCHANT/AGENT fixture 补齐共享 User/Role 菜单和同租户授权，并在本地运行时启动时失败关闭地复核。它不是 Flyway migration，也不覆盖生产历史 Tenant；生产 provisioning/backfill、升级兼容和恢复方案仍属于 IAM-003 Required 工作。
+
+仍未完成的生产边界是：跨域命令当前 local profile 使用本地 bootstrap BCrypt 摘要，尚未接入 Keycloak provisioning/outbox；HTTP PEP 暂复用 `user:view|create|update|disable` 并由 PLATFORM protected system Role 二次限制，ADR 要求的专用不可委派权限码尚未落库；source actor 仅以服务端生成 JSON 写入 target audit，尚无独立结构化 actor 列、拒绝审计与完整 before/after。以上缺口闭环前 IAM-003 保持 **candidate / NO-GO / Required**。
+
+## Required：ADR-0012 PLATFORM Role/Menu 跨域目录尚未生产闭环
+
+<!-- decision-status id=IAM-PLATFORM-CROSS-DOMAIN-IAM-DIRECTORY status=accepted ref=docs/adr/0012-expose-platform-cross-domain-role-and-menu-directories.md -->
+
+[ADR-0012](../adr/0012-expose-platform-cross-domain-role-and-menu-directories.md) 已接受受保护 PLATFORM system administrator 查询三账号域 Role/Menu 的只读目标。当前已有 Core port/service、PLATFORM HTTP Controller、PostgreSQL adapter、前端 directory client/types、归属列、页面 target 请求编排与只读动作收敛 Candidate；`BELONG_SYSTEM` Candidate 只消费固定三项的 color/order，label 按既定 locale-safe 规则来自应用 i18n。`/system/role/list` 和 `/system/menu/list` 继续只使用可信 Session Tenant，响应也没有 `accountDomain/tenantId/tenantName`。
+
+Candidate 使用独立的 `/api/platform/role-directory`、`/api/platform/menu-directory`，没有复用普通 CRUD 的 target selector。PLATFORM 域固定 source Session Tenant；MERCHANT/AGENT 必须精确选择一个 ACTIVE 且域匹配的 target Tenant；Menu 每次只返回该 Tenant 的树。响应以服务端 `managementMode` 标记同租户或只读，但该字段不能代替后端鉴权。所有 target-domain 行在前端只读，不得创建、编辑、启停、删除、分配用户或替换 RoleGrant。
+
+Candidate 可暂用 `role:view|menu:view + protected PLATFORM system role`；生产前必须增加不可委派且不进入普通授权目录的 `role:cross-domain-view`、`menu:cross-domain-view`，并证明 MERCHANT/AGENT composition root 未注册路径。`BELONG_SYSTEM` 只按固定 `1/2/3 -> PLATFORM/MERCHANT/AGENT` 映射提供 color/order，label 始终来自应用 `zh-CN/en-US` i18n；额外或缺失字典数据不得改变合法域、target Tenant 或鉴权。Candidate 源码、API contract/integration、字典污染/缺失、前端只读态、迟到响应和浏览器回归均已纳入验证面；专用权限迁移和组合根负向生产门禁仍未完成，因此继续保持 **candidate / NO-GO / Required**。

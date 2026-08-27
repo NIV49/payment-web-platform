@@ -13,15 +13,53 @@ import {
 
 const agentPolicy = {
   accountDomain: 'AGENT' as const,
-  menuPageComponents: ['/dashboard/workspace/index'],
-  routeNames: ['AgentDashboard', 'AgentWorkspace'],
-  routePaths: ['/dashboard', '/dashboard/workspace'],
+  menuPageComponents: [
+    '/dashboard/workspace/index',
+    '/system/role/list',
+    '/system/user/list',
+  ],
+  routeNames: [
+    'AgentDashboard',
+    'AgentWorkspace',
+    'System',
+    'SystemRole',
+    'SystemUser',
+  ],
+  routePaths: [
+    '/dashboard',
+    '/dashboard/workspace',
+    '/system',
+    '/system/role',
+    '/system/user',
+  ],
 };
 const merchantPolicy = {
   accountDomain: 'MERCHANT' as const,
-  menuPageComponents: ['/dashboard/workspace/index'],
-  routeNames: ['MerchantDashboard', 'MerchantWorkspace'],
-  routePaths: ['/dashboard', '/dashboard/workspace'],
+  menuPageComponents: [
+    '/dashboard/workspace/index',
+    '/system/role/list',
+    '/system/user/list',
+  ],
+  routeNames: [
+    'MerchantDashboard',
+    'MerchantWorkspace',
+    'System',
+    'SystemRole',
+    'SystemUser',
+  ],
+  routePaths: [
+    '/dashboard',
+    '/dashboard/workspace',
+    '/system',
+    '/system/role',
+    '/system/user',
+  ],
+};
+const platformPolicy = {
+  accountDomain: 'PLATFORM' as const,
+  menuPageComponents: ['/system/dict/data/list'],
+  routeNames: [],
+  routePaths: [],
 };
 
 installBackofficeDeployment({
@@ -122,6 +160,30 @@ describe('product access policy', () => {
   );
 
   it.each([
+    {
+      name: 'SystemDictionaryData',
+      path: '/system/dict/data',
+    },
+    {
+      name: 'SystemDictionaryDataIndex',
+      path: '/system/dict/data/type/:dictType',
+    },
+  ])('rejects the retired dictionary route for PLATFORM', (legacyRoute) => {
+    expect(() =>
+      assertValidBackendRoutesForPolicy(
+        [
+          {
+            component: '/system/dict/data/list',
+            type: 'menu',
+            ...legacyRoute,
+          },
+        ],
+        platformPolicy,
+      ),
+    ).toThrow('Backend route is outside the current account-domain boundary');
+  });
+
+  it.each([
     ['agent', agentPolicy, 'AgentDashboard', 'AgentWorkspace'],
     ['merchant', merchantPolicy, 'MerchantDashboard', 'MerchantWorkspace'],
   ] as const)(
@@ -145,6 +207,68 @@ describe('product access policy', () => {
       ).not.toThrow();
       expect(() =>
         assertValidBackendRoutesForPolicy(
+          [
+            {
+              children: [
+                {
+                  component: '/system/user/list',
+                  name: 'SystemUser',
+                  path: '/system/user',
+                  type: 'menu',
+                },
+                {
+                  component: '/system/role/list',
+                  name: 'SystemRole',
+                  path: '/system/role',
+                  type: 'menu',
+                },
+              ],
+              name: 'System',
+              path: '/system',
+              type: 'catalog',
+            },
+          ],
+          policy,
+        ),
+      ).not.toThrow();
+      for (const forbiddenDictionaryRoute of [
+        {
+          component: '/system/dict/data/list',
+          name: 'SystemDictionaryDataIndex',
+          path: '/system/dict/data',
+          type: 'menu',
+        },
+        {
+          component: '/system/dict/data/list',
+          name: 'SystemDictionaryData',
+          path: '/system/dict/data',
+          type: 'menu',
+        },
+        {
+          component: '/system/dict/data/list',
+          name: 'SystemDictionaryDataIndex',
+          path: '/system/dict/data/type/:dictType',
+          type: 'menu',
+        },
+      ]) {
+        expect(() =>
+          assertValidBackendRoutesForPolicy(
+            [
+              {
+                children: [forbiddenDictionaryRoute],
+                name: 'System',
+                path: '/system',
+                type: 'catalog',
+              },
+            ],
+            policy,
+          ),
+        ).toThrow(
+          'Backend route is outside the current account-domain boundary',
+        );
+      }
+      expect(() =>
+        assertValidBackendRoutesForPolicy(
           [{ ...allowedCatalog, name: 'WrongDashboard' }],
           policy,
         ),
@@ -163,7 +287,7 @@ describe('product access policy', () => {
               children: [
                 {
                   ...allowedPage,
-                  component: '/system/user/list',
+                  component: '/payments/ledger/index',
                 },
               ],
             },

@@ -1,6 +1,7 @@
 package com.niv.payment.adminapi;
 
 import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.persistence.repository.JooqIdentityQueryRepository;
 import com.niv.payment.permission.persistence.repository.JooqUserAdministrationRepository;
 import com.niv.payment.permission.service.IdentityModels;
@@ -23,6 +24,7 @@ import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_R
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_TENANT;
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_USER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 class DomainAwareUsernameRepositoryIntegrationTest {
@@ -37,6 +39,9 @@ class DomainAwareUsernameRepositoryIntegrationTest {
     private static final long TARGET_USER_ID = 23_007L;
     private static final long TARGET_MEMBERSHIP_ID = 23_008L;
     private static final long MERCHANT_USER_ID = 23_009L;
+    private static final long MERCHANT_DEPARTMENT_ID = 23_103L;
+    private static final long MERCHANT_ACTOR_USER_ID = 23_104L;
+    private static final long MERCHANT_ACTOR_MEMBERSHIP_ID = 23_105L;
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(DockerImageName.parse(
@@ -121,6 +126,79 @@ class DomainAwareUsernameRepositoryIntegrationTest {
                 .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(TARGET_USER_ID))
                 .fetchSingle(IAM_AUTHENTICATION_CREDENTIAL.USERNAME))
                 .isEqualTo("shared-login");
+        }
+    }
+
+    @Test
+    void merchantRepositoryCreatesOnlyMerchantDomainUsersInItsSessionTenant() throws Exception {
+        PostgresFlywayTestSupport.configure()
+            .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+            .locations("classpath:db/migration")
+            .load()
+            .migrate();
+
+        try (var connection = DriverManager.getConnection(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
+            var dsl = DSL.using(connection, SQLDialect.POSTGRES);
+            dsl.insertInto(IAM_TENANT,
+                    IAM_TENANT.ID, IAM_TENANT.TENANT_CODE, IAM_TENANT.TENANT_NAME,
+                    IAM_TENANT.TENANT_TYPE, IAM_TENANT.STATUS, IAM_TENANT.ACCOUNT_DOMAIN)
+                .values(23_101L, "platform-23101", "Platform 23101",
+                    "PLATFORM", "ACTIVE", "PLATFORM")
+                .values(23_102L, "merchant-23102", "Merchant 23102",
+                    "DIRECT_MERCHANT", "ACTIVE", "MERCHANT")
+                .execute();
+            dsl.insertInto(IAM_DEPARTMENT,
+                    IAM_DEPARTMENT.ID, IAM_DEPARTMENT.TENANT_ID,
+                    IAM_DEPARTMENT.DEPARTMENT_CODE, IAM_DEPARTMENT.DEPARTMENT_NAME,
+                    IAM_DEPARTMENT.STATUS)
+                .values(MERCHANT_DEPARTMENT_ID, 23_102L, "root", "Root", "ACTIVE")
+                .execute();
+            insertUser(dsl, MERCHANT_ACTOR_USER_ID, "owner@merchant.example.test",
+                "Merchant Owner", "MERCHANT", "local");
+            dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
+                .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, SUPPORTED_DUMMY_HASH)
+                .set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, "ACTIVE")
+                .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(MERCHANT_ACTOR_USER_ID))
+                .execute();
+            dsl.insertInto(IAM_MEMBERSHIP,
+                    IAM_MEMBERSHIP.ID, IAM_MEMBERSHIP.TENANT_ID, IAM_MEMBERSHIP.USER_ID,
+                    IAM_MEMBERSHIP.DEPARTMENT_ID, IAM_MEMBERSHIP.STATUS,
+                    IAM_MEMBERSHIP.ACCOUNT_DOMAIN)
+                .values(MERCHANT_ACTOR_MEMBERSHIP_ID, 23_102L, MERCHANT_ACTOR_USER_ID,
+                    MERCHANT_DEPARTMENT_ID, "ACTIVE", "MERCHANT")
+                .execute();
+
+            var repository = new JooqUserAdministrationRepository(
+                dsl, new JooqIdentityQueryRepository(dsl), AccountDomain.MERCHANT,
+                () -> "merchant-user-create-test", () -> SUPPORTED_DUMMY_HASH);
+            AdministrationActor actor = new AdministrationActor(
+                MERCHANT_ACTOR_MEMBERSHIP_ID, MERCHANT_ACTOR_USER_ID, 0L, 0L);
+
+            long userId = repository.createUser(23_102L, actor,
+                new IdentityModels.UserCreateCommand(
+                    "member@merchant.example.test", "Merchant Member",
+                    MERCHANT_DEPARTMENT_ID, List.of(), 1, null));
+
+            assertThat(dsl.select(IAM_USER.ACCOUNT_DOMAIN)
+                .from(IAM_USER)
+                .where(IAM_USER.ID.eq(userId))
+                .fetchSingle(IAM_USER.ACCOUNT_DOMAIN)).isEqualTo("MERCHANT");
+            assertThat(dsl.select(IAM_MEMBERSHIP.ACCOUNT_DOMAIN)
+                .from(IAM_MEMBERSHIP)
+                .where(IAM_MEMBERSHIP.USER_ID.eq(userId))
+                .fetchSingle(IAM_MEMBERSHIP.ACCOUNT_DOMAIN)).isEqualTo("MERCHANT");
+            assertThat(dsl.select(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN)
+                .from(IAM_AUTHENTICATION_CREDENTIAL)
+                .where(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(userId))
+                .fetchSingle(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN))
+                .isEqualTo("MERCHANT");
+
+            assertThatThrownBy(() -> repository.createUser(23_101L, actor,
+                new IdentityModels.UserCreateCommand(
+                    "cross-domain@example.test", "Cross Domain",
+                    MERCHANT_DEPARTMENT_ID, List.of(), 1, null)))
+                .isInstanceOf(SecurityException.class);
         }
     }
 

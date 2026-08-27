@@ -3,7 +3,6 @@ package com.niv.payment.identity.oidc;
 import cn.dev33.satoken.stp.StpLogic;
 import com.niv.payment.identity.lifecycle.JooqMfaRecoveryRepository;
 import com.niv.payment.identity.lifecycle.JooqIdentityInvitationRepository;
-import com.niv.payment.identity.lifecycle.IdentityGovernanceService;
 import com.niv.payment.identity.lifecycle.MemberInvitationService;
 import com.niv.payment.identity.lifecycle.MfaRecoveryRepository;
 import com.niv.payment.identity.lifecycle.MfaRecoveryService;
@@ -26,8 +25,7 @@ import java.time.Duration;
 @ConditionalOnProperty(prefix = "payment.identity.lifecycle", name = "enabled", havingValue = "true")
 @EnableScheduling
 @Import({MfaRecoveryController.class, MfaRecoveryExceptionHandler.class,
-    IdentityGovernanceController.class, IdentityGovernanceExceptionHandler.class,
-    TenantBootstrapController.class})
+    IdentityGovernanceController.class, TenantBootstrapController.class})
 class MfaRecoveryConfiguration {
     @Bean
     MfaRecoveryRepository mfaRecoveryRepository(DSLContext dsl, OidcRequestTrace trace) {
@@ -76,14 +74,11 @@ class MfaRecoveryConfiguration {
     }
 
     @Bean
-    KeycloakMfaRecoveryClient keycloakMfaRecoveryClient(KeycloakAdminSettings settings) {
-        return new KeycloakMfaRecoveryClient(RestClient.create(), settings);
-    }
-
-    @Bean
-    JooqIdentityInvitationRepository identityInvitationRepository(DSLContext dsl,
-                                                                  OidcRequestTrace trace) {
-        return new JooqIdentityInvitationRepository(dsl, trace::current);
+    KeycloakMfaRecoveryClient keycloakMfaRecoveryClient(
+        KeycloakAdminSettings settings,
+        @Value("${payment.identity.lifecycle.invitation-action-lifespan:PT24H}")
+        Duration actionLifespan) {
+        return new KeycloakMfaRecoveryClient(RestClient.create(), settings, actionLifespan);
     }
 
     @Bean
@@ -99,12 +94,6 @@ class MfaRecoveryConfiguration {
                                                      JooqIdentityInvitationRepository repository,
                                                      KeycloakIdentityProvisioningClient provisioner) {
         return new MemberInvitationService(accountDomain, repository, provisioner);
-    }
-
-    @Bean
-    IdentityGovernanceService identityGovernanceService(AccountDomain accountDomain,
-                                                        JooqIdentityInvitationRepository repository) {
-        return new IdentityGovernanceService(accountDomain, repository);
     }
 
     @Bean

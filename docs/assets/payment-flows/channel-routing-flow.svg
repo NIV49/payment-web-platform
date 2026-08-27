@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">渠道路由决策链路</title>
+  <desc id="desc">旧系统渠道路由的八段固定处理器链、四个巴基斯坦市场后置调整器、有序候选输出，以及路由成功不等于支付成功的边界。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#52606d"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0f766e"/>
+    </marker>
+    <style>
+      .title { font: 500 42px 'PingFang SC','Microsoft YaHei',Arial,sans-serif; fill: #17212b; }
+      .subtitle { font: 400 24px 'PingFang SC','Microsoft YaHei',Arial,sans-serif; fill: #52606d; }
+      .section { font: 500 24px 'PingFang SC','Microsoft YaHei',Arial,sans-serif; fill: #17212b; }
+      .box-title { font: 500 24px 'PingFang SC','Microsoft YaHei',Arial,sans-serif; fill: #17212b; text-anchor: middle; }
+      .box-text { font: 400 20px 'PingFang SC','Microsoft YaHei',Arial,sans-serif; fill: #3e4c59; text-anchor: middle; }
+      .num { font: 500 21px 'PingFang SC','Microsoft YaHei',Arial,sans-serif; fill: #ffffff; text-anchor: middle; }
+      .edge { fill: none; stroke: #52606d; stroke-width: 3; marker-end: url(#arrow); }
+      .edge-teal { fill: none; stroke: #0f766e; stroke-width: 3; marker-end: url(#arrow-teal); }
+      .feed { fill: none; stroke: #7b8794; stroke-width: 2.5; stroke-dasharray: 9 7; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1000" fill="#ffffff"/>
+  <text class="title" x="70" y="66">渠道路由决策链路</text>
+  <text class="subtitle" x="70" y="106">输入订单事实，经过固定过滤与调度，输出有序渠道账号候选</text>
+  <rect x="1255" y="42" width="275" height="68" rx="6" fill="#fff3f0" stroke="#f2b8b5" stroke-width="2"/>
+  <text x="1392" y="70" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="20" font-weight="500" fill="#b42318" text-anchor="middle">旧系统参考 · CODE</text>
+  <text x="1392" y="98" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="19" fill="#7a271a" text-anchor="middle">不是新平台已实现能力</text>
+
+  <text class="section" x="70" y="166">决策输入</text>
+  <rect x="70" y="188" width="390" height="128" rx="6" fill="#eaf2ff" stroke="#7aa7e8" stroke-width="2"/>
+  <text class="box-title" x="265" y="226">订单事实</text>
+  <text class="box-text" x="265" y="260">市场 · 交易类型 · 产品/类目 · 金额</text>
+  <text class="box-text" x="265" y="292">商户 · 收款信息 · 平台订单号</text>
+  <rect x="605" y="188" width="390" height="128" rx="6" fill="#f5f3ff" stroke="#a78bdb" stroke-width="2"/>
+  <text class="box-title" x="800" y="226">动态配置（旧实现缺版本快照）</text>
+  <text class="box-text" x="800" y="260">渠道账号 · 产品关系 · 商户覆盖</text>
+  <text class="box-text" x="800" y="292">权重 · 成本 · 损耗 · 开关</text>
+  <rect x="1140" y="188" width="390" height="128" rx="6" fill="#fff5e8" stroke="#d99a45" stroke-width="2"/>
+  <text class="box-title" x="1335" y="226">运行态采样</text>
+  <text class="box-text" x="1335" y="260">Redis 限额 · 熔断 · 失败数</text>
+  <text class="box-text" x="1335" y="292">成功率 · 探测 · 账号占用</text>
+
+  <text class="section" x="70" y="365">八段固定主链（顺序就是业务行为）</text>
+  <path class="feed" d="M265 316 V392"/>
+  <path class="feed" d="M800 316 V392"/>
+  <path class="feed" d="M1335 316 V392"/>
+
+  <g>
+    <rect x="55" y="398" width="165" height="120" rx="6" fill="#e8f7f4" stroke="#55a89a" stroke-width="2"/>
+    <circle cx="82" cy="424" r="17" fill="#0f766e"/><text class="num" x="82" y="431">1</text>
+    <text class="box-title" x="137" y="456">基础候选</text><text class="box-text" x="137" y="489">Channel</text>
+    <rect x="245" y="398" width="165" height="120" rx="6" fill="#e8f7f4" stroke="#55a89a" stroke-width="2"/>
+    <circle cx="272" cy="424" r="17" fill="#0f766e"/><text class="num" x="272" y="431">2</text>
+    <text class="box-title" x="327" y="456">额度过滤</text><text class="box-text" x="327" y="489">Quota</text>
+    <rect x="435" y="398" width="165" height="120" rx="6" fill="#e8f7f4" stroke="#55a89a" stroke-width="2"/>
+    <circle cx="462" cy="424" r="17" fill="#0f766e"/><text class="num" x="462" y="431">3</text>
+    <text class="box-title" x="517" y="456">银行/产品</text><text class="box-text" x="517" y="489">Bank List</text>
+    <rect x="625" y="398" width="165" height="120" rx="6" fill="#e8f7f4" stroke="#55a89a" stroke-width="2"/>
+    <circle cx="652" cy="424" r="17" fill="#0f766e"/><text class="num" x="652" y="431">4</text>
+    <text class="box-title" x="707" y="456">商户覆盖</text><text class="box-text" x="707" y="489">Override</text>
+    <rect x="815" y="398" width="165" height="120" rx="6" fill="#e8f7f4" stroke="#55a89a" stroke-width="2"/>
+    <circle cx="842" cy="424" r="17" fill="#0f766e"/><text class="num" x="842" y="431">5</text>
+    <text class="box-title" x="897" y="456">指定渠道</text><text class="box-text" x="897" y="489">Appoint</text>
+    <rect x="1005" y="398" width="165" height="120" rx="6" fill="#e8f7f4" stroke="#55a89a" stroke-width="2"/>
+    <circle cx="1032" cy="424" r="17" fill="#0f766e"/><text class="num" x="1032" y="431">6</text>
+    <text class="box-title" x="1087" y="456">账号黑名单</text><text class="box-text" x="1087" y="489">Black Account</text>
+    <rect x="1195" y="398" width="165" height="120" rx="6" fill="#e8f7f4" stroke="#55a89a" stroke-width="2"/>
+    <circle cx="1222" cy="424" r="17" fill="#0f766e"/><text class="num" x="1222" y="431">7</text>
+    <text class="box-title" x="1277" y="456">熔断过滤</text><text class="box-text" x="1277" y="489">Fuse</text>
+    <rect x="1385" y="398" width="165" height="120" rx="6" fill="#dff3ef" stroke="#0f766e" stroke-width="3"/>
+    <circle cx="1412" cy="424" r="17" fill="#0f766e"/><text class="num" x="1412" y="431">8</text>
+    <text class="box-title" x="1467" y="456">最终调度</text><text class="box-text" x="1467" y="489">Dispatcher</text>
+  </g>
+  <path class="edge-teal" d="M220 458 H245"/>
+  <path class="edge-teal" d="M410 458 H435"/>
+  <path class="edge-teal" d="M600 458 H625"/>
+  <path class="edge-teal" d="M790 458 H815"/>
+  <path class="edge-teal" d="M980 458 H1005"/>
+  <path class="edge-teal" d="M1170 458 H1195"/>
+  <path class="edge-teal" d="M1360 458 H1385"/>
+
+  <text class="section" x="70" y="574">主链后的 PAK 软调整（再次改变优先顺序，不新增候选）</text>
+  <rect x="70" y="598" width="335" height="100" rx="6" fill="#fff5e8" stroke="#d99a45" stroke-width="2"/>
+  <text class="box-title" x="237" y="635">1 · SWICH 健康度</text><text class="box-text" x="237" y="669">技术失败率后移</text>
+  <rect x="445" y="598" width="335" height="100" rx="6" fill="#fff5e8" stroke="#d99a45" stroke-width="2"/>
+  <text class="box-title" x="612" y="635">2 · SWICH 流量保护</text><text class="box-text" x="612" y="669">账号并发 / mobile 软降级</text>
+  <rect x="820" y="598" width="335" height="100" rx="6" fill="#fff5e8" stroke="#d99a45" stroke-width="2"/>
+  <text class="box-title" x="987" y="635">3 · JazzCash mobile</text><text class="box-text" x="987" y="669">代收 mobile 维度保护</text>
+  <rect x="1195" y="598" width="335" height="100" rx="6" fill="#fff5e8" stroke="#d99a45" stroke-width="2"/>
+  <text class="box-title" x="1362" y="635">4 · JazzCash payout</text><text class="box-text" x="1362" y="669">代付比例 / 速率保护</text>
+  <path class="edge" d="M405 648 H445"/>
+  <path class="edge" d="M780 648 H820"/>
+  <path class="edge" d="M1155 648 H1195"/>
+  <path class="edge" d="M1467 518 V535 H40 V648 H70"/>
+
+  <path class="edge-teal" d="M1362 698 V744 H800 V766"/>
+  <rect x="380" y="766" width="840" height="108" rx="6" fill="#eaf2ff" stroke="#2563eb" stroke-width="3"/>
+  <text x="800" y="808" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="28" font-weight="500" fill="#17212b" text-anchor="middle">输出：有序渠道账号候选 + 首选渠道成本 / 损耗快照</text>
+  <text x="800" y="848" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="23" fill="#3e4c59" text-anchor="middle">旧输出缺少 decisionId、规则版本、逐候选淘汰原因和运行态指纹</text>
+
+  <rect x="70" y="910" width="1460" height="58" rx="6" fill="#fff3f0" stroke="#f2b8b5" stroke-width="2"/>
+  <text x="800" y="948" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="25" font-weight="500" fill="#b42318" text-anchor="middle">集成边界：路由成功只代表“有候选账号”，不代表渠道受理、渠道成功或资金完成</text>
+</svg>

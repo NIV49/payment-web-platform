@@ -1210,6 +1210,7 @@ REQUIRED_RUNTIME_PATHS = {
     ".github/CODEOWNERS",
     ".github/workflows/documentation.yml",
     "scripts/check-doc-decisions.py",
+    "scripts/check_doc_code_sync.py",
     "scripts/check_modernization_artifacts.py",
     "scripts/check_project_skills.py",
     "scripts/check_sensitive_artifacts.py",

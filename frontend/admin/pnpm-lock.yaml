@@ -633,9 +633,21 @@ importers:
       '@payment/backoffice-runtime':
         specifier: workspace:*
         version: link:../../packages/effects/backoffice-runtime
+      '@vben/access':
+        specifier: workspace:*
+        version: link:../../packages/effects/access
+      '@vben/common-ui':
+        specifier: workspace:*
+        version: link:../../packages/effects/common-ui
       '@vben/types':
         specifier: workspace:*
         version: link:../../packages/types
+      antdv-next:
+        specifier: 'catalog:'
+        version: 1.4.5(date-fns@4.4.0)(vue@3.5.40(typescript@6.0.3))
+      vue:
+        specifier: ^3.5.40
+        version: 3.5.40(typescript@6.0.3)
 
   apps/platform-admin:
     dependencies:

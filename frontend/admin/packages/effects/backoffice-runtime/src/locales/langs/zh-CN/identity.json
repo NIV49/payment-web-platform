@@ -8,6 +8,7 @@
     "displayName": "显示名称",
     "email": "登录邮箱",
     "roles": "普通角色",
+    "operation": "操作",
     "membershipStatus": "成员状态",
     "identityStatus": "身份状态",
     "provisioningStatus": "供应状态",

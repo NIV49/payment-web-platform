@@ -43,5 +43,8 @@ public record RoleConfigurationCommand(
             throw new IllegalArgumentException("A concise role-configuration reason is required");
         }
         grants = grants == null ? List.of() : List.copyOf(grants);
+        if (grants.size() > RoleGrantModels.MAX_SELECTIONS) {
+            throw new IllegalArgumentException("Too many role grants");
+        }
     }
 }

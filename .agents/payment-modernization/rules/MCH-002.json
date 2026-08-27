@@ -1,0 +1,50 @@
+{
+  "ruleId": "MCH-002",
+  "status": "candidate",
+  "statement": "PLATFORM Merchant profile maintenance and operating markets must remain distinct from legal registration identity and lifecycle transitions.",
+  "scope": [
+    "platform Merchant profile maintenance",
+    "Merchant operating-market assignment",
+    "profile-update authorization, concurrency, idempotency, and audit",
+    "platform Merchant list and detail interaction"
+  ],
+  "given": [
+    "an MCH-001 Merchant in ACTIVE or DISABLED state",
+    "a recently stepped-up PLATFORM Session",
+    "append-only V34, V35 and V36 migrations and a protected system Role"
+  ],
+  "when": [
+    "a protected PLATFORM operator edits a Merchant profile",
+    "a PLATFORM operator views or filters the Merchant list",
+    "an existing V33 Merchant has no proven operating market"
+  ],
+  "then": [
+    "MCH-002 keeps registrationCountry as an ISO 3166-1 alpha-2 legal-registration fact and never presents it as a market.",
+    "marketCodes is a multiple ISO 3166-1 alpha-3 operating-market set whose current values are BRA and PHL; legacy rows may return empty while updates require at least one value.",
+    "Only merchant:update held by the same protected PLATFORM system Role with recent step-up authorizes PUT /api/platform/merchants/{merchantId}/profile.",
+    "The exact update fields are expectedVersion, Idempotency-Key semantics, legalName, displayName, merchantTypeCode, legalPersonName, authenticationType, remarks and marketCodes; no Tenant or registration selector is accepted.",
+    "Only ACTIVE and DISABLED may update; a no-op is rejected, status and statusReasonCode remain unchanged and rowVersion increments exactly once; historical status reason remains null when exact evidence is absent and is never inferred.",
+    "UPDATE_PROFILE and server-derived PLATFORM_PROFILE_UPDATED bind permanent idempotency and audit in the same transaction.",
+    "The list uses a Switch only for ACTIVE and DISABLED, a Tag otherwise, Detail and Edit actions, allowClear selects, and no routine detail disable, enable or terminate action.",
+    "Merchant Type, Legal Person Name and Authentication Type are retained while business email is excluded; those classifications never create Tenant, AgentRelation, MerchantMarket or authorization scope, and append-only V35 extends the already executed V34 without rewriting it.",
+    "The command schema 1 compatibility path is replay-only: a complete V34 profile body may return an authorized existing deduplication result, while a miss, a partial V35 shape or any attempted legacy new write fails closed.",
+    "Before V34, exact V33 duplicate Merchant audit versions fail closed before status-reason backfill; append-only V36 enforces one merchant_audit_event per Merchant version, and ambiguous V34/V35 history requires a separately approved forward repair.",
+    "Merchant Type values are DIRECT, INDIRECT, COMMISSION, SALES and PLATFORM; Authentication Type values are ENTERPRISE, NON_PROFIT_ORGANIZATIONS, CLIQUE, INDIVIDUAL and INDIVIDUAL_HOUSEHOLD."
+  ],
+  "counterexamples": [
+    "registrationCountry is renamed to market or stores BRA and PHL.",
+    "V34 guesses an operating market for a V33 Merchant.",
+    "a MERCHANT actor or ordinary PLATFORM Role edits the profile.",
+    "a pending, rejected or terminated Merchant is edited through the PLATFORM profile command.",
+    "a profile update changes status or commits without idempotency and audit.",
+    "the detail drawer exposes disable, enable or terminate as routine actions.",
+    "a profile classification is treated as a Tenant, AgentRelation, MerchantMarket or authorization selector."
+  ],
+  "evidence": [],
+  "confidence": "high",
+  "judgeTests": [
+    "MCH-002-DECISION-CONTRACT",
+    "MCH-002-BACKEND-VERIFY",
+    "MCH-002-FRONTEND-VERIFY"
+  ]
+}

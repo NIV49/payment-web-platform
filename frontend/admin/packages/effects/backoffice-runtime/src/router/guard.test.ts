@@ -1,8 +1,13 @@
 import type { UserInfo } from '@vben/types';
 
-import { createMemoryHistory, createRouter } from 'vue-router';
+import {
+  createMemoryHistory,
+  createRouter,
+  isNavigationFailure,
+  NavigationFailureType,
+} from 'vue-router';
 
-import { useAccessStore, useUserStore } from '@vben/stores';
+import { useAccessStore, useTabbarStore, useUserStore } from '@vben/stores';
 
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -77,6 +82,95 @@ describe('access guard route generation', () => {
     expect(accessStore.accessRoutes).toEqual([]);
   });
 
+  it('removes persisted tabs that are unavailable after access routes are generated', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        ...routes,
+        {
+          component: { render: () => null },
+          name: 'GuardTrigger',
+          path: '/guard-trigger',
+        },
+      ],
+    });
+    const accessStore = useAccessStore();
+    const tabbarStore = useTabbarStore();
+    const userStore = useUserStore();
+    accessStore.setAccessToken('cookie-session');
+    userStore.setUserInfo({
+      avatar: '',
+      desc: '',
+      homePath: '/system/user',
+      realName: 'Current User',
+      roles: [],
+      token: '',
+      userId: 'current-user',
+      username: 'current-user',
+    });
+    tabbarStore.tabs = [
+      {
+        fullPath: '/system/user?page=2',
+        hash: '',
+        key: '/system/user?page=2',
+        matched: [],
+        meta: { title: 'system.user.title' },
+        name: 'SystemUser',
+        params: {},
+        path: '/system/user',
+        query: { page: '2' },
+        redirectedFrom: undefined,
+      },
+      {
+        fullPath: '/system/dict/data?dictType=SYS_COMMON_STATUS',
+        hash: '',
+        key: '/system/dict/data?dictType=SYS_COMMON_STATUS',
+        matched: [],
+        meta: { affixTab: true, title: 'system.dict.data.title' },
+        name: 'SystemDictionaryDataIndex',
+        params: {},
+        path: '/system/dict/data',
+        query: { dictType: 'SYS_COMMON_STATUS' },
+        redirectedFrom: undefined,
+      },
+      {
+        fullPath: '/retired-feature/report',
+        hash: '',
+        key: '/retired-feature/report',
+        matched: [],
+        meta: { title: 'retired.feature.title' },
+        name: 'RetiredFeatureReport',
+        params: {},
+        path: '/retired-feature/report',
+        query: {},
+        redirectedFrom: undefined,
+      },
+    ];
+    mocks.generateAccess.mockImplementation(async () => {
+      const systemUserRoute = {
+        component: { render: () => null },
+        meta: { title: 'system.user.title' },
+        name: 'SystemUser',
+        path: '/system/user',
+      };
+      router.addRoute('Root', systemUserRoute);
+      return {
+        accessibleMenus: [],
+        accessibleRoutes: [systemUserRoute],
+      };
+    });
+    createRouterGuard(router);
+
+    await router.push('/guard-trigger');
+
+    expect(tabbarStore.tabs).toHaveLength(1);
+    expect(tabbarStore.tabs[0]).toMatchObject({
+      fullPath: '/system/user?page=2',
+      name: 'SystemUser',
+      query: { page: '2' },
+    });
+  });
+
   it('does not request menus after delayed user info belongs to an old session', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
@@ -112,6 +206,29 @@ describe('access guard route generation', () => {
     });
     await navigation;
 
+    expect(mocks.generateAccess).not.toHaveBeenCalled();
+    expect(accessStore.isAccessChecked).toBe(false);
+  });
+
+  it('cancels stale navigation after session recovery clears the login marker', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes,
+    });
+    const accessStore = useAccessStore();
+    accessStore.setAccessToken('cookie-session');
+    mocks.fetchUserInfo.mockImplementation(async () => {
+      accessStore.setAccessToken(null);
+      startProductSessionGeneration();
+      throw new Error('Session is invalid or expired');
+    });
+    createRouterGuard(router);
+
+    const navigation = await router.push('/revoked-session-route');
+
+    expect(isNavigationFailure(navigation, NavigationFailureType.aborted)).toBe(
+      true,
+    );
     expect(mocks.generateAccess).not.toHaveBeenCalled();
     expect(accessStore.isAccessChecked).toBe(false);
   });

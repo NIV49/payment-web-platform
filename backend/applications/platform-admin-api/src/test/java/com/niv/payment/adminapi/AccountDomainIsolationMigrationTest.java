@@ -45,7 +45,7 @@ class AccountDomainIsolationMigrationTest {
 
     @Test
     void freshSchemaCreatesRequiredDomainColumnsAndConstraints() throws Exception {
-        flyway(null).migrate();
+        flyway("19").migrate();
 
         assertThat(singleLong("""
             SELECT count(*) FROM information_schema.columns
@@ -113,7 +113,7 @@ class AccountDomainIsolationMigrationTest {
             VALUES(92,'merchant-user-92',NULL,'ACTIVE');
             """);
 
-        flyway(null).migrate();
+        flyway("31").migrate();
 
         assertThat(singleLong("SELECT count(*) FROM iam_tenant WHERE id=91 AND account_domain='MERCHANT'"))
             .isOne();
@@ -143,9 +143,9 @@ class AccountDomainIsolationMigrationTest {
               (154,141,'deleted-role','Deleted Role','PLATFORM',true,false,'DISABLED',CURRENT_TIMESTAMP);
             """);
 
-        flyway(null).migrate();
+        flyway("31").migrate();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("27");
+        assertThat(currentSuccessfulVersion()).isEqualTo("31");
         assertThat(singleLong("""
             SELECT count(*)
               FROM iam_role role_row
@@ -209,9 +209,9 @@ class AccountDomainIsolationMigrationTest {
               (181,178,'TENANT','TENANT_ALL');
             """);
 
-        flyway(null).migrate();
+        flyway("31").migrate();
 
-        assertThat(currentSuccessfulVersion()).isEqualTo("27");
+        assertThat(currentSuccessfulVersion()).isEqualTo("31");
         assertThat(singleLong("""
             SELECT count(*) FROM iam_role_grant
              WHERE tenant_id=171 AND role_id=175 AND status='ACTIVE'
@@ -238,7 +238,7 @@ class AccountDomainIsolationMigrationTest {
         assertThat(singleLong("SELECT row_version FROM iam_role WHERE tenant_id=171 AND id=175"))
             .isEqualTo(2L);
         assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE tenant_id=171 AND id=173"))
-            .isEqualTo(2L);
+            .isEqualTo(3L);
         assertThat(singleLong("""
             SELECT count(*) FROM iam_permission_change_outbox
              WHERE tenant_id=171 AND aggregate_type='MEMBERSHIP' AND aggregate_ref='173'
@@ -249,7 +249,7 @@ class AccountDomainIsolationMigrationTest {
             var repository = new JooqRoleGrantAdministrationRepository(
                 DSL.using(database, SQLDialect.POSTGRES), () -> "migration-v20-round-trip");
             var service = new RoleGrantAdministrationService(repository, repository, true);
-            var actor = new AdministrationActor(173L, 172L, 2L, 0L);
+            var actor = new AdministrationActor(173L, 172L, 3L, 0L);
             var current = service.find(171L, actor, 175L);
             assertThat(current.editable()).isTrue();
             assertThat(current.grants()).singleElement().satisfies(grant -> {
@@ -262,7 +262,7 @@ class AccountDomainIsolationMigrationTest {
                 "V20 migration round-trip", current.grants()));
             assertThat(replaced.roleVersion()).isEqualTo(3L);
             assertThat(replaced.grants()).containsExactlyElementsOf(current.grants());
-            var refreshedActor = new AdministrationActor(173L, 172L, 3L, 0L);
+            var refreshedActor = new AdministrationActor(173L, 172L, 4L, 0L);
             assertThat(service.find(171L, refreshedActor, 175L).grants())
                 .containsExactlyElementsOf(current.grants());
         }

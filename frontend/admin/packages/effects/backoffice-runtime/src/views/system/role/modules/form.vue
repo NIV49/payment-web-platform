@@ -1,0 +1,371 @@
+<script lang="ts" setup>
+import type { SystemMenuApi } from '@payment/backoffice-runtime/api/system/menu';
+import type { SystemRoleApi } from '@payment/backoffice-runtime/api/system/role';
+
+import type { RoleConfigurationTree } from '../menu-tree';
+import type { RoleRequestIdentity } from '../role-request-guard';
+
+import { computed, nextTick, ref } from 'vue';
+
+import { Tree, useVbenDrawer } from '@vben/common-ui';
+import { IconifyIcon } from '@vben/icons';
+
+import { useVbenForm } from '@payment/backoffice-runtime/adapter/form';
+import { isOptimisticLockConflict } from '@payment/backoffice-runtime/api/error-contract';
+import { getMenuList } from '@payment/backoffice-runtime/api/system/menu';
+import {
+  createRoleConfiguration,
+  getGrantablePermissions,
+  getRoleGrants,
+  replaceRoleConfiguration,
+} from '@payment/backoffice-runtime/api/system/role-grant';
+import CommonStatusDictionaryAlert from '@payment/backoffice-runtime/components/common-status-dictionary-alert';
+import { useCommonStatusDictionary } from '@payment/backoffice-runtime/composables';
+import { $t } from '@payment/backoffice-runtime/locales';
+import { Alert, Button, Input, Spin } from 'antdv-next';
+
+import { useFormSchema } from '../data';
+import { buildTenantRoleGrants } from '../grant-contract';
+import {
+  buildRoleConfigurationTree,
+  filterAvailableNavigationMenuIds,
+  normalizeRoleConfigurationSelection,
+} from '../menu-tree';
+import { createRoleRequestGuard } from '../role-request-guard';
+
+const emits = defineEmits(['success']);
+
+const NEW_ROLE_SCOPE = 'new-role';
+
+const formData = ref<SystemRoleApi.SystemRole>();
+const menuOptions = ref<SystemMenuApi.SystemMenu[]>([]);
+const roleConfigurationTree = ref<RoleConfigurationTree>();
+const configurationReason = ref('');
+const configurationReadOnly = ref(false);
+const reasonMissing = ref(false);
+const loadingMenuOptions = ref(false);
+const menuOptionsLoadFailed = ref(false);
+const formReady = ref(false);
+const requestGuard = createRoleRequestGuard();
+const appliedRequestIdentity = ref<RoleRequestIdentity>();
+const commonStatus = useCommonStatusDictionary();
+const commonStatusError = commonStatus.error;
+const getStatusOptions = () => commonStatus.options.value;
+
+const [Form, formApi] = useVbenForm({
+  schema: useFormSchema(getStatusOptions),
+  showDefaultActions: false,
+});
+
+const id = ref<string>();
+const [Drawer, drawerApi] = useVbenDrawer({
+  async onConfirm() {
+    const currentRole = formData.value;
+    const currentScope = currentRole?.id ?? NEW_ROLE_SCOPE;
+    const currentRequestIdentity = appliedRequestIdentity.value;
+    if (
+      !formReady.value ||
+      configurationReadOnly.value ||
+      !currentRequestIdentity ||
+      !requestGuard.isCurrent(currentRequestIdentity, currentScope) ||
+      (currentRole ? id.value !== currentRole.id : id.value !== undefined)
+    ) {
+      return;
+    }
+    const { valid } = await formApi.validate();
+    if (
+      !valid ||
+      !requestGuard.isCurrent(currentRequestIdentity, currentScope)
+    ) {
+      return;
+    }
+    const values = await formApi.getValues<SystemRoleApi.RoleSaveParams>();
+    if (!requestGuard.isCurrent(currentRequestIdentity, currentScope)) return;
+
+    reasonMissing.value = Boolean(
+      currentRole && !configurationReason.value.trim(),
+    );
+    if (reasonMissing.value) return;
+
+    drawerApi.lock();
+    try {
+      if (currentRole) {
+        const configuration = roleConfigurationTree.value;
+        if (!configuration) return;
+        const normalized = normalizeRoleConfigurationSelection(
+          values.menuIds ?? [],
+          configuration,
+        );
+        await replaceRoleConfiguration(currentRole.id, {
+          expectedVersion: currentRole.rowVersion,
+          grants: buildTenantRoleGrants(normalized.permissionCodes),
+          menuIds: normalized.menuIds,
+          name: values.name,
+          reason: configurationReason.value.trim(),
+          remark: values.remark,
+          status: values.status,
+        });
+      } else {
+        const configuration = roleConfigurationTree.value;
+        if (!configuration) return;
+        const normalized = normalizeRoleConfigurationSelection(
+          values.menuIds ?? [],
+          configuration,
+        );
+        await createRoleConfiguration({
+          grants: buildTenantRoleGrants(normalized.permissionCodes),
+          menuIds: normalized.menuIds,
+          name: values.name,
+          remark: values.remark,
+          status: values.status,
+        });
+      }
+      if (!requestGuard.isCurrent(currentRequestIdentity, currentScope)) {
+        return;
+      }
+      emits('success');
+      drawerApi.close();
+    } catch (error) {
+      if (!requestGuard.isCurrent(currentRequestIdentity, currentScope)) {
+        return;
+      }
+      if (isOptimisticLockConflict(error)) {
+        emits('success');
+        drawerApi.close();
+        return;
+      }
+      throw error;
+    } finally {
+      if (requestGuard.isCurrent(currentRequestIdentity, currentScope)) {
+        drawerApi.unlock();
+      }
+    }
+  },
+
+  onOpenChange(isOpen) {
+    requestGuard.invalidate();
+    appliedRequestIdentity.value = undefined;
+    formReady.value = false;
+    configurationReadOnly.value = false;
+    configurationReason.value = '';
+    reasonMissing.value = false;
+    roleConfigurationTree.value = undefined;
+    loadingMenuOptions.value = false;
+    menuOptionsLoadFailed.value = false;
+    drawerApi.unlock();
+    drawerApi.setState({ showConfirmButton: false });
+    if (!isOpen) {
+      formData.value = undefined;
+      id.value = undefined;
+      return;
+    }
+    const data = drawerApi.getData<SystemRoleApi.SystemRole>();
+    const existingRole = data?.id ? data : undefined;
+    formApi.reset();
+    formData.value = existingRole;
+    id.value = existingRole?.id;
+    void initializeForm(existingRole);
+  },
+});
+
+async function initializeForm(existingRole?: SystemRoleApi.SystemRole) {
+  const scope = existingRole?.id ?? NEW_ROLE_SCOPE;
+  const requestIdentity = requestGuard.begin(scope);
+  loadingMenuOptions.value = true;
+  menuOptionsLoadFailed.value = false;
+  appliedRequestIdentity.value = undefined;
+  drawerApi.setState({ showConfirmButton: false });
+  try {
+    if (existingRole) {
+      const [rawMenus, grantablePermissions, grantDetail] = await Promise.all([
+        getMenuList(),
+        getGrantablePermissions(),
+        getRoleGrants(existingRole.id),
+      ]);
+      if (!requestGuard.isCurrent(requestIdentity, currentScope())) return;
+
+      const configuration = buildRoleConfigurationTree(
+        rawMenus,
+        grantablePermissions.map(({ permissionCode }) => permissionCode),
+      );
+      const permissionCodes = grantDetail.grants.map(
+        ({ permissionCode }) => permissionCode,
+      );
+      const unsupportedPermission = permissionCodes.some(
+        (permissionCode) => !configuration.buttonIdByPermission[permissionCode],
+      );
+      const versionChanged =
+        grantDetail.roleVersion !== existingRole.rowVersion;
+      configurationReadOnly.value =
+        !grantDetail.editable || unsupportedPermission || versionChanged;
+      roleConfigurationTree.value = configuration;
+      menuOptions.value = configuration.tree;
+
+      const selectedIds = [
+        ...filterAvailableNavigationMenuIds(
+          existingRole.menuIds ?? [],
+          configuration.tree,
+        ),
+        ...permissionCodes.flatMap((permissionCode) => {
+          const buttonId = configuration.buttonIdByPermission[permissionCode];
+          return buttonId ? [buttonId] : [];
+        }),
+      ];
+      const normalized = normalizeRoleConfigurationSelection(
+        selectedIds,
+        configuration,
+      );
+      await nextTick();
+      if (!requestGuard.isCurrent(requestIdentity, currentScope())) return;
+      await formApi.setValues({
+        ...existingRole,
+        menuIds: configurationReadOnly.value
+          ? selectedIds
+          : normalized.selectedIds,
+      });
+    } else {
+      const [rawMenus, grantablePermissions] = await Promise.all([
+        getMenuList(),
+        getGrantablePermissions(),
+      ]);
+      if (!requestGuard.isCurrent(requestIdentity, currentScope())) return;
+      const configuration = buildRoleConfigurationTree(
+        rawMenus,
+        grantablePermissions.map(({ permissionCode }) => permissionCode),
+      );
+      roleConfigurationTree.value = configuration;
+      menuOptions.value = configuration.tree;
+      await nextTick();
+      if (!requestGuard.isCurrent(requestIdentity, currentScope())) return;
+      await formApi.setValues({ menuIds: [], status: 1 });
+    }
+    if (!requestGuard.isCurrent(requestIdentity, currentScope())) return;
+    appliedRequestIdentity.value = requestIdentity;
+    formReady.value = true;
+    drawerApi.setState({
+      showConfirmButton: !configurationReadOnly.value,
+    });
+  } catch {
+    if (!requestGuard.isCurrent(requestIdentity, currentScope())) return;
+    menuOptionsLoadFailed.value = true;
+    drawerApi.setState({ showConfirmButton: false });
+  } finally {
+    if (requestGuard.isCurrent(requestIdentity, currentScope())) {
+      loadingMenuOptions.value = false;
+    }
+  }
+}
+
+async function onRoleTreeSelect(item: { value: SystemMenuApi.SystemMenu }) {
+  const configuration = roleConfigurationTree.value;
+  if (!configuration || configurationReadOnly.value) return;
+  await nextTick();
+  const values = await formApi.getValues<SystemRoleApi.RoleSaveParams>();
+  const selectedIds = values.menuIds ?? [];
+  const normalized = normalizeRoleConfigurationSelection(
+    selectedIds,
+    configuration,
+    {
+      checked: selectedIds.includes(item.value.id),
+      id: item.value.id,
+    },
+  );
+  await formApi.setValues({ menuIds: normalized.selectedIds });
+}
+
+function currentScope() {
+  return formData.value?.id ?? NEW_ROLE_SCOPE;
+}
+
+function retryInitializeForm() {
+  void initializeForm(formData.value);
+}
+
+const getDrawerTitle = computed(() => {
+  return formData.value?.id
+    ? $t('common.edit', $t('system.role.name'))
+    : $t('common.create', $t('system.role.name'));
+});
+</script>
+<template>
+  <Drawer :title="getDrawerTitle">
+    <CommonStatusDictionaryAlert
+      :error="commonStatusError"
+      :reload="commonStatus.reload"
+    />
+    <Alert
+      v-if="menuOptionsLoadFailed"
+      class="mb-4"
+      show-icon
+      :title="$t('system.role.configurationLoadFailed')"
+      type="error"
+    >
+      <template #action>
+        <Button size="small" @click="retryInitializeForm">
+          {{ $t('system.role.retry') }}
+        </Button>
+      </template>
+    </Alert>
+    <Alert
+      v-if="configurationReadOnly"
+      class="mb-4"
+      show-icon
+      :title="$t('system.role.grantReadOnly')"
+      type="warning"
+    />
+    <Form>
+      <template #menuIds="slotProps">
+        <Spin :spinning="loadingMenuOptions" :classes="{ root: 'w-full' }">
+          <Tree
+            :tree-data="menuOptions"
+            multiple
+            bordered
+            check-strictly
+            :auto-check-parent="false"
+            :disabled="configurationReadOnly"
+            :default-expanded-level="2"
+            v-bind="slotProps"
+            value-field="id"
+            label-field="meta.title"
+            icon-field="meta.icon"
+            @select="onRoleTreeSelect"
+          >
+            <template #node="{ value }">
+              <IconifyIcon v-if="value.meta?.icon" :icon="value.meta.icon" />
+              {{ $t(value.meta?.title ?? value.name) }}
+            </template>
+          </Tree>
+        </Spin>
+      </template>
+    </Form>
+    <div v-if="formData?.id" class="mt-4">
+      <div class="mb-1 text-sm font-medium">
+        {{ $t('system.role.grantReason') }}
+      </div>
+      <Input.TextArea
+        v-model:value="configurationReason"
+        :disabled="configurationReadOnly"
+        :maxlength="500"
+        :placeholder="$t('system.role.grantReasonPlaceholder')"
+        :rows="3"
+        @update:value="reasonMissing = false"
+      />
+      <div v-if="reasonMissing" class="mt-1 text-sm text-red-500">
+        {{ $t('system.role.grantReasonRequired') }}
+      </div>
+    </div>
+  </Drawer>
+</template>
+<style lang="css" scoped>
+:deep(.ant-tree-title) {
+  .tree-actions {
+    @apply ml-5 hidden;
+  }
+}
+
+:deep(.ant-tree-title:hover) {
+  .tree-actions {
+    @apply ml-5 flex flex-auto justify-end;
+  }
+}
+</style>

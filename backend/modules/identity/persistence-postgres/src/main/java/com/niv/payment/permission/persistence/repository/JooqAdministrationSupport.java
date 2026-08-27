@@ -1,11 +1,13 @@
 package com.niv.payment.permission.persistence.repository;
 
 import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.port.InvalidAuthorizationSubjectException;
 import com.niv.payment.permission.port.StalePermissionVersionException;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import org.jooq.DSLContext;
 import org.jooq.JSONB;
+import org.jooq.Record6;
 
 import java.util.Locale;
 import java.util.Objects;
@@ -28,22 +30,35 @@ final class JooqAdministrationSupport {
     private static final JSONB EMPTY_JSON = JSONB.valueOf("{}");
 
     private final DSLContext dsl;
+    private final AccountDomain accountDomain;
     private final Supplier<String> traceIdSupplier;
 
     JooqAdministrationSupport(DSLContext dsl, Supplier<String> traceIdSupplier) {
+        this(dsl, AccountDomain.PLATFORM, traceIdSupplier);
+    }
+
+    JooqAdministrationSupport(DSLContext dsl, AccountDomain accountDomain,
+                              Supplier<String> traceIdSupplier) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
+        this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
         this.traceIdSupplier = Objects.requireNonNull(traceIdSupplier, "traceIdSupplier");
     }
 
     void requirePlatformTenant(long tenantId) {
-        boolean activePlatform = dsl.fetchExists(dsl.selectOne()
+        requireAccountDomainTenant(tenantId);
+    }
+
+    String requireAccountDomainTenant(long tenantId) {
+        String tenantType = dsl.select(IAM_TENANT.TENANT_TYPE)
             .from(IAM_TENANT)
             .where(IAM_TENANT.ID.eq(tenantId)
-                .and(IAM_TENANT.TENANT_TYPE.eq("PLATFORM"))
-                .and(IAM_TENANT.STATUS.eq(ACTIVE))));
-        if (!activePlatform) {
-            throw new SecurityException("Platform tenant is required");
+                .and(IAM_TENANT.ACCOUNT_DOMAIN.eq(accountDomain.name()))
+                .and(IAM_TENANT.STATUS.eq(ACTIVE)))
+            .fetchOne(IAM_TENANT.TENANT_TYPE);
+        if (tenantType == null) {
+            throw new SecurityException("Active tenant in the fixed account domain is required");
         }
+        return tenantType;
     }
 
     void lockTenant(long tenantId, AdministrationActor actor) {
@@ -51,68 +66,91 @@ final class JooqAdministrationSupport {
         Long locked = dsl.select(IAM_TENANT.ID)
             .from(IAM_TENANT)
             .where(IAM_TENANT.ID.eq(tenantId)
-                .and(IAM_TENANT.TENANT_TYPE.eq("PLATFORM"))
+                .and(IAM_TENANT.ACCOUNT_DOMAIN.eq(accountDomain.name()))
                 .and(IAM_TENANT.STATUS.eq(ACTIVE)))
             .forUpdate()
             .fetchOne(IAM_TENANT.ID);
         if (locked == null) {
-            throw new SecurityException("Active platform tenant is required");
+            throw new SecurityException("Active tenant in the fixed account domain is required");
         }
         var currentVersions = dsl.select(
                 IAM_MEMBERSHIP.PERMISSION_VERSION,
-                IAM_MEMBERSHIP.SESSION_VERSION)
+                IAM_MEMBERSHIP.SESSION_VERSION,
+                IAM_USER.IDENTITY_VERSION,
+                IAM_USER.IDP_ISSUER,
+                IAM_USER.IDP_SUBJECT,
+                IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
             .from(IAM_MEMBERSHIP)
             .join(IAM_USER)
                 .on(IAM_USER.ID.eq(IAM_MEMBERSHIP.USER_ID)
-                    .and(IAM_USER.STATUS.eq(ACTIVE)))
+                    .and(IAM_USER.STATUS.eq(ACTIVE))
+                    .and(IAM_USER.ACCOUNT_DOMAIN.eq(accountDomain.name())))
             .join(IAM_AUTHENTICATION_CREDENTIAL)
                 .on(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(IAM_USER.ID)
                     .and(IAM_AUTHENTICATION_CREDENTIAL.STATUS.eq(ACTIVE))
-                    .and(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH.isNotNull()))
+                    .and(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN.eq(accountDomain.name())))
             .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
                 .and(IAM_MEMBERSHIP.ID.eq(actor.membershipId()))
                 .and(IAM_MEMBERSHIP.USER_ID.eq(actor.expectedUserId()))
+                .and(IAM_MEMBERSHIP.ACCOUNT_DOMAIN.eq(accountDomain.name()))
                 .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE)))
             .forUpdate()
             .of(IAM_MEMBERSHIP, IAM_USER, IAM_AUTHENTICATION_CREDENTIAL)
             .fetchOne();
-        if (currentVersions == null) {
-            throw new InvalidAuthorizationSubjectException();
-        }
-        if (currentVersions.value1() != actor.expectedPermissionVersion()) {
-            throw new StalePermissionVersionException();
-        }
-        if (currentVersions.value2() != actor.expectedSessionVersion()) {
-            throw new InvalidAuthorizationSubjectException();
-        }
+        validateCurrentActor(currentVersions, actor);
     }
 
     void validateActor(long tenantId, AdministrationActor actor) {
         Objects.requireNonNull(actor, "actor");
-        requirePlatformTenant(tenantId);
+        requireAccountDomainTenant(tenantId);
         var currentVersions = dsl.select(
                 IAM_MEMBERSHIP.PERMISSION_VERSION,
-                IAM_MEMBERSHIP.SESSION_VERSION)
+                IAM_MEMBERSHIP.SESSION_VERSION,
+                IAM_USER.IDENTITY_VERSION,
+                IAM_USER.IDP_ISSUER,
+                IAM_USER.IDP_SUBJECT,
+                IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH)
             .from(IAM_MEMBERSHIP)
             .join(IAM_USER)
                 .on(IAM_USER.ID.eq(IAM_MEMBERSHIP.USER_ID)
-                    .and(IAM_USER.STATUS.eq(ACTIVE)))
+                    .and(IAM_USER.STATUS.eq(ACTIVE))
+                    .and(IAM_USER.ACCOUNT_DOMAIN.eq(accountDomain.name())))
             .join(IAM_AUTHENTICATION_CREDENTIAL)
                 .on(IAM_AUTHENTICATION_CREDENTIAL.USER_ID.eq(IAM_USER.ID)
                     .and(IAM_AUTHENTICATION_CREDENTIAL.STATUS.eq(ACTIVE))
-                    .and(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH.isNotNull()))
+                    .and(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN.eq(accountDomain.name())))
             .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
                 .and(IAM_MEMBERSHIP.ID.eq(actor.membershipId()))
                 .and(IAM_MEMBERSHIP.USER_ID.eq(actor.expectedUserId()))
+                .and(IAM_MEMBERSHIP.ACCOUNT_DOMAIN.eq(accountDomain.name()))
                 .and(IAM_MEMBERSHIP.STATUS.eq(ACTIVE)))
             .fetchOne();
-        if (currentVersions == null) {
+        validateCurrentActor(currentVersions, actor);
+    }
+
+    private static void validateCurrentActor(
+        Record6<Long, Long, Long, String, String, String> current,
+        AdministrationActor actor
+    ) {
+        if (current == null) {
             throw new InvalidAuthorizationSubjectException();
         }
-        if (currentVersions.value1() != actor.expectedPermissionVersion()) {
+        if (current.value1() != actor.expectedPermissionVersion()) {
             throw new StalePermissionVersionException();
         }
-        if (currentVersions.value2() != actor.expectedSessionVersion()) {
+        if (current.value2() != actor.expectedSessionVersion()) {
+            throw new InvalidAuthorizationSubjectException();
+        }
+        if (actor.expectedIssuer() == null) {
+            if (current.value6() == null) {
+                throw new InvalidAuthorizationSubjectException();
+            }
+            return;
+        }
+        if (current.value3() != actor.expectedIdentityVersion()
+            || !actor.expectedIssuer().equals(current.value4())
+            || !actor.expectedSubject().equals(current.value5())
+            || (!actor.federated() && current.value6() == null)) {
             throw new InvalidAuthorizationSubjectException();
         }
     }

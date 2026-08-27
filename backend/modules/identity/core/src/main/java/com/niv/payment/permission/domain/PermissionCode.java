@@ -4,7 +4,8 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 public record PermissionCode(String value) {
-    private static final Pattern FORMAT = Pattern.compile("[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*");
+    private static final Pattern FORMAT = Pattern.compile(
+        "[a-z][a-z0-9_-]*(?::[a-z][a-z0-9_-]*)+");
 
     public PermissionCode {
         Objects.requireNonNull(value, "value");
@@ -22,7 +23,7 @@ public record PermissionCode(String value) {
      * policy that requires read-only semantics fails closed instead of guessing from a suffix.
      */
     public PermissionAction action() {
-        return PermissionAction.fromCode(value.substring(value.indexOf(':') + 1));
+        return PermissionAction.fromCode(value.substring(value.lastIndexOf(':') + 1));
     }
 
     @Override

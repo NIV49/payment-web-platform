@@ -9,6 +9,7 @@ public enum PermissionAction {
     CREATE(false),
     UPDATE(false),
     DELETE(false),
+    UPLOAD(false),
     DISABLE(false),
     ASSIGN_ROLE(false),
     MANAGE(false),

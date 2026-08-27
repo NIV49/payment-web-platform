@@ -29,14 +29,15 @@ backend/
 │   ├── merchant-admin-api/       MERCHANT composition root
 │   └── agent-admin-api/          AGENT composition root
 └── modules/
-    └── identity/
-        ├── core/                 framework-free model, use cases, and ports
-        ├── persistence-postgres/ identity-owned jOOQ adapter, generated model and migrations
-        ├── cache-redis/          identity-owned permission snapshot cache
-        └── session-satoken/      identity-owned trusted-session adapter
+    ├── identity/
+    │   ├── core/                 framework-free model, use cases, and ports
+    │   ├── persistence-postgres/ identity-owned jOOQ adapter, generated model and migrations
+    │   ├── cache-redis/          identity-owned permission snapshot cache
+    │   └── session-satoken/      identity-owned trusted-session adapter
+    └── system-dictionary/        dictionary core plus PostgreSQL/Redis adapters
 ```
 
-`applications` means executable composition roots only. Each bounded context owns its core and adapters under `modules`; infrastructure is not pooled into generic repository-wide modules. Dependencies point inward: Identity adapters implement Identity core ports, while `identity-core` does not depend on applications, jOOQ, Redis, or Sa-Token. Test-only fakes stay with the owning module until more than one module needs a shared `test-support` artifact.
+`applications` means executable composition roots only. Each bounded context owns its core and adapters under `modules`; infrastructure is not pooled into generic repository-wide modules. Dependencies point inward: Identity adapters implement Identity core ports, while `identity-core` does not depend on applications, jOOQ, Redis, or Sa-Token. `system-dictionary` keeps its framework-free rules separate from its PostgreSQL and Redis packages inside the owning module. Test-only fakes stay with the owning module until more than one module needs a shared `test-support` artifact.
 
 ## Verify
 
@@ -71,7 +72,7 @@ java -jar applications/platform-admin-api/target/platform-admin-api-0.1.0-SNAPSH
 unset PAYMENT_BOOTSTRAP_PASSWORD
 ```
 
-The local API is available at `http://127.0.0.1:8080/api`. After the production migration chain completes, the `local` profile separately provisions the `admin` username. Startup requires the local operator to supply `PAYMENT_BOOTSTRAP_PASSWORD`; no default identity credential is committed. V8 removes only the reserved V2/V3 fixture footprint while preserving the global and extended permission catalog plus unrelated tenants, users, audit events, and outbox events. Reserved-key collisions, modified fixture rows, or extra relationships attached to tenant `1` abort the transaction and require the [V8 migration runbook](../docs/runbooks/iam-v8-fixture-isolation.md).
+The local API is available at `http://127.0.0.1:8080/api`. After the production migration chain completes, the `local` profile separately provisions the `admin` username. Startup requires the local operator to supply `PAYMENT_BOOTSTRAP_PASSWORD`; no default identity credential is committed. V8 removes only the reserved V2/V3 fixture footprint while preserving the global and extended permission catalog plus unrelated tenants, users, audit events, and outbox events. Reserved-key collisions, modified fixture rows, or extra relationships attached to tenant `1` abort the transaction. The durable decision, rehearsal and recovery rules live in the [backend V8 migration section](../docs/ai-context/backend/README.md#v8-生产-fixture-隔离).
 
 ### Existing local volume credential alignment
 

@@ -30,6 +30,7 @@ public final class OidcStepUpFlowService {
     private final Clock clock;
     private final Supplier<String> opaqueValue;
     private final String publicScheme;
+    private final int publicPort;
     private final String frontendCallbackPath;
 
     public OidcStepUpFlowService(AccountDomain accountDomain,
@@ -43,6 +44,22 @@ public final class OidcStepUpFlowService {
                                  Supplier<String> opaqueValue,
                                  String publicScheme,
                                  String frontendCallbackPath) {
+        this(accountDomain, entries, authorizationClient, codeExchangeClient, transactions,
+            handoffs, sessions, clock, opaqueValue, publicScheme, -1, frontendCallbackPath);
+    }
+
+    public OidcStepUpFlowService(AccountDomain accountDomain,
+                                 OidcFlowService.TrustedEntryResolver entries,
+                                 AuthorizationClient authorizationClient,
+                                 CodeExchangeClient codeExchangeClient,
+                                 TransactionStore transactions,
+                                 HandoffStore handoffs,
+                                 SessionStepUp sessions,
+                                 Clock clock,
+                                 Supplier<String> opaqueValue,
+                                 String publicScheme,
+                                 int publicPort,
+                                 String frontendCallbackPath) {
         this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
         this.entries = Objects.requireNonNull(entries, "entries");
         this.authorizationClient = Objects.requireNonNull(authorizationClient, "authorizationClient");
@@ -53,6 +70,7 @@ public final class OidcStepUpFlowService {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.opaqueValue = Objects.requireNonNull(opaqueValue, "opaqueValue");
         this.publicScheme = requireScheme(publicScheme);
+        this.publicPort = requirePort(publicPort);
         this.frontendCallbackPath = requireCallbackPath(frontendCallbackPath);
     }
 
@@ -123,7 +141,8 @@ public final class OidcStepUpFlowService {
     }
 
     private URI frontendRedirect(String host, String parameter, String value) {
-        return URI.create(publicScheme + "://" + host + frontendCallbackPath + "?" + parameter + "="
+        String port = publicPort == -1 ? "" : ":" + publicPort;
+        return URI.create(publicScheme + "://" + host + port + frontendCallbackPath + "?" + parameter + "="
             + URLEncoder.encode(value, StandardCharsets.UTF_8));
     }
 
@@ -175,9 +194,16 @@ public final class OidcStepUpFlowService {
         return value;
     }
 
+    private static int requirePort(int value) {
+        if (value != -1 && (value < 1 || value > 65_535)) {
+            throw new IllegalArgumentException("Public port must be -1 or between 1 and 65535");
+        }
+        return value;
+    }
+
     private static boolean isLoopback(String host) {
         return "localhost".equals(host) || "::1".equals(host) || "[::1]".equals(host)
-            || host.startsWith("127.");
+            || host.startsWith("127.") || host.endsWith(".localhost");
     }
 
     public record StepUpPrincipal(AccountDomain accountDomain, long tenantId, long userId,

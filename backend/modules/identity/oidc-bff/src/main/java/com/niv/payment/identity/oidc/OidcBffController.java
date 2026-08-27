@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -88,9 +89,27 @@ final class OidcBffController {
 
     @PostMapping(value = "/oidc/backchannel-logout",
         consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-    ResponseEntity<Void> backChannelLogout(@RequestParam("logout_token") String signedLogout) {
-        backChannelLogout.logout(signedLogout);
+    ResponseEntity<Void> backChannelLogout(HttpServletRequest request) {
+        backChannelLogout.logout(requireLogoutToken(request.getParameterMap()));
         return ResponseEntity.noContent().build();
+    }
+
+    static String requireLogoutToken(Map<String, String[]> form) {
+        if (form == null || form.size() != 1 || !form.containsKey("logout_token")) {
+            throw new OidcLogoutTokenVerifier.BackChannelLogoutRejectedException(
+                OidcLogoutTokenVerifier.Reason.FORM_FIELDS_INVALID);
+        }
+        String[] values = form.get("logout_token");
+        if (values == null || values.length != 1) {
+            throw new OidcLogoutTokenVerifier.BackChannelLogoutRejectedException(
+                OidcLogoutTokenVerifier.Reason.FORM_VALUES_INVALID);
+        }
+        String token = values[0];
+        if (token == null || token.isBlank() || token.length() > 16_384) {
+            throw new OidcLogoutTokenVerifier.BackChannelLogoutRejectedException(
+                OidcLogoutTokenVerifier.Reason.FORM_TOKEN_INVALID);
+        }
+        return token;
     }
 
     record HandoffRequest(@NotBlank @Size(max = 512) String handoff) { }

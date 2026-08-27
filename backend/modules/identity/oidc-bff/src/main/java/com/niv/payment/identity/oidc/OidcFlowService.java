@@ -14,6 +14,7 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 public final class OidcFlowService {
+    private static final int MAX_ID_TOKEN_LENGTH = 16_384;
     private static final Pattern CANONICAL_HOST = Pattern.compile(
         "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$");
 
@@ -27,6 +28,7 @@ public final class OidcFlowService {
     private final Clock clock;
     private final Supplier<String> opaqueValue;
     private final String publicScheme;
+    private final int publicPort;
     private final String frontendCallbackPath;
 
     public OidcFlowService(AccountDomain accountDomain,
@@ -40,6 +42,22 @@ public final class OidcFlowService {
                            Supplier<String> opaqueValue,
                            String publicScheme,
                            String frontendCallbackPath) {
+        this(accountDomain, entries, authorizationClient, codeExchangeClient, transactions,
+            handoffs, authenticator, clock, opaqueValue, publicScheme, -1, frontendCallbackPath);
+    }
+
+    public OidcFlowService(AccountDomain accountDomain,
+                           TrustedEntryResolver entries,
+                           AuthorizationClient authorizationClient,
+                           CodeExchangeClient codeExchangeClient,
+                           LoginTransactionStore transactions,
+                           HandoffStore handoffs,
+                           SessionAuthenticator authenticator,
+                           Clock clock,
+                           Supplier<String> opaqueValue,
+                           String publicScheme,
+                           int publicPort,
+                           String frontendCallbackPath) {
         this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
         this.entries = Objects.requireNonNull(entries, "entries");
         this.authorizationClient = Objects.requireNonNull(authorizationClient, "authorizationClient");
@@ -50,6 +68,7 @@ public final class OidcFlowService {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.opaqueValue = Objects.requireNonNull(opaqueValue, "opaqueValue");
         this.publicScheme = requireScheme(publicScheme);
+        this.publicPort = requirePort(publicPort);
         this.frontendCallbackPath = requireCallbackPath(frontendCallbackPath);
     }
 
@@ -85,6 +104,7 @@ public final class OidcFlowService {
         handoffs.putHandoff(handoff, new LoginHandoff(transaction.entry(), identity, clock.instant()));
         String encoded = URLEncoder.encode(handoff, StandardCharsets.UTF_8);
         return new CallbackResult(URI.create(publicScheme + "://" + transaction.entry().entryHost()
+            + portSuffix()
             + frontendCallbackPath + "?handoff=" + encoded));
     }
 
@@ -141,9 +161,20 @@ public final class OidcFlowService {
         return value;
     }
 
+    private static int requirePort(int value) {
+        if (value != -1 && (value < 1 || value > 65_535)) {
+            throw new IllegalArgumentException("Public port must be -1 or between 1 and 65535");
+        }
+        return value;
+    }
+
+    private String portSuffix() {
+        return publicPort == -1 ? "" : ":" + publicPort;
+    }
+
     private static boolean isLoopback(String host) {
         return "localhost".equals(host) || "::1".equals(host) || "[::1]".equals(host)
-            || host.startsWith("127.");
+            || host.startsWith("127.") || host.endsWith(".localhost");
     }
 
     public record TrustedEntry(String entryHost, AccountDomain accountDomain, long tenantId) {
@@ -171,8 +202,15 @@ public final class OidcFlowService {
             sessionId = requirePresentedValue(sessionId);
             Objects.requireNonNull(authTime, "authTime");
             acr = requirePresentedValue(acr);
-            idToken = requirePresentedValue(idToken);
+            idToken = requireIdToken(idToken);
         }
+    }
+
+    private static String requireIdToken(String value) {
+        if (value == null || value.isBlank() || value.length() > MAX_ID_TOKEN_LENGTH) {
+            throw new LoginRejectedException(LoginRejectedException.Reason.ID_TOKEN_SIZE_INVALID);
+        }
+        return value;
     }
 
     public record LoginTransaction(TrustedEntry entry, String state, String codeVerifier, String nonce,
@@ -233,12 +271,46 @@ public final class OidcFlowService {
     }
 
     public static final class LoginRejectedException extends RuntimeException {
+        enum Reason {
+            UNSPECIFIED,
+            TOKEN_EXCHANGE_FAILED,
+            ID_TOKEN_MISSING,
+            ID_TOKEN_DECODE_FAILED,
+            ID_TOKEN_ISSUER_INVALID,
+            ID_TOKEN_SUBJECT_INVALID,
+            ID_TOKEN_TIMESTAMPS_INVALID,
+            ID_TOKEN_EXPIRED,
+            ID_TOKEN_ISSUED_AT_INVALID,
+            ID_TOKEN_AUDIENCE_INVALID,
+            ID_TOKEN_NONCE_INVALID,
+            ID_TOKEN_ACR_INVALID,
+            ID_TOKEN_AUTHORIZED_PARTY_INVALID,
+            ID_TOKEN_AUTH_TIME_INVALID,
+            ID_TOKEN_SESSION_ID_INVALID,
+            ID_TOKEN_SIZE_INVALID
+        }
+
+        private final Reason reason;
+
         public LoginRejectedException() {
-            super("OIDC login was rejected");
+            this(Reason.UNSPECIFIED, null);
         }
 
         public LoginRejectedException(Throwable cause) {
+            this(Reason.UNSPECIFIED, cause);
+        }
+
+        LoginRejectedException(Reason reason) {
+            this(reason, null);
+        }
+
+        LoginRejectedException(Reason reason, Throwable cause) {
             super("OIDC login was rejected", cause);
+            this.reason = Objects.requireNonNull(reason, "reason");
+        }
+
+        Reason reason() {
+            return reason;
         }
     }
 }

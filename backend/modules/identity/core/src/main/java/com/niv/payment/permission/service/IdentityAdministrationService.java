@@ -20,6 +20,7 @@ public final class IdentityAdministrationService {
     public static final int MAX_TREE_NODES = 2_000;
     public static final int MAX_TREE_DEPTH = 32;
     private static final int MAX_ROLES_PER_MEMBERSHIP = 256;
+    private static final int MAX_ROLE_MEMBER_CHANGES = 200;
     private static final int MAX_MENUS_PER_ROLE = 2_048;
     private final IdentityQueryPort queries;
     private final UserAdministrationPort users;
@@ -57,6 +58,19 @@ public final class IdentityAdministrationService {
         return users.findUsers(tenantId, new IdentityModels.UserQuery(query.username(), query.name(), query.id(),
             query.status(), query.departmentId(), query.startTime(), query.endTime(), page, pageSize));
     }
+    public IdentityModels.Page<IdentityModels.User> roleMembers(
+        long tenantId, long roleId, boolean assigned, IdentityModels.UserQuery query) {
+        Objects.requireNonNull(query, "query");
+        if (query.status()!=null) validStatus(query.status());
+        validRange(query.startTime(), query.endTime());
+        int page = validPage(query.page());
+        int pageSize = validPageSize(query.pageSize());
+        validOffset(page, pageSize);
+        return users.findRoleMembers(tenantId, positiveId(roleId), assigned,
+            new IdentityModels.UserQuery(query.username(), query.name(), query.id(),
+                query.status(), query.departmentId(), query.startTime(), query.endTime(),
+                page, pageSize));
+    }
     public IdentityModels.Page<IdentityModels.Role> roles(long tenantId, IdentityModels.RoleQuery query) {
         Objects.requireNonNull(query, "query"); if (query.status()!=null) validStatus(query.status());
         validRange(query.startTime(), query.endTime());
@@ -89,14 +103,39 @@ public final class IdentityAdministrationService {
                            IdentityModels.MembershipUpdateCommand command) {
         validateMembershipUpdate(command); users.updateUser(tenantId, validActor(actor), positiveId(id), command);
     }
+    public long replaceUserRoles(long tenantId, AdministrationActor actor, long id,
+                                 List<Long> roleIds, long userVersion) {
+        Objects.requireNonNull(roleIds, "roleIds is required");
+        validCollectionSize(roleIds, MAX_ROLES_PER_MEMBERSHIP, "roleIds");
+        roleIds.forEach(IdentityAdministrationService::positiveId);
+        return users.replaceUserRoles(tenantId, validActor(actor), positiveId(id),
+            List.copyOf(roleIds), validVersion(userVersion));
+    }
+    public void updateRoleMembers(long tenantId, AdministrationActor actor, long roleId,
+                                  List<IdentityModels.RoleMemberChange> members) {
+        Objects.requireNonNull(members, "members is required");
+        validCollectionSize(members, MAX_ROLE_MEMBER_CHANGES, "members");
+        Set<Long> userIds = new HashSet<>();
+        for (IdentityModels.RoleMemberChange member : members) {
+            Objects.requireNonNull(member, "member is required");
+            positiveId(member.userId());
+            validVersion(member.userVersion());
+            if (!userIds.add(member.userId())) {
+                throw new InvalidCommandException("members must contain unique users");
+            }
+        }
+        users.updateRoleMembers(tenantId, validActor(actor), positiveId(roleId),
+            List.copyOf(members));
+    }
     public long updateUserStatus(long tenantId, AdministrationActor actor, long id, int status, long version) {
         validStatus(status);
         return users.updateUserStatus(tenantId, validActor(actor), positiveId(id), status, validVersion(version));
     }
     public IdentityModels.PasswordResetResult resetUserPassword(long tenantId, AdministrationActor actor,
-                                                                long id, long credentialVersion) {
+                                                                long id, long credentialVersion,
+                                                                String password) {
         return users.resetUserPassword(tenantId, validActor(actor), positiveId(id),
-            validVersion(credentialVersion));
+            validVersion(credentialVersion), LocalPasswordPolicy.requireValid(password));
     }
     public void deleteUser(long tenantId, AdministrationActor actor, long id, long expectedVersion) {
         users.deleteUser(tenantId, validActor(actor), positiveId(id), validVersion(expectedVersion));
@@ -149,7 +188,7 @@ public final class IdentityAdministrationService {
     }
 
     private static void validateUserCreate(IdentityModels.UserCreateCommand command) {
-        Objects.requireNonNull(command, "command"); requiredText(command.username(), "Username");
+        Objects.requireNonNull(command, "command"); LoginEmailPolicy.normalize(command.username());
         requiredText(command.name(), "Name"); positiveId(command.departmentId());
         Objects.requireNonNull(command.roleIds(), "roleIds is required");
         validCollectionSize(command.roleIds(), MAX_ROLES_PER_MEMBERSHIP, "roleIds");
@@ -165,7 +204,7 @@ public final class IdentityAdministrationService {
             || command.identityVersion() != null || command.credentialVersion() != null
             || command.remark() != null;
         if (identityUpdate) {
-            requiredText(command.username(), "Username");
+            LoginEmailPolicy.normalize(command.username());
             requiredText(command.name(), "Name");
             if (command.identityVersion() == null || command.identityVersion() < 0) {
                 throw new InvalidCommandException("identityVersion is invalid");

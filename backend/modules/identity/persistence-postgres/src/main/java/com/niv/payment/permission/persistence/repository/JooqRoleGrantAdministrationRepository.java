@@ -48,14 +48,18 @@ import static com.niv.payment.permission.persistence.repository.JooqAdministrati
 /** Atomic jOOQ boundary for the deliberately constrained tenant-wide role grant editor. */
 public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort, RoleGrantWritePort {
     private static final Set<String> LEGACY_COMPATIBILITY_CODES =
-        Set.of("menu:manage", "department:manage");
+        Set.of(
+            "menu:manage", "department:manage",
+            "dictionary-data:create", "dictionary-data:update", "dictionary-data:delete");
     private static final Set<String> PROTECTED_PORTAL_PERMISSION_CODES = Set.of(
         AccountDomain.PLATFORM.accessPermissionCode(),
         AccountDomain.MERCHANT.accessPermissionCode(),
         AccountDomain.AGENT.accessPermissionCode());
     private static final Set<String> REPLACEABLE_PERMISSION_CODES =
         java.util.stream.Stream.concat(
-                RoleGrantAdministrationService.GRANTABLE_CODES.stream(),
+                java.util.stream.Stream.concat(
+                    RoleGrantAdministrationService.GRANTABLE_CODES.stream(),
+                    RoleGrantAdministrationService.DICTIONARY_GRANTABLE_CODES.stream()),
                 LEGACY_COMPATIBILITY_CODES.stream())
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
     private static final Set<String> REQUIRED_TRANSACTIONAL_PERMISSIONS = Set.of(
@@ -64,11 +68,18 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
     private final DSLContext dsl;
     private final JooqAdministrationSupport support;
     private final Supplier<String> traceIdSupplier;
+    private final Set<String> grantableCodes;
 
     public JooqRoleGrantAdministrationRepository(DSLContext dsl, Supplier<String> traceIdSupplier) {
+        this(dsl, AccountDomain.PLATFORM, traceIdSupplier);
+    }
+
+    public JooqRoleGrantAdministrationRepository(DSLContext dsl, AccountDomain accountDomain,
+                                                 Supplier<String> traceIdSupplier) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
         this.traceIdSupplier = Objects.requireNonNull(traceIdSupplier, "traceIdSupplier");
-        this.support = new JooqAdministrationSupport(dsl, traceIdSupplier);
+        this.support = new JooqAdministrationSupport(dsl, accountDomain, traceIdSupplier);
+        this.grantableCodes = RoleGrantAdministrationService.grantableCodes(accountDomain);
     }
 
     @Override
@@ -79,7 +90,7 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
         return dsl.select(IAM_PERMISSION.PERMISSION_CODE, IAM_PERMISSION.RESOURCE_CODE,
                 IAM_PERMISSION.ACTION_CODE)
             .from(IAM_PERMISSION)
-            .where(IAM_PERMISSION.PERMISSION_CODE.in(RoleGrantAdministrationService.GRANTABLE_CODES)
+            .where(IAM_PERMISSION.PERMISSION_CODE.in(grantableCodes)
                 .and(IAM_PERMISSION.STATUS.eq(ACTIVE))
                 .and(IAM_PERMISSION.RISK_LEVEL.eq("NORMAL"))
                 .and(IAM_PERMISSION.CROSS_TENANT_MODE.eq("SAME_TENANT_ONLY"))
@@ -282,7 +293,7 @@ public class JooqRoleGrantAdministrationRepository implements RoleGrantReadPort,
                 editable = false;
                 continue;
             }
-            boolean supported = RoleGrantAdministrationService.GRANTABLE_CODES.contains(code)
+            boolean supported = grantableCodes.contains(code)
                 && safeTenantGrant;
             editable &= supported;
             if (first.get(IAM_GRANT_DIMENSION.DIMENSION_CODE) != null) {

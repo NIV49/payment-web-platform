@@ -20,6 +20,7 @@ import {
 } from '../../api';
 import { $t } from '../../locales';
 import { useAuthStore } from '../../store';
+import { resolveIdentityGovernanceMode } from './identity-governance-mode';
 
 defineOptions({ name: 'IdentityMembersView' });
 
@@ -30,6 +31,10 @@ type InvitationValues = {
 };
 
 const authStore = useAuthStore();
+const { oidcWritesEnabled } = resolveIdentityGovernanceMode({
+  explicitMode: import.meta.env.VITE_AUTH_MODE,
+  prod: import.meta.env.PROD,
+});
 const invitationRoles = ref<IdentityGovernanceApi.InvitationRole[]>([]);
 
 const invitationSchema: VbenFormSchema[] = [
@@ -125,13 +130,17 @@ const columns = [
     slots: { default: 'administrator' },
     title: $t('identity.members.administrator'),
   },
-  {
-    field: 'action',
-    fixed: 'right',
-    slots: { default: 'action' },
-    title: $t('common.operation'),
-    width: 150,
-  },
+  ...(oidcWritesEnabled
+    ? [
+        {
+          field: 'action',
+          fixed: 'right',
+          slots: { default: 'action' },
+          title: $t('identity.members.operation'),
+          width: 150,
+        },
+      ]
+    : []),
 ];
 
 const [Grid, gridApi] = useVbenVxeGrid<IdentityGovernanceApi.Member>({
@@ -157,6 +166,7 @@ const [Grid, gridApi] = useVbenVxeGrid<IdentityGovernanceApi.Member>({
 
 function canRecover(member: IdentityGovernanceApi.Member) {
   return (
+    oidcWritesEnabled &&
     !member.currentMembership &&
     member.membershipStatus === 'ACTIVE' &&
     member.identityStatus === 'ACTIVE' &&
@@ -184,22 +194,27 @@ function startStepUp() {
 
 <template>
   <Page auto-content-height>
-    <InvitationModal :title="$t('identity.members.invite')">
+    <InvitationModal
+      v-if="oidcWritesEnabled"
+      :title="$t('identity.members.invite')"
+    >
       <InvitationForm class="mx-4" />
     </InvitationModal>
 
     <Grid :table-title="$t('identity.members.list')">
       <template #toolbar-tools>
-        <Tooltip :title="$t('identity.members.stepUpRequired')">
-          <Button @click="startStepUp">
-            <IconifyIcon class="size-5" icon="lucide:shield-check" />
-            {{ $t('identity.members.stepUp') }}
+        <template v-if="oidcWritesEnabled">
+          <Tooltip :title="$t('identity.members.stepUpRequired')">
+            <Button @click="startStepUp">
+              <IconifyIcon class="size-5" icon="lucide:shield-check" />
+              {{ $t('identity.members.stepUp') }}
+            </Button>
+          </Tooltip>
+          <Button type="primary" @click="invitationModalApi.open()">
+            <IconifyIcon class="size-5" icon="lucide:user-plus" />
+            {{ $t('identity.members.invite') }}
           </Button>
-        </Tooltip>
-        <Button type="primary" @click="invitationModalApi.open()">
-          <IconifyIcon class="size-5" icon="lucide:user-plus" />
-          {{ $t('identity.members.invite') }}
-        </Button>
+        </template>
       </template>
 
       <template #administrator="{ row }">

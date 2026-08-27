@@ -1,6 +1,7 @@
 package com.niv.payment.permission;
 
 import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.domain.PermissionCode;
 import com.niv.payment.permission.domain.ScopeDimension;
 import com.niv.payment.permission.domain.ScopeMode;
@@ -11,7 +12,9 @@ import com.niv.payment.permission.service.RoleGrantReadPort;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,6 +37,16 @@ class RoleGrantAdministrationServiceTest {
         });
 
         assertEquals(18, service.grantablePermissions(3L, ACTOR).size());
+    }
+
+    @Test
+    void platformDictionaryGrantCatalogOmitsLegacyDataWritePermissions() {
+        assertEquals(Set.of(
+                "dictionary:view", "dictionary:create", "dictionary:update",
+                "dictionary:delete", "dictionary-data:view"),
+            RoleGrantAdministrationService.grantableCodes(AccountDomain.PLATFORM).stream()
+                .filter(code -> code.startsWith("dictionary"))
+                .collect(java.util.stream.Collectors.toSet()));
     }
 
     @Test
@@ -75,6 +88,16 @@ class RoleGrantAdministrationServiceTest {
 
         assertTrue(called.get());
         assertEquals(5L, result.roleVersion());
+    }
+
+    @Test
+    void rejectsOversizedGrantSetsAtTheCoreCommandBoundary() {
+        List<RoleGrantModels.Selection> oversized = IntStream.range(0, 65)
+            .mapToObj(index -> selection("grant-" + index, "user:view"))
+            .toList();
+
+        assertThrows(IllegalArgumentException.class, () -> new RoleGrantChangeCommand(
+            3L, 2L, 4L, ACTOR, "least privilege", oversized));
     }
 
     @Test

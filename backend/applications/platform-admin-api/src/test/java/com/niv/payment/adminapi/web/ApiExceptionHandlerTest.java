@@ -72,4 +72,28 @@ class ApiExceptionHandlerTest {
         assertThat(response.getBody().code()).isEqualTo(40903);
         assertThat(response.getBody().error()).isEqualTo("LEGACY_ADMINISTRATION_CUTOVER_REQUIRED");
     }
+
+    @Test
+    void multipartFailuresUseBoundedBadRequestAndPayloadTooLargeEnvelopes() {
+        var handler = new ApiExceptionHandler(mock(AuthenticationService.class));
+
+        var malformed = handler.malformedMultipart(
+            new org.springframework.web.multipart.MultipartException("parser internals"));
+        assertThat(malformed.getStatusCode().value()).isEqualTo(400);
+        assertThat(malformed.getBody().code()).isEqualTo(40001);
+        assertThat(malformed.getBody().error()).isEqualTo("INVALID_REQUEST");
+        assertThat(malformed.getBody().message()).isEqualTo("Invalid request");
+
+        var oversized = handler.multipartTooLarge(
+            new org.springframework.web.multipart.MaxUploadSizeExceededException(2_097_152));
+        assertThat(oversized.getStatusCode().value()).isEqualTo(413);
+        assertThat(oversized.getBody().code()).isEqualTo(41301);
+        assertThat(oversized.getBody().error()).isEqualTo("PAYLOAD_TOO_LARGE");
+        assertThat(oversized.getBody().message()).isEqualTo("Request body is too large");
+
+        var missingPart = handler.badRequest(
+            new org.springframework.web.multipart.support.MissingServletRequestPartException("file"));
+        assertThat(missingPart.getStatusCode().value()).isEqualTo(400);
+        assertThat(missingPart.getBody().error()).isEqualTo("INVALID_REQUEST");
+    }
 }

@@ -29,6 +29,10 @@ spring:
     default-property-inclusion: non_null
     deserialization:
       fail-on-unknown-properties: true
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 2304KB
 
 # Sa-Token's auto-configuration binds this bean while the application context
 # is created, before the web server accepts traffic. Security settings must not
@@ -58,11 +62,13 @@ payment:
     legacy-administration-cutover-complete: ${PAYMENT_LEGACY_ADMINISTRATION_CUTOVER_COMPLETE:false}
   menu:
     # Keep in sync with deliberate route pages under platform-admin/src/views.
-    allowed-page-components: /dashboard/analytics/index,/dashboard/workspace/index,/demos/antd/index,/system/dept/list,/system/menu/list,/system/role/list,/system/user/list
+    allowed-page-components: /dashboard/analytics/index,/dashboard/workspace/index,/demos/antd/index,/merchant/list,/system/dept/list,/system/dict/data/list,/system/dict/list,/system/menu/list,/system/role/list,/system/user/list
+
   security:
     allowed-origins: ${PAYMENT_PLATFORM_ALLOWED_ORIGIN:http://127.0.0.1:5999}
     # Applies to every mutating /api request, including chunked requests without Content-Length.
     max-request-body-bytes: ${PAYMENT_MAX_REQUEST_BODY_BYTES:262144}
+    merchant-document-upload-enabled: true
   identity:
     account-domain: PLATFORM
     login-type: platform-admin
@@ -89,6 +95,7 @@ payment:
     post-logout-redirect-uri: ${PAYMENT_PLATFORM_OIDC_POST_LOGOUT_REDIRECT_URI:}
     required-acr: ${PAYMENT_PLATFORM_OIDC_REQUIRED_ACR:2}
     public-scheme: ${PAYMENT_PLATFORM_PUBLIC_SCHEME:https}
+    public-port: ${PAYMENT_PLATFORM_PUBLIC_PORT:-1}
     frontend-callback-path: /auth/oidc/callback
     transaction-ttl: PT5M
     handoff-ttl: PT1M
@@ -96,6 +103,15 @@ payment:
     logout-event-maximum-age: PT5M
     logout-processing-ttl: PT30S
     logout-replay-ttl: PT24H
+
+merchant:
+  protection:
+    search-hmac-keys: ${MCH_SEARCH_HMAC_KEYS}
+    idempotency-hmac-keys: ${MCH_IDEMPOTENCY_HMAC_KEYS}
+    registration-aead-keys: ${MCH_REGISTRATION_AEAD_KEYS}
+    legal-id-aead-keys: ${MCH_LEGAL_ID_AEAD_KEYS}
+    document-aead-keys: ${MCH_DOCUMENT_AEAD_KEYS}
+    active-idempotency-key-id: ${MCH_ACTIVE_IDEMPOTENCY_KEY_ID:mch-idempotency-v1}
 
 logging:
   level:

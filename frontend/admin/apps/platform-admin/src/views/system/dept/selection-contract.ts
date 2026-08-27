@@ -12,6 +12,14 @@ interface DepartmentParentOption extends SystemDeptApi.SystemDept {
   disabled?: boolean;
 }
 
+function normalizeDepartmentParentId(parentId: unknown): string | undefined {
+  if (parentId === undefined || parentId === null || parentId === '') {
+    return undefined;
+  }
+  const normalized = String(parentId);
+  return normalized === '0' ? undefined : normalized;
+}
+
 function canManageDepartment(department: SystemDeptApi.SystemDept) {
   return !department.deletedAt;
 }
@@ -66,4 +74,5 @@ export {
   canManageDepartment,
   canPerformDepartmentAction,
   filterDepartmentParentOptions,
+  normalizeDepartmentParentId,
 };

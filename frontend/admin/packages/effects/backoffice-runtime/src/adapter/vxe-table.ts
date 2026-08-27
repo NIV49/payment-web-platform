@@ -1,4 +1,4 @@
-import type { FormValues, TableActionProps } from '@vben/common-ui';
+import type { ActionItem, FormValues, TableActionProps } from '@vben/common-ui';
 import type { VxeTableGridOptions } from '@vben/plugins/vxe-table';
 import type { Recordable } from '@vben/types';
 
@@ -8,7 +8,6 @@ import { defineComponent, h } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { VbenTableAction as VbenTableActionCore } from '@vben/common-ui';
-import { IconifyIcon } from '@vben/icons';
 import { $te } from '@vben/locales';
 import {
   setupVbenVxeTable,
@@ -18,8 +17,9 @@ import { get, isFunction, isString } from '@vben/utils';
 
 import { $t } from '@payment/backoffice-runtime/locales';
 import { objectOmit } from '@vueuse/core';
-import { Button, Image, Popconfirm, Switch, Tag } from 'antdv-next';
+import { Button, Image, Switch, Tag } from 'antdv-next';
 
+import { resolveCellTagOptions } from './cell-tag-options';
 import { useVbenForm } from './form';
 
 setupVbenVxeTable({
@@ -85,12 +85,15 @@ setupVbenVxeTable({
 
     // 单元格渲染： Tag
     vxeUI.renderer.add('CellTag', {
-      renderTableDefault({ options, props }, { column, row }) {
-        const value = get(row, column.field);
-        const tagOptions = options ?? [
+      renderTableDefault({ attrs, options, props }, { column, row }) {
+        const value = get(row, attrs?.valueField || column.field);
+        const displayValue = attrs?.labelField
+          ? get(row, attrs.labelField)
+          : undefined;
+        const tagOptions = resolveCellTagOptions(options, [
           { color: 'success', label: $t('common.enabled'), value: 1 },
           { color: 'error', label: $t('common.disabled'), value: 0 },
-        ];
+        ]);
         const tagItem = tagOptions.find((item) => item.value === value);
         return h(
           Tag,
@@ -98,7 +101,7 @@ setupVbenVxeTable({
             ...props,
             ...objectOmit(tagItem ?? {}, ['label']),
           },
-          { default: () => tagItem?.label ?? value },
+          { default: () => displayValue ?? tagItem?.label ?? value },
         );
       },
     });
@@ -151,7 +154,7 @@ setupVbenVxeTable({
       renderTableDefault({ attrs, options, props }, { column, row }) {
         const { hasAccessByCodes } = useAccess();
         const defaultProps = { size: 'small', type: 'link', ...props };
-        let align: string;
+        let align: 'center' | 'end' | 'start';
         switch (column.align) {
           case 'center': {
             align = 'center';
@@ -202,103 +205,50 @@ setupVbenVxeTable({
             return optBtn;
           })
           .filter((opt) => {
-            if (opt.show === false) return false;
+            if (opt.show === false || opt.ifShow === false) return false;
             if (!opt.auth) return true;
             const codes = Array.isArray(opt.auth) ? opt.auth : [opt.auth];
             return hasAccessByCodes(codes);
           });
 
-        function renderBtn(opt: Recordable<any>, listen = true) {
-          return h(
-            Button,
-            {
-              ...props,
-              ...objectOmit(opt, ['auth', 'code', 'show']),
-              icon: undefined,
-              onClick: listen
-                ? () =>
-                    attrs?.onClick?.({
-                      code: opt.code,
-                      row,
-                    })
-                : undefined,
-            },
-            {
-              default: () => {
-                const content = [];
-                if (opt.icon) {
-                  content.push(
-                    h(IconifyIcon, { class: 'size-5', icon: opt.icon }),
-                  );
-                }
-                content.push(opt.text);
-                return content;
-              },
-            },
-          );
+        function onActionClick(code: string) {
+          attrs?.onClick?.({ code, row });
         }
 
-        function renderConfirm(opt: Recordable<any>) {
-          let viewportWrapper: HTMLElement | null = null;
-          return h(
-            Popconfirm,
-            {
-              /**
-               * 当popconfirm用在固定列中时，将固定列作为弹窗的容器时可能会因为固定列较窄而无法容纳弹窗
-               * 将表格主体区域作为弹窗容器时又会因为固定列的层级较高而遮挡弹窗
-               * 将body或者表格视口区域作为弹窗容器时又会导致弹窗无法跟随表格滚动。
-               * 鉴于以上各种情况，一种折中的解决方案是弹出层展示时，禁止操作表格的滚动条。
-               * 这样既解决了弹窗的遮挡问题，又不至于让弹窗随着表格的滚动而跑出视口区域。
-               */
-              getPopupContainer(el) {
-                viewportWrapper = el.closest('.vxe-table--viewport-wrapper');
-                return document.body;
-              },
-              placement: 'topLeft',
+        const actions: ActionItem[] = operations.map((opt) => {
+          const action: ActionItem = {
+            class: opt.class,
+            danger: opt.danger,
+            disabled: opt.disabled,
+            icon: opt.icon,
+            key: opt.code,
+            loading: opt.loading,
+            onClick: () => onActionClick(opt.code),
+            size: opt.size === 'small' ? 'sm' : opt.size,
+            text: opt.text,
+            tooltip: opt.tooltip,
+            variant: opt.variant ?? (opt.type === 'link' ? 'link' : undefined),
+          };
+          if (opt.code === 'delete') {
+            action.popConfirm = {
+              cancelText: $t('common.cancel'),
+              confirm: () => onActionClick(opt.code),
+              description: $t('ui.actionMessage.deleteConfirm', [
+                row[attrs?.nameField || 'name'],
+              ]),
+              okText: $t('common.confirm'),
               title: $t('ui.actionTitle.delete', [attrs?.nameTitle || '']),
-              ...props,
-              ...objectOmit(opt, ['auth', 'code', 'show']),
-              icon: undefined,
-              onOpenChange: (open: boolean) => {
-                // 当弹窗打开时，禁止表格的滚动
-                if (open) {
-                  viewportWrapper?.style.setProperty('pointer-events', 'none');
-                } else {
-                  viewportWrapper?.style.removeProperty('pointer-events');
-                }
-              },
-              onConfirm: () => {
-                attrs?.onClick?.({
-                  code: opt.code,
-                  row,
-                });
-              },
-            },
-            {
-              default: () => renderBtn({ ...opt }, false),
-              description: () =>
-                h(
-                  'div',
-                  { class: 'truncate' },
-                  $t('ui.actionMessage.deleteConfirm', [
-                    row[attrs?.nameField || 'name'],
-                  ]),
-                ),
-            },
-          );
-        }
+            };
+          }
+          return action;
+        });
 
-        const btns = operations.map((opt) =>
-          opt.code === 'delete' ? renderConfirm(opt) : renderBtn(opt),
-        );
-        return h(
-          'div',
-          {
-            class: 'flex table-operations',
-            style: { justifyContent: align },
-          },
-          btns,
-        );
+        return h(VbenTableActionCore, {
+          actions: actions.slice(0, 3),
+          align,
+          dropdownActions: actions.slice(3),
+          dropdownTrigger: 'click',
+        });
       },
     });
 
@@ -357,4 +307,5 @@ export type OnActionClickParams<T = Recordable<any>> = {
 export type OnActionClickFn<T = Recordable<any>> = (
   params: OnActionClickParams<T>,
 ) => void;
+export { asCellTagRenderOptions } from './cell-tag-options';
 export type * from '@vben/plugins/vxe-table';

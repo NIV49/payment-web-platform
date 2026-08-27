@@ -1,3 +1,5 @@
+import type { CommonStatusOptions } from '@payment/backoffice-runtime/composables';
+
 import type { ComputedRef } from 'vue';
 
 import type { VxeTableGridColumns } from '@vben/plugins/vxe-table';
@@ -7,6 +9,7 @@ import type { OnActionClickFn } from '#/adapter/vxe-table';
 import type { SystemDeptApi } from '#/api/system/dept';
 
 import { z } from '#/adapter/form';
+import { asCellTagRenderOptions } from '#/adapter/vxe-table';
 import { PERMISSION_CODES } from '#/api';
 import { getDeptList } from '#/api/system/dept';
 import { $t } from '#/locales';
@@ -18,12 +21,18 @@ import {
 
 type AccessCodeChecker = (codes: string[]) => boolean;
 
+const getFallbackStatusOptions = (): CommonStatusOptions => [
+  { color: 'success', label: $t('common.enabled'), value: 1 },
+  { color: 'error', label: $t('common.disabled'), value: 0 },
+];
+
 /**
  * 获取编辑表单的字段配置。如果没有使用多语言，可以直接export一个数组常量
  */
 export function useSchema(
   currentDepartmentId: ComputedRef<string | undefined>,
   currentParentId: ComputedRef<string | undefined>,
+  getStatusOptions: () => CommonStatusOptions = getFallbackStatusOptions,
 ): VbenFormSchema[] {
   return [
     {
@@ -65,14 +74,11 @@ export function useSchema(
     },
     {
       component: 'RadioGroup',
-      componentProps: {
+      componentProps: () => ({
         buttonStyle: 'solid',
-        options: [
-          { label: $t('common.enabled'), value: 1 },
-          { label: $t('common.disabled'), value: 0 },
-        ],
+        options: getStatusOptions(),
         optionType: 'button',
-      },
+      }),
       defaultValue: 1,
       fieldName: 'status',
       label: $t('system.dept.status'),
@@ -102,6 +108,7 @@ export function useSchema(
 export function useColumns(
   onActionClick?: OnActionClickFn<SystemDeptApi.SystemDept>,
   hasAccessByCodes: AccessCodeChecker = () => false,
+  getStatusOptions: () => CommonStatusOptions = getFallbackStatusOptions,
 ): VxeTableGridColumns<SystemDeptApi.SystemDept> {
   return [
     {
@@ -113,7 +120,10 @@ export function useColumns(
       width: 150,
     },
     {
-      cellRender: { name: 'CellTag' },
+      cellRender: {
+        name: 'CellTag',
+        options: asCellTagRenderOptions(getStatusOptions),
+      },
       field: 'status',
       title: $t('system.dept.status'),
       width: 100,

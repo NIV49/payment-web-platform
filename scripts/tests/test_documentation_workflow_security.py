@@ -55,6 +55,7 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
         ".github/CODEOWNERS",
         ".github/workflows/documentation.yml",
         "scripts/check-doc-decisions.py",
+        "scripts/check_doc_code_sync.py",
         "scripts/check_modernization_artifacts.py",
         "scripts/check_project_skills.py",
         "scripts/check_sensitive_artifacts.py",
@@ -972,6 +973,7 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
         script = controlled_steps[0]["run"]
         self.assertEqual(1, script.count("ci_capture_python_dependency_state"))
         self.assertIn("ci_python scripts/check-doc-decisions.py", script)
+        self.assertIn("ci_python scripts/check_doc_code_sync.py", script)
         self.assertIn(
             'ci_python -m unittest discover -s scripts/tests -p "test_*.py"',
             script,
@@ -2057,11 +2059,22 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
         )
         self.assertNotRegex(controlled_script, r"(^|\s)python3\s")
         self.assertNotRegex(controlled_script, r"(^|\s)git\s")
-        self.assertEqual(4, content.count('--commit "$CI_EXPECTED_COMMIT"'))
+        self.assertEqual(6, content.count('--commit "$CI_EXPECTED_COMMIT"'))
         self.assertEqual(
-            4, content.count('--repository-root "$CI_EXPECTED_WORKSPACE"')
+            6, content.count('--repository-root "$CI_EXPECTED_WORKSPACE"')
         )
-        self.assertEqual(2, content.count('--base-commit "$TRUSTED_POLICY_COMMIT"'))
+        self.assertEqual(4, content.count('--base-commit "$TRUSTED_POLICY_COMMIT"'))
+        self.assertEqual(2, content.count("scripts/check_doc_code_sync.py"))
+        for bound_option in (
+            '--git-executable "$CI_TOOL_GIT"',
+            '--git-dir "$CI_EXPECTED_GIT_DIR"',
+            '--work-tree "$CI_EXPECTED_WORK_TREE"',
+            '--git-common-dir "$CI_EXPECTED_GIT_COMMON_DIR"',
+            '--object-directory "$CI_EXPECTED_OBJECT_DIRECTORY"',
+            '--safe-path "$CI_SAFE_PATH"',
+            '--safe-home "$CI_SAFE_HOME"',
+        ):
+            self.assertEqual(2, content.count(bound_option))
         self.assertEqual(
             2,
             content.count('--trusted-policy-commit "$TRUSTED_POLICY_COMMIT"'),
@@ -2096,6 +2109,7 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
             self.assertIn(locked_install_option, guard)
         for command in (
             "check-doc-decisions.py",
+            "check_doc_code_sync.py",
             "check_project_skills.py",
             "check_sensitive_artifacts.py",
             "check_modernization_artifacts.py",
@@ -2104,6 +2118,11 @@ class DocumentationWorkflowSecurityTest(unittest.TestCase):
             self.assertIn(command, content)
         self.assertIn("ci_python ", content)
         self.assertNotIn('"$CI_TOOL_PYTHON3"', content)
+
+    def test_archive_manifest_requires_the_documentation_sync_checker(self) -> None:
+        guard = REPOSITORY_GUARD.read_text(encoding="utf-8")
+
+        self.assertIn('"scripts/check_doc_code_sync.py",', guard)
 
     def test_isolated_python_ignores_a_sibling_stdlib_shadow_module(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

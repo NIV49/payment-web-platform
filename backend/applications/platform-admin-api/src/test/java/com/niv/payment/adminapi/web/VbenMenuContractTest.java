@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class VbenMenuContractTest {
     private final VbenMenuContract contract = new VbenMenuContract(
-        "/dashboard/analytics/index,/system/user/list,/system/role/list");
+        "/dashboard/analytics/index,/system/dict/data/list,/system/dict/list,/system/user/list,/system/role/list");
 
     @Test
     void acceptsCurrentVbenCatalogPageEmbeddedLinkAndButtonShapes() {
@@ -20,6 +20,12 @@ class VbenMenuContractTest {
             Map.of("title", "system.title"))).doesNotThrowAnyException();
         assertThatCode(() -> contract.validate("menu", "SystemUser", "/system/user", "/system/user/list",
             null, "user:view", Map.of("title", "system.user.title"))).doesNotThrowAnyException();
+        assertThatCode(() -> contract.validate("menu", "SystemDictionary", "/system/dict", "/system/dict/list",
+            null, "dictionary:view", Map.of("title", "system.dict.title"))).doesNotThrowAnyException();
+        assertThatCode(() -> contract.validate("menu", "SystemDictionaryData", "/system/dict/data/type/:dictType",
+            "/system/dict/data/list", null, "dictionary-data:view",
+            Map.of("title", "system.dictData.title", "hideInMenu", true,
+                "activePath", "/system/dict"))).doesNotThrowAnyException();
         assertThatCode(() -> contract.validate("embedded", "StatusPage", "/status", "IFrameView", null, null,
             Map.of("title", "page.status.title", "iframeSrc", "https://status.example.com")))
             .doesNotThrowAnyException();

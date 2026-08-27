@@ -36,5 +36,8 @@ public record RoleConfigurationCreateCommand(
             throw new IllegalArgumentException("Role menu identifiers are invalid");
         }
         grants = grants == null ? List.of() : List.copyOf(grants);
+        if (grants.size() > RoleGrantModels.MAX_SELECTIONS) {
+            throw new IllegalArgumentException("Too many role grants");
+        }
     }
 }

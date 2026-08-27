@@ -4,7 +4,8 @@ function isLoopback(hostname: string) {
   return (
     hostname === '::1' ||
     hostname === 'localhost' ||
-    hostname.startsWith('127.')
+    hostname.startsWith('127.') ||
+    hostname.endsWith('.localhost')
   );
 }
 

@@ -11,6 +11,8 @@ import { useAccess } from '@vben/access';
 import { Page, useVbenModal } from '@vben/common-ui';
 import { Plus } from '@vben/icons';
 
+import CommonStatusDictionaryAlert from '@payment/backoffice-runtime/components/common-status-dictionary-alert';
+import { useCommonStatusDictionary } from '@payment/backoffice-runtime/composables';
 import { Button, message } from 'antdv-next';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
@@ -25,6 +27,9 @@ import Form from './modules/form.vue';
 import { canPerformDepartmentAction } from './selection-contract';
 
 const { hasAccessByCodes } = useAccess();
+const commonStatus = useCommonStatusDictionary();
+const commonStatusError = commonStatus.error;
+const getStatusOptions = () => commonStatus.options.value;
 const canCreateDepartment = computed(() =>
   hasPermissionDependencies(
     [PERMISSION_CODES.departmentCreate],
@@ -135,7 +140,7 @@ function onActionClick({
 const [Grid, gridApi] = useVbenVxeGrid({
   gridEvents: {},
   gridOptions: {
-    columns: useColumns(onActionClick, hasAccessByCodes),
+    columns: useColumns(onActionClick, hasAccessByCodes, getStatusOptions),
     height: 'auto',
     keepSource: true,
     pagerConfig: {
@@ -172,6 +177,10 @@ function refreshGrid() {
 <template>
   <Page auto-content-height>
     <FormModal @success="refreshGrid" />
+    <CommonStatusDictionaryAlert
+      :error="commonStatusError"
+      :reload="commonStatus.reload"
+    />
     <Grid :table-title="$t('system.dept.list')">
       <template #toolbar-tools>
         <Button

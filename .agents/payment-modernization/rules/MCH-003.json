@@ -1,0 +1,53 @@
+{
+  "ruleId": "MCH-003",
+  "status": "candidate",
+  "statement": "PLATFORM-assisted Merchant creation and full-profile amendments must preserve IAM separation, reviewer independence, protected evidence, and the effective Merchant lifecycle.",
+  "scope": [
+    "PLATFORM-assisted Merchant application for an existing eligible MERCHANT Tenant",
+    "full reviewed Merchant profile amendments",
+    "protected Merchant image evidence and legal identity numbers",
+    "single full-page Merchant create and edit interaction",
+    "separate full-page Merchant detail and review interaction with one shared read-only presentation"
+  ],
+  "given": [
+    "an ACTIVE unbound MERCHANT Tenant or an ACTIVE/DISABLED Merchant",
+    "a recently stepped-up PLATFORM Session holding one exact protected permission",
+    "the accepted ADR-0015 and exact section 12 API contract"
+  ],
+  "when": [
+    "a protected PLATFORM operator submits a Merchant application or amendment",
+    "another protected PLATFORM operator reviews the pending version",
+    "a protected image is uploaded, attached, previewed or superseded"
+  ],
+  "then": [
+    "GET /api/platform/merchant-onboarding/eligible-tenants and POST /api/platform/merchants require merchant:create and may bind only an existing ACTIVE unbound MERCHANT Tenant without creating IAM records.",
+    "POST /api/platform/merchants/{merchantId}/amendments requires merchant:amend; GET /api/platform/merchants/{merchantId}/amendments/pending requires merchant:view; review-decisions requires merchant:review.",
+    "Temporary document commands require merchant:document:upload, attached document reads require merchant:document:view, and no document endpoint returns a public URL or original bytes.",
+    "The existing attached-document endpoint accepts optional amendmentId: omission reads the current effective binding, presence reads only the exact pending amendment attachment, and a pending review never falls back to current evidence.",
+    "Create and amendment accept the exact 23 required profile inputs, reject JSON null and unknown fields, and allow only remarks to be empty; receiveEmail is excluded.",
+    "The initial industryCode values are FINANCIAL_SERVICES, ECOMMERCE, RETAIL, TRAVEL, EDUCATION and OTHER; legalIdTypeCode values are NATIONAL_ID, PASSPORT and DRIVER_LICENSE.",
+    "New merchantTypeCode writes and responses use PLATFORM, INDIRECT, COMMISSION or SALES; DIRECT is replay-only and PLATFORM is canonical.",
+    "A create records the author Membership and creates Merchant PENDING_REVIEW; the same Membership cannot review that application.",
+    "An amendment has independent PENDING_REVIEW, APPROVED, REJECTED or STALE status plus immutable originMerchantVersion, originStatus and authorMembershipId; submission leaves the effective Merchant unchanged.",
+    "Amendment approval proves origin version and status, applies all fields atomically, increments Merchant rowVersion once and preserves ACTIVE or DISABLED; rejection leaves Merchant unchanged and drift makes the amendment STALE.",
+    "PNG/JPEG evidence is magic-checked, dimension-bounded, fully decoded and re-encoded before AES-256-GCM private BYTEA storage; temporary uploads are actor/target/kind-bound, expire after 30 minutes and attach once.",
+    "legalIdNo uses an independent AEAD key purpose and only legalIdNoMasked is returned; Merchant stores documentId references and content is authorized streaming only.",
+    "After MCH-003 cutover PUT /api/platform/merchants/{merchantId}/profile is authorized existing receipt replay-only; a deduplication miss returns 40910 and the UI never calls it.",
+    "The PLATFORM UI uses one full-page create/edit form; detail and review use separate hidden routes backed by one complete read-only profile, and review adds one bounded modal action.",
+    "PLATFORM tables render every effective action inline when the count is at most three; only the fourth and later actions use the existing click-triggered overflow menu, and Merchant markets are centered localized names without codes."
+  ],
+  "counterexamples": [
+    "PLATFORM create provisions a Tenant, User, Membership, Role or Credential.",
+    "An amendment writes Merchant fields or status before approval, or the author Membership reviews its own version.",
+    "A document is persisted as a URL, filesystem path, object key, original upload, unencrypted BYTEA or browser-visible plaintext.",
+    "DIRECT remains selectable for a new write or an MCH-002 deduplication miss performs a legacy profile update.",
+    "The frontend submits fewer than 23 fields, uses a drawer, gives detail an active review command, separates review evidence from its decision, shows more than three inline actions or opens overflow on hover."
+  ],
+  "evidence": [],
+  "confidence": "high",
+  "judgeTests": [
+    "MCH-003-DECISION-CONTRACT",
+    "MCH-003-BACKEND-VERIFY",
+    "MCH-003-FRONTEND-VERIFY"
+  ]
+}

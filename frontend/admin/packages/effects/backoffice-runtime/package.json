@@ -6,9 +6,6 @@
   "scripts": {
     "typecheck": "vue-tsc --noEmit --skipLibCheck"
   },
-  "imports": {
-    "#/*": "./src/*"
-  },
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -42,6 +39,18 @@
       "types": "./src/api/menu-contract.ts",
       "default": "./src/api/menu-contract.ts"
     },
+    "./api/merchant-country": {
+      "types": "./src/api/merchant-country.ts",
+      "default": "./src/api/merchant-country.ts"
+    },
+    "./api/merchant-lifecycle": {
+      "types": "./src/api/merchant-lifecycle.ts",
+      "default": "./src/api/merchant-lifecycle.ts"
+    },
+    "./api/merchant-onboarding": {
+      "types": "./src/api/merchant-onboarding.ts",
+      "default": "./src/api/merchant-onboarding.ts"
+    },
     "./api/permission-codes": {
       "types": "./src/api/permission-codes.ts",
       "default": "./src/api/permission-codes.ts"
@@ -53,6 +62,54 @@
     "./api/session": {
       "types": "./src/api/session.ts",
       "default": "./src/api/session.ts"
+    },
+    "./api/system/dept": {
+      "types": "./src/api/system/dept.ts",
+      "default": "./src/api/system/dept.ts"
+    },
+    "./api/system/dictionary-data": {
+      "types": "./src/api/system/dictionary-data.ts",
+      "default": "./src/api/system/dictionary-data.ts"
+    },
+    "./api/system/dictionary-type": {
+      "types": "./src/api/system/dictionary-type.ts",
+      "default": "./src/api/system/dictionary-type.ts"
+    },
+    "./api/system/menu": {
+      "types": "./src/api/system/menu.ts",
+      "default": "./src/api/system/menu.ts"
+    },
+    "./api/system/role": {
+      "types": "./src/api/system/role.ts",
+      "default": "./src/api/system/role.ts"
+    },
+    "./api/system/role-grant": {
+      "types": "./src/api/system/role-grant.ts",
+      "default": "./src/api/system/role-grant.ts"
+    },
+    "./api/system/types": {
+      "types": "./src/api/system/types.ts",
+      "default": "./src/api/system/types.ts"
+    },
+    "./api/system/user": {
+      "types": "./src/api/system/user.ts",
+      "default": "./src/api/system/user.ts"
+    },
+    "./components/dictionary-type-selector": {
+      "types": "./src/components/dictionary-type-selector.vue",
+      "default": "./src/components/dictionary-type-selector.vue"
+    },
+    "./components/account-domain-dictionary-alert": {
+      "types": "./src/components/account-domain-dictionary-alert.vue",
+      "default": "./src/components/account-domain-dictionary-alert.vue"
+    },
+    "./components/common-status-dictionary-alert": {
+      "types": "./src/components/common-status-dictionary-alert.vue",
+      "default": "./src/components/common-status-dictionary-alert.vue"
+    },
+    "./composables": {
+      "types": "./src/composables/index.ts",
+      "default": "./src/composables/index.ts"
     },
     "./locales": {
       "types": "./src/locales/index.ts",
@@ -69,6 +126,26 @@
     "./views/identity-members": {
       "types": "./src/views/identity-members/index.ts",
       "default": "./src/views/identity-members/index.ts"
+    },
+    "./views/merchant/contract": {
+      "types": "./src/views/merchant/contract.ts",
+      "default": "./src/views/merchant/contract.ts"
+    },
+    "./views/merchant/request-guard": {
+      "types": "./src/views/merchant/request-guard.ts",
+      "default": "./src/views/merchant/request-guard.ts"
+    },
+    "./views/system/permission-dependencies": {
+      "types": "./src/views/system/permission-dependencies.ts",
+      "default": "./src/views/system/permission-dependencies.ts"
+    },
+    "./views/system/platform-directory": {
+      "types": "./src/views/system/platform-directory.ts",
+      "default": "./src/views/system/platform-directory.ts"
+    },
+    "./views/system/dictionary-data": {
+      "types": "./src/views/system/dict/data/index.ts",
+      "default": "./src/views/system/dict/data/index.ts"
     },
     "./router/product-access": {
       "types": "./src/router/product-access.ts",

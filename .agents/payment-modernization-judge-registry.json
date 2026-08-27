@@ -40,6 +40,102 @@
       "ruleIds": [
         "IAM-002"
       ]
+    },
+    {
+      "checkId": "IAM-003-DECISION-CONTRACT",
+      "path": "scripts/check_iam003_delegated_user_governance.py",
+      "command": "python3 -I scripts/check_iam003_delegated_user_governance.py --repository-root .",
+      "ruleIds": [
+        "IAM-003"
+      ]
+    },
+    {
+      "checkId": "IAM-003-BACKEND-VERIFY",
+      "path": "backend/pom.xml",
+      "command": "backend/mvnw -f backend/pom.xml clean verify",
+      "ruleIds": [
+        "IAM-003"
+      ]
+    },
+    {
+      "checkId": "IAM-003-FRONTEND-VERIFY",
+      "path": "frontend/admin/package.json",
+      "command": "pnpm --dir frontend/admin test:unit && pnpm --dir frontend/admin build:all",
+      "ruleIds": [
+        "IAM-003"
+      ]
+    },
+    {
+      "checkId": "MCH-001-DECISION-CONTRACT",
+      "path": "scripts/check_mch001_merchant_lifecycle.py",
+      "command": "python3 -I scripts/check_mch001_merchant_lifecycle.py --repository-root .",
+      "ruleIds": [
+        "MCH-001"
+      ]
+    },
+    {
+      "checkId": "MCH-001-BACKEND-VERIFY",
+      "path": "backend/pom.xml",
+      "command": "backend/mvnw -f backend/pom.xml clean verify",
+      "ruleIds": [
+        "MCH-001"
+      ]
+    },
+    {
+      "checkId": "MCH-001-FRONTEND-VERIFY",
+      "path": "frontend/admin/package.json",
+      "command": "pnpm --dir frontend/admin test:unit && pnpm --dir frontend/admin check:type && pnpm --dir frontend/admin test:production-safety && pnpm --dir frontend/admin build:all",
+      "ruleIds": [
+        "MCH-001"
+      ]
+    },
+    {
+      "checkId": "MCH-002-DECISION-CONTRACT",
+      "path": "scripts/check_mch002_merchant_profile.py",
+      "command": "python3 -I scripts/check_mch002_merchant_profile.py --repository-root .",
+      "ruleIds": [
+        "MCH-002"
+      ]
+    },
+    {
+      "checkId": "MCH-002-BACKEND-VERIFY",
+      "path": "backend/pom.xml",
+      "command": "backend/mvnw -f backend/pom.xml clean verify",
+      "ruleIds": [
+        "MCH-002"
+      ]
+    },
+    {
+      "checkId": "MCH-002-FRONTEND-VERIFY",
+      "path": "frontend/admin/package.json",
+      "command": "pnpm --dir frontend/admin test:unit && pnpm --dir frontend/admin check:type && pnpm --dir frontend/admin test:production-safety && pnpm --dir frontend/admin build:all",
+      "ruleIds": [
+        "MCH-002"
+      ]
+    },
+    {
+      "checkId": "MCH-003-DECISION-CONTRACT",
+      "path": "scripts/check_mch003_merchant_onboarding.py",
+      "command": "python3 -I scripts/check_mch003_merchant_onboarding.py --repository-root .",
+      "ruleIds": [
+        "MCH-003"
+      ]
+    },
+    {
+      "checkId": "MCH-003-BACKEND-VERIFY",
+      "path": "backend/pom.xml",
+      "command": "backend/mvnw -f backend/pom.xml clean verify",
+      "ruleIds": [
+        "MCH-003"
+      ]
+    },
+    {
+      "checkId": "MCH-003-FRONTEND-VERIFY",
+      "path": "frontend/admin/package.json",
+      "command": "pnpm --dir frontend/admin test:unit && pnpm --dir frontend/admin check:type && pnpm --dir frontend/admin test:production-safety && pnpm --dir frontend/admin build:all",
+      "ruleIds": [
+        "MCH-003"
+      ]
     }
   ]
 }

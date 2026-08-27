@@ -28,6 +28,14 @@ public final class TenantBootstrapService {
         AccountDomain targetDomain = command.tenantType().accountDomain();
         TenantBootstrapRepository.TenantReservation reservation =
             repository.reserve(actor, targetDomain, command);
+        IdentityInvitationRepository.Reservation invitation = reservation.invitation();
+        if (invitation.status() != IdentityInvitationRepository.Status.RESERVED) {
+            if (invitation.membershipId() == null) {
+                throw new IllegalStateException("Existing tenant bootstrap has no membership");
+            }
+            return new TenantBootstrapRepository.TenantBootstrap(reservation.tenantId(),
+                invitation.invitationId(), invitation.membershipId(), invitation.status());
+        }
         FederatedIdentity identity = provisioner.resolveInvitationIdentity(targetDomain,
             command.idempotencyKey(), command.firstAdministratorEmail(),
             command.firstAdministratorDisplayName());

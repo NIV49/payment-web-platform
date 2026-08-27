@@ -8,6 +8,7 @@
     "displayName": "Display Name",
     "email": "Login Email",
     "roles": "Ordinary Roles",
+    "operation": "Operation",
     "membershipStatus": "Membership Status",
     "identityStatus": "Identity Status",
     "provisioningStatus": "Provisioning Status",

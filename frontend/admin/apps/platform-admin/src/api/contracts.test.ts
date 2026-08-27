@@ -1,11 +1,12 @@
 import type { SystemDeptApi } from './system/dept';
+import type { SystemDictionaryApi } from './system/dictionary';
 import type { SystemMenuApi } from './system/menu';
 import type { SystemRoleApi } from './system/role';
 import type { IamRoleGrantApi } from './system/role-grant';
 import type { PageResult } from './system/types';
 import type { SystemUserApi } from './system/user';
 
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import {
   isOptimisticLockConflict,
@@ -22,6 +23,10 @@ import {
   resolveVbenMenuComponent,
 } from './system/menu-contract';
 import { hasExplicitRoleIds } from './system/types';
+
+vi.mock('@payment/backoffice-runtime/api/request', () => ({
+  requestClient: {},
+}));
 
 describe('admin API contracts', () => {
   it('never exposes the cookie session marker as an Authorization header', () => {
@@ -83,7 +88,9 @@ describe('admin API contracts', () => {
     const codes = Object.values(PERMISSION_CODES);
 
     expect(new Set(codes).size).toBe(codes.length);
-    expect(codes.every((code) => /^[a-z-]+:[a-z-]+$/.test(code))).toBe(true);
+    expect(codes.every((code) => /^[a-z-]+(?::[a-z-]+)+$/.test(code))).toBe(
+      true,
+    );
     expect(codes).toEqual([
       'user:view',
       'user:create',
@@ -104,6 +111,27 @@ describe('admin API contracts', () => {
       'department:create',
       'department:update',
       'department:delete',
+      'dictionary:view',
+      'dictionary:create',
+      'dictionary:update',
+      'dictionary:delete',
+      'dictionary-data:view',
+      'dictionary-data:create',
+      'dictionary-data:update',
+      'dictionary-data:delete',
+      'merchant:self-view',
+      'merchant:submit',
+      'merchant:resubmit',
+      'merchant:view',
+      'merchant:update',
+      'merchant:create',
+      'merchant:amend',
+      'merchant:document:upload',
+      'merchant:document:view',
+      'merchant:review',
+      'merchant:disable',
+      'merchant:enable',
+      'merchant:terminate',
     ]);
   });
 
@@ -131,15 +159,21 @@ describe('admin API contracts', () => {
     expectTypeOf<SystemMenuApi.SystemMenu>().toMatchTypeOf<{
       rowVersion: number;
     }>();
+    expectTypeOf<SystemDictionaryApi.SystemDictionary>().toMatchTypeOf<{
+      dictId: string;
+      rowVersion: number;
+    }>();
   });
 
   it('separates global user creation from membership updates', () => {
     expectTypeOf<SystemUserApi.UserCreateParams>().toEqualTypeOf<{
+      accountDomain?: 'AGENT' | 'MERCHANT' | 'PLATFORM';
       deptId: string;
       name: string;
       remark?: string;
       roleIds: string[];
       status: 0 | 1;
+      tenantId?: string;
       username: string;
     }>();
     expectTypeOf<SystemUserApi.MembershipUpdateParams>().toEqualTypeOf<{
@@ -191,6 +225,12 @@ describe('admin API contracts', () => {
       expectedVersion: number;
     }>();
     expectTypeOf<SystemMenuApi.MenuUpdateParams>().toMatchTypeOf<{
+      expectedVersion: number;
+    }>();
+    expectTypeOf<SystemDictionaryApi.DictionaryUpdateParams>().toMatchTypeOf<{
+      expectedVersion: number;
+    }>();
+    expectTypeOf<SystemDictionaryApi.DictionaryDataUpdateParams>().toMatchTypeOf<{
       expectedVersion: number;
     }>();
   });

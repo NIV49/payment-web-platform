@@ -1,6 +1,7 @@
 package com.niv.payment.permission.persistence.repository;
 
 import com.niv.payment.permission.domain.AdministrationActor;
+import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.permission.port.UserAdministrationPort;
 import com.niv.payment.permission.service.IdentityAdministrationService;
 import com.niv.payment.permission.service.IdentityModels;
@@ -13,12 +14,15 @@ import org.jooq.impl.DSL;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static com.niv.payment.permission.persistence.jooq.generated.Tables.IAM_AUTHENTICATION_CREDENTIAL;
@@ -37,26 +41,54 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
     private static final String PENDING_ACTIVATION = "PENDING_ACTIVATION";
     private static final String DISABLED = "DISABLED";
     private final DSLContext dsl;
+    private final AccountDomain accountDomain;
     private final JooqIdentityQueryRepository queries;
     private final JooqAdministrationSupport support;
     private final Supplier<String> initialPasswordHashSupplier;
+    private final BooleanSupplier localPasswordResetEnabled;
+    private final Function<String, String> passwordHasher;
     private final RoleAssignmentPolicy roleAssignmentPolicy = new RoleAssignmentPolicy();
 
     public JooqUserAdministrationRepository(DSLContext dsl,
                                             JooqIdentityQueryRepository queries,
                                             Supplier<String> traceIdSupplier) {
-        this(dsl, queries, traceIdSupplier, () -> null);
+        this(dsl, queries, AccountDomain.PLATFORM, traceIdSupplier, () -> null,
+            () -> false, ignored -> null);
     }
 
     public JooqUserAdministrationRepository(DSLContext dsl,
                                             JooqIdentityQueryRepository queries,
                                             Supplier<String> traceIdSupplier,
                                             Supplier<String> initialPasswordHashSupplier) {
+        this(dsl, queries, AccountDomain.PLATFORM, traceIdSupplier,
+            initialPasswordHashSupplier, () -> false, ignored -> null);
+    }
+
+    public JooqUserAdministrationRepository(DSLContext dsl,
+                                            JooqIdentityQueryRepository queries,
+                                            AccountDomain accountDomain,
+                                            Supplier<String> traceIdSupplier,
+                                            Supplier<String> initialPasswordHashSupplier) {
+        this(dsl, queries, accountDomain, traceIdSupplier, initialPasswordHashSupplier,
+            () -> false, ignored -> null);
+    }
+
+    public JooqUserAdministrationRepository(DSLContext dsl,
+                                            JooqIdentityQueryRepository queries,
+                                            AccountDomain accountDomain,
+                                            Supplier<String> traceIdSupplier,
+                                            Supplier<String> initialPasswordHashSupplier,
+                                            BooleanSupplier localPasswordResetEnabled,
+                                            Function<String, String> passwordHasher) {
         this.dsl = Objects.requireNonNull(dsl, "dsl");
+        this.accountDomain = Objects.requireNonNull(accountDomain, "accountDomain");
         this.queries = Objects.requireNonNull(queries, "queries");
-        this.support = new JooqAdministrationSupport(dsl, traceIdSupplier);
+        this.support = new JooqAdministrationSupport(dsl, accountDomain, traceIdSupplier);
         this.initialPasswordHashSupplier = Objects.requireNonNull(
             initialPasswordHashSupplier, "initialPasswordHashSupplier");
+        this.localPasswordResetEnabled = Objects.requireNonNull(
+            localPasswordResetEnabled, "localPasswordResetEnabled");
+        this.passwordHasher = Objects.requireNonNull(passwordHasher, "passwordHasher");
     }
 
     @Override
@@ -65,9 +97,17 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
     }
 
     @Override
+    public IdentityModels.Page<IdentityModels.User> findRoleMembers(
+        long tenantId, long roleId, boolean assigned, IdentityModels.UserQuery query) {
+        support.requireAccountDomainTenant(tenantId);
+        validateRoles(tenantId, List.of(roleId));
+        return queries.findRoleMembers(tenantId, roleId, assigned, query);
+    }
+
+    @Override
     @Transactional
     public long createUser(long tenantId, AdministrationActor actor, IdentityModels.UserCreateCommand command) {
-        support.requirePlatformTenant(tenantId);
+        support.requireAccountDomainTenant(tenantId);
         long userId = support.nextId();
         long membershipId = support.nextId();
         authorizeRoleReplacement(tenantId, actor, membershipId, command.roleIds());
@@ -79,8 +119,8 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
 
         dsl.insertInto(IAM_USER)
             .set(IAM_USER.ID, userId)
-            .set(IAM_USER.ACCOUNT_DOMAIN, "PLATFORM")
-            .set(IAM_USER.IDP_ISSUER, "local")
+            .set(IAM_USER.ACCOUNT_DOMAIN, accountDomain.name())
+            .set(IAM_USER.IDP_ISSUER, localIssuer())
             .set(IAM_USER.IDP_SUBJECT, username)
             .set(IAM_USER.DISPLAY_NAME, command.name().trim())
             .set(IAM_USER.STATUS, loginCapable ? ACTIVE : PENDING_ACTIVATION)
@@ -88,7 +128,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
             .execute();
         dsl.insertInto(IAM_MEMBERSHIP)
             .set(IAM_MEMBERSHIP.ID, membershipId)
-            .set(IAM_MEMBERSHIP.ACCOUNT_DOMAIN, "PLATFORM")
+            .set(IAM_MEMBERSHIP.ACCOUNT_DOMAIN, accountDomain.name())
             .set(IAM_MEMBERSHIP.TENANT_ID, tenantId)
             .set(IAM_MEMBERSHIP.USER_ID, userId)
             .set(IAM_MEMBERSHIP.DEPARTMENT_ID, command.departmentId())
@@ -96,7 +136,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
             .execute();
         dsl.insertInto(IAM_AUTHENTICATION_CREDENTIAL)
             .set(IAM_AUTHENTICATION_CREDENTIAL.USER_ID, userId)
-            .set(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN, "PLATFORM")
+            .set(IAM_AUTHENTICATION_CREDENTIAL.ACCOUNT_DOMAIN, accountDomain.name())
             .set(IAM_AUTHENTICATION_CREDENTIAL.USERNAME, username)
             .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, initialPasswordHash)
             .set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, loginCapable ? ACTIVE : DISABLED)
@@ -110,7 +150,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
     @Transactional
     public void updateUser(long tenantId, AdministrationActor actor, long userId,
                            IdentityModels.MembershipUpdateCommand command) {
-        support.requirePlatformTenant(tenantId);
+        support.requireAccountDomainTenant(tenantId);
         support.lockTenant(tenantId, actor);
         var target = dsl.select(
                 IAM_MEMBERSHIP.ID,
@@ -171,11 +211,14 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
             userChanged = usernameChanged
                 || !displayName.equals(target.get(IAM_USER.DISPLAY_NAME))
                 || !Objects.equals(remark, target.get(IAM_USER.REMARK));
-            if (userChanged && !isPlatformSystemAdministrator(tenantId, actor.membershipId())) {
-                throw new SecurityException("Platform system administrator is required for identity changes");
+            if (userChanged && !isSystemAdministrator(tenantId, actor.membershipId())) {
+                throw new SecurityException("System administrator is required for identity changes");
+            }
+            if (userChanged) {
+                requireTenantExclusiveIdentity(tenantId, userId);
             }
             if (usernameChanged) {
-                if (!"local".equals(target.get(IAM_USER.IDP_ISSUER))) {
+                if (!isLocalIssuer(target.get(IAM_USER.IDP_ISSUER))) {
                     throw new IdentityAdministrationService.DataConflictException(
                         "External identity username cannot be edited");
                 }
@@ -250,7 +293,123 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         support.audit(tenantId, actor.membershipId(), "MEMBERSHIP", membershipId, "UPDATE", "user:update");
     }
 
-    private boolean isPlatformSystemAdministrator(long tenantId, long membershipId) {
+    @Override
+    @Transactional
+    public long replaceUserRoles(long tenantId, AdministrationActor actor, long userId,
+                                 List<Long> roleIds, long expectedVersion) {
+        support.requireAccountDomainTenant(tenantId);
+        support.lockTenant(tenantId, actor);
+        var target = dsl.select(IAM_MEMBERSHIP.ID, IAM_MEMBERSHIP.ROW_VERSION)
+            .from(IAM_MEMBERSHIP)
+            .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
+                .and(IAM_MEMBERSHIP.USER_ID.eq(userId))
+                .and(IAM_MEMBERSHIP.STATUS.ne(TERMINATED)))
+            .forUpdate()
+            .fetchOne();
+        if (target == null) {
+            throw notFound("User");
+        }
+        long membershipId = target.get(IAM_MEMBERSHIP.ID);
+        if (target.get(IAM_MEMBERSHIP.ROW_VERSION) != expectedVersion) {
+            throw new IdentityAdministrationService.OptimisticLockException();
+        }
+        authorizeRoleReplacement(tenantId, actor, membershipId, roleIds);
+        int updated = dsl.update(IAM_MEMBERSHIP)
+            .set(IAM_MEMBERSHIP.PERMISSION_VERSION, IAM_MEMBERSHIP.PERMISSION_VERSION.plus(1L))
+            .set(IAM_MEMBERSHIP.SESSION_VERSION, IAM_MEMBERSHIP.SESSION_VERSION.plus(1L))
+            .set(IAM_MEMBERSHIP.ROW_VERSION, IAM_MEMBERSHIP.ROW_VERSION.plus(1L))
+            .set(IAM_MEMBERSHIP.UPDATED_AT, DSL.currentOffsetDateTime())
+            .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
+                .and(IAM_MEMBERSHIP.USER_ID.eq(userId))
+                .and(IAM_MEMBERSHIP.ROW_VERSION.eq(expectedVersion))
+                .and(IAM_MEMBERSHIP.STATUS.ne(TERMINATED)))
+            .execute();
+        if (updated != 1) {
+            throw new IdentityAdministrationService.OptimisticLockException();
+        }
+        replaceRoles(tenantId, membershipId, roleIds, actor.membershipId());
+        support.audit(tenantId, actor.membershipId(), "MEMBERSHIP", membershipId,
+            "ASSIGN_ROLES", "user:assign-role");
+        return expectedVersion + 1L;
+    }
+
+    @Override
+    @Transactional
+    public void updateRoleMembers(long tenantId, AdministrationActor actor, long roleId,
+                                  List<IdentityModels.RoleMemberChange> members) {
+        support.requireAccountDomainTenant(tenantId);
+        support.lockTenant(tenantId, actor);
+        validateRoles(tenantId, List.of(roleId));
+        if (members.isEmpty()) {
+            return;
+        }
+        Map<Long, IdentityModels.RoleMemberChange> changesByUser = members.stream()
+            .collect(java.util.stream.Collectors.toMap(
+                IdentityModels.RoleMemberChange::userId,
+                Function.identity(),
+                (left, right) -> left,
+                LinkedHashMap::new));
+        var targets = dsl.select(
+                IAM_MEMBERSHIP.ID,
+                IAM_MEMBERSHIP.USER_ID,
+                IAM_MEMBERSHIP.ROW_VERSION)
+            .from(IAM_MEMBERSHIP)
+            .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
+                .and(IAM_MEMBERSHIP.USER_ID.in(changesByUser.keySet()))
+                .and(IAM_MEMBERSHIP.STATUS.ne(TERMINATED)))
+            .orderBy(IAM_MEMBERSHIP.USER_ID)
+            .forUpdate()
+            .fetch();
+        if (targets.size() != changesByUser.size()) {
+            throw notFound("User");
+        }
+
+        Map<Long, List<Long>> requestedRolesByMembership = new LinkedHashMap<>();
+        for (var target : targets) {
+            long userId = target.get(IAM_MEMBERSHIP.USER_ID);
+            long membershipId = target.get(IAM_MEMBERSHIP.ID);
+            IdentityModels.RoleMemberChange change = changesByUser.get(userId);
+            if (target.get(IAM_MEMBERSHIP.ROW_VERSION) != change.userVersion()) {
+                throw new IdentityAdministrationService.OptimisticLockException();
+            }
+            Set<Long> requestedRoleIds = new LinkedHashSet<>(
+                findMembershipRoleIds(tenantId, membershipId));
+            if (change.assigned()) {
+                requestedRoleIds.add(roleId);
+            } else {
+                requestedRoleIds.remove(roleId);
+            }
+            List<Long> requestedRoles = List.copyOf(requestedRoleIds);
+            authorizeRoleReplacement(tenantId, actor, membershipId, requestedRoles);
+            requestedRolesByMembership.put(membershipId, requestedRoles);
+        }
+
+        for (var target : targets) {
+            long membershipId = target.get(IAM_MEMBERSHIP.ID);
+            long expectedVersion = target.get(IAM_MEMBERSHIP.ROW_VERSION);
+            int updated = dsl.update(IAM_MEMBERSHIP)
+                .set(IAM_MEMBERSHIP.PERMISSION_VERSION,
+                    IAM_MEMBERSHIP.PERMISSION_VERSION.plus(1L))
+                .set(IAM_MEMBERSHIP.SESSION_VERSION,
+                    IAM_MEMBERSHIP.SESSION_VERSION.plus(1L))
+                .set(IAM_MEMBERSHIP.ROW_VERSION, IAM_MEMBERSHIP.ROW_VERSION.plus(1L))
+                .set(IAM_MEMBERSHIP.UPDATED_AT, DSL.currentOffsetDateTime())
+                .where(IAM_MEMBERSHIP.TENANT_ID.eq(tenantId)
+                    .and(IAM_MEMBERSHIP.ID.eq(membershipId))
+                    .and(IAM_MEMBERSHIP.ROW_VERSION.eq(expectedVersion))
+                    .and(IAM_MEMBERSHIP.STATUS.ne(TERMINATED)))
+                .execute();
+            if (updated != 1) {
+                throw new IdentityAdministrationService.OptimisticLockException();
+            }
+            replaceRoles(tenantId, membershipId,
+                requestedRolesByMembership.get(membershipId), actor.membershipId());
+            support.audit(tenantId, actor.membershipId(), "MEMBERSHIP", membershipId,
+                "ASSIGN_ROLES", "user:assign-role");
+        }
+    }
+
+    private boolean isSystemAdministrator(long tenantId, long membershipId) {
         return dsl.fetchExists(dsl.selectOne()
             .from(IAM_MEMBERSHIP_ROLE)
             .join(IAM_ROLE)
@@ -263,23 +422,39 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
                 .and(IAM_ROLE.DELETED_AT.isNull())));
     }
 
+    private void requireTenantExclusiveIdentity(long tenantId, long userId) {
+        boolean sharedWithAnotherTenant = dsl.fetchExists(dsl.selectOne()
+            .from(IAM_MEMBERSHIP)
+            .where(IAM_MEMBERSHIP.USER_ID.eq(userId)
+                .and(IAM_MEMBERSHIP.TENANT_ID.ne(tenantId))
+                .and(IAM_MEMBERSHIP.STATUS.ne(TERMINATED))));
+        if (sharedWithAnotherTenant) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "Global identity changes are not allowed for a user shared with another tenant");
+        }
+    }
+
     @Override
     @Transactional
     public IdentityModels.PasswordResetResult resetUserPassword(long tenantId,
                                                                 AdministrationActor actor,
                                                                 long userId,
-                                                                long expectedCredentialVersion) {
-        support.requirePlatformTenant(tenantId);
+                                                                long expectedCredentialVersion,
+                                                                String password) {
+        requireLocalPasswordResetEnabled();
+        support.requireAccountDomainTenant(tenantId);
         support.lockTenant(tenantId, actor);
-        if (!isPlatformSystemAdministrator(tenantId, actor.membershipId())) {
+        if (!isSystemAdministrator(tenantId, actor.membershipId())) {
             throw new SecurityException(
-                "Platform system administrator is required for password reset");
+                "System administrator is required for password reset");
         }
 
         var target = dsl.select(
                 IAM_MEMBERSHIP.ROW_VERSION,
                 IAM_USER.IDP_ISSUER,
+                IAM_USER.STATUS,
                 IAM_USER.ROW_VERSION,
+                IAM_AUTHENTICATION_CREDENTIAL.STATUS,
                 IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION)
             .from(IAM_MEMBERSHIP)
             .join(IAM_USER).on(IAM_USER.ID.eq(IAM_MEMBERSHIP.USER_ID))
@@ -294,19 +469,24 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         if (target == null) {
             throw notFound("User");
         }
-        if (!"local".equals(target.get(IAM_USER.IDP_ISSUER))) {
+        if (!localIssuer().equals(target.get(IAM_USER.IDP_ISSUER))) {
             throw new IdentityAdministrationService.DataConflictException(
                 "External identity password cannot be reset");
+        }
+        if (!ACTIVE.equals(target.get(IAM_USER.STATUS))
+            || !ACTIVE.equals(target.get(IAM_AUTHENTICATION_CREDENTIAL.STATUS))) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "Inactive local identity password cannot be reset");
         }
         if (!Objects.equals(target.get(IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION),
             expectedCredentialVersion)) {
             throw new IdentityAdministrationService.OptimisticLockException();
         }
+        requireTenantExclusiveIdentity(tenantId, userId);
 
-        String passwordHash = requiredInitialPasswordHash();
+        String passwordHash = hashPassword(password);
         int credentialUpdated = dsl.update(IAM_AUTHENTICATION_CREDENTIAL)
             .set(IAM_AUTHENTICATION_CREDENTIAL.PASSWORD_HASH, passwordHash)
-            .set(IAM_AUTHENTICATION_CREDENTIAL.STATUS, ACTIVE)
             .set(IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION,
                 IAM_AUTHENTICATION_CREDENTIAL.ROW_VERSION.plus(1L))
             .set(IAM_AUTHENTICATION_CREDENTIAL.UPDATED_AT, DSL.currentOffsetDateTime())
@@ -318,7 +498,6 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         }
 
         int identityUpdated = dsl.update(IAM_USER)
-            .set(IAM_USER.STATUS, ACTIVE)
             .set(IAM_USER.ROW_VERSION, IAM_USER.ROW_VERSION.plus(1L))
             .set(IAM_USER.UPDATED_AT, DSL.currentOffsetDateTime())
             .where(IAM_USER.ID.eq(userId)
@@ -359,11 +538,28 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
         return passwordHash;
     }
 
-    private String requiredInitialPasswordHash() {
-        String passwordHash = optionalInitialPasswordHash();
-        if (passwordHash == null) {
+    private String localIssuer() {
+        return accountDomain == AccountDomain.PLATFORM
+            ? "local"
+            : "local:" + accountDomain.cacheNamespace();
+    }
+
+    private static boolean isLocalIssuer(String issuer) {
+        return "local".equals(issuer) || (issuer != null && issuer.startsWith("local:"));
+    }
+
+    private void requireLocalPasswordResetEnabled() {
+        if (!localPasswordResetEnabled.getAsBoolean()) {
             throw new IdentityAdministrationService.DataConflictException(
-                "Initial password is not configured");
+                "Local password reset is unavailable");
+        }
+    }
+
+    private String hashPassword(String password) {
+        String passwordHash = passwordHasher.apply(password);
+        if (!LoginCredentialPolicy.isLoginCapableHash(passwordHash)) {
+            throw new IdentityAdministrationService.DataConflictException(
+                "Local password reset is unavailable");
         }
         return passwordHash;
     }
@@ -389,7 +585,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
     @Transactional
     public long updateUserStatus(long tenantId, AdministrationActor actor, long userId,
                                  int newStatus, long expectedVersion) {
-        support.requirePlatformTenant(tenantId);
+        support.requireAccountDomainTenant(tenantId);
         support.lockTenant(tenantId, actor);
         String state = status(newStatus);
         if (!currentMembershipDepartmentAllowsStatus(tenantId, userId, state)) {
@@ -428,7 +624,7 @@ public class JooqUserAdministrationRepository implements UserAdministrationPort 
     @Override
     @Transactional
     public void deleteUser(long tenantId, AdministrationActor actor, long userId, long expectedVersion) {
-        support.requirePlatformTenant(tenantId);
+        support.requireAccountDomainTenant(tenantId);
         protectAdministratorDeactivation(tenantId, actor, userId);
         int updated = dsl.update(IAM_MEMBERSHIP)
             .set(IAM_MEMBERSHIP.STATUS, TERMINATED)

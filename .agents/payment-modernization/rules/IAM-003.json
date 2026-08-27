@@ -1,0 +1,47 @@
+{
+  "ruleId": "IAM-003",
+  "status": "candidate",
+  "statement": "Cross-domain tenant-administrator provisioning and same-tenant user governance must remain distinct capabilities while all three backoffices expose user and role management.",
+  "scope": [
+    "platform cross-domain user directory",
+    "merchant and agent tenant administrator provisioning",
+    "local/test cross-domain password recovery",
+    "same-tenant user and role administration",
+    "email login identifiers and identity mapping"
+  ],
+  "given": [
+    "three isolated account domains and application sessions",
+    "tenant affiliation represented by Membership",
+    "application identity mapping keyed by issuer and subject"
+  ],
+  "when": [
+    "a platform administrator lists users across account domains",
+    "a platform administrator creates or maintains a merchant or agent system administrator",
+    "a protected platform administrator resets a precisely bound merchant or agent local/test password",
+    "a merchant or agent administrator manages an ordinary user or role",
+    "a new login identity is created"
+  ],
+  "then": [
+    "Only PLATFORM system administrators may read the cross-domain directory, and its account-domain filter defaults to PLATFORM.",
+    "PLATFORM cross-domain writes may affect only protected system-administrator Memberships in an existing MERCHANT or AGENT Tenant, except that a protected PLATFORM system administrator may reset an ACTIVE local/test password for a precisely bound MERCHANT or AGENT User without changing lifecycle status or roles.",
+    "Ordinary user and role administration derives tenant and account domain from the trusted Session and rejects client tenant selectors.",
+    "Tenant affiliation is stored as Membership and is not duplicated as merchantId, agentId, tenantId, portal, or realm fields on User.",
+    "A PLATFORM provisioning actor never receives or impersonates a target-tenant Membership, and cross-domain audit records do not forge a target-tenant operator.",
+    "New login identifiers are normalized email addresses, while identity mapping remains the exact issuer and subject pair and the same email may represent independent Users in different account domains."
+  ],
+  "counterexamples": [
+    "a merchant or agent request selects another tenant with tenantId",
+    "a platform operator assigns arbitrary ordinary roles to a target tenant user through the cross-domain endpoint",
+    "merchantId or agentId is added to User as the authorization source",
+    "a platform actor is stored as though it held a Membership in the target tenant",
+    "email is used instead of issuer and subject to merge or map identities",
+    "a new non-email username is accepted"
+  ],
+  "evidence": [],
+  "confidence": "high",
+  "judgeTests": [
+    "IAM-003-DECISION-CONTRACT",
+    "IAM-003-BACKEND-VERIFY",
+    "IAM-003-FRONTEND-VERIFY"
+  ]
+}

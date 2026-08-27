@@ -28,6 +28,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,11 +78,11 @@ class ThreeBackofficeBoundaryIntegrationTest {
     @BeforeAll
     static void startThreeIndependentBackoffices() throws Exception {
         Root platform = new Root("platform", freePort(), "http://127.0.0.1:5999",
-            "admin", "PAYMENT_PLATFORM_SESSION", 1000L, "platform-admin");
+            "admin@platform.localhost", "PAYMENT_PLATFORM_SESSION", 1000L, "platform-admin");
         Root merchant = new Root("merchant", freePort(), "http://127.0.0.1:6002",
-            "merchant-admin", "PAYMENT_MERCHANT_SESSION", 2100L, "merchant-admin");
+            "admin@merchant.localhost", "PAYMENT_MERCHANT_SESSION", 2100L, "merchant-admin");
         Root agent = new Root("agent", freePort(), "http://127.0.0.1:6001",
-            "agent-admin", "PAYMENT_AGENT_SESSION", 3100L, "agent-admin");
+            "admin@agent.localhost", "PAYMENT_AGENT_SESSION", 3100L, "agent-admin");
         roots = List.of(platform, merchant, agent);
 
         start(platform, "applications/platform-admin-api/target/platform-admin-api-0.1.0-SNAPSHOT.jar", Map.of(
@@ -348,7 +350,7 @@ class ThreeBackofficeBoundaryIntegrationTest {
             String cookie = login(root, root.username(), LOGIN_TEST_VALUE, null).cookie(root.cookieName());
             assertThat(get(root, "/api/not-registered", cookie).status()).as(root.name()).isEqualTo(403);
             if (!root.name().equals("platform")) {
-                assertThat(get(root, "/api/system/user/list?page=1&pageSize=20", cookie).status())
+                assertThat(get(root, "/api/platform/user-directory?page=1&pageSize=20", cookie).status())
                     .as(root.name() + " direct platform API").isEqualTo(403);
             }
         }
@@ -395,7 +397,7 @@ class ThreeBackofficeBoundaryIntegrationTest {
         assertThat(warmed.status()).isEqualTo(200);
         long versionBefore = Long.parseLong(queryString(
             "SELECT permission_version FROM iam_membership WHERE id=?", platform.membershipId()));
-        assertThat(redisGrantKeys()).contains(
+        assertThat(redisGrantKeys()).doesNotContain(
             "iam:platform:grant:1:" + platform.membershipId() + ":v" + versionBefore);
 
         CountDownLatch ready = new CountDownLatch(8);
@@ -455,7 +457,7 @@ class ThreeBackofficeBoundaryIntegrationTest {
                 Response refreshedCodes = get(platform, "/api/auth/codes", refreshedCookie);
                 assertThat(refreshedCodes.status()).isEqualTo(200);
                 assertThat(refreshedCodes.body()).doesNotContain("user:view");
-                assertThat(redisGrantKeys()).contains(
+                assertThat(redisGrantKeys()).doesNotContain(
                     "iam:platform:grant:1:" + platform.membershipId() + ":v" + (versionBefore + 1));
             } finally {
                 start.countDown();
@@ -498,8 +500,24 @@ class ThreeBackofficeBoundaryIntegrationTest {
         environment.put("PAYMENT_REDIS_PASSWORD", VALKEY_AUTH_VALUE);
         environment.put("PAYMENT_COOKIE_SECURE", "false");
         environment.put("PAYMENT_FLYWAY_ENABLED", "false");
+        environment.put("MCH_SEARCH_HMAC_KEYS",
+            syntheticMerchantKey("mch-registration-search-v1", 0x11));
+        environment.put("MCH_IDEMPOTENCY_HMAC_KEYS",
+            syntheticMerchantKey("mch-idempotency-v1", 0x22));
+        environment.put("MCH_REGISTRATION_AEAD_KEYS",
+            syntheticMerchantKey("mch-registration-aead-v1", 0x33));
+        environment.put("MCH_LEGAL_ID_AEAD_KEYS",
+            syntheticMerchantKey("mch-legal-id-aead-v1", 0x44));
+        environment.put("MCH_DOCUMENT_AEAD_KEYS",
+            syntheticMerchantKey("mch-document-aead-v1", 0x55));
         environment.putAll(rootEnvironment);
         PROCESSES.add(builder.start());
+    }
+
+    private static String syntheticMerchantKey(String keyId, int fill) {
+        byte[] key = new byte[32];
+        Arrays.fill(key, (byte) fill);
+        return keyId + "=" + Base64.getEncoder().encodeToString(key);
     }
 
     private static void waitUntilReady(Root root) throws Exception {

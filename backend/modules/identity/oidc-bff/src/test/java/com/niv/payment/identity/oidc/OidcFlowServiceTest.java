@@ -82,6 +82,51 @@ class OidcFlowServiceTest {
             .isInstanceOf(OidcFlowService.LoginRejectedException.class);
     }
 
+    @Test
+    void localHttpSupportsDotLocalhostAndAnExplicitFrontendPort() {
+        String localHost = "platform.localhost";
+        OidcFlowService service = new Fixture().service("http", localHost, 15_999);
+
+        OidcFlowService.StartResult start = service.start(localHost);
+        OidcFlowService.CallbackResult callback = service.callback("code", start.state());
+
+        assertThat(callback.redirectUri().getScheme()).isEqualTo("http");
+        assertThat(callback.redirectUri().getHost()).isEqualTo(localHost);
+        assertThat(callback.redirectUri().getPort()).isEqualTo(15_999);
+        assertThat(callback.redirectUri().getPath()).isEqualTo("/auth/oidc/callback");
+    }
+
+    @Test
+    void localHttpRejectsLookalikeHostsAndInvalidPublicPorts() {
+        Fixture fixture = new Fixture();
+
+        assertThatThrownBy(() -> fixture.service("http", "localhost.example", 15_999)
+            .start("localhost.example"))
+            .isInstanceOf(OidcFlowService.LoginRejectedException.class);
+        assertThatThrownBy(() -> fixture.service("http", "evil-localhost.example", 15_999)
+            .start("evil-localhost.example"))
+            .isInstanceOf(OidcFlowService.LoginRejectedException.class);
+        assertThatThrownBy(() -> fixture.service("http", "platform.localhost", 0))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> fixture.service("http", "platform.localhost", 65_536))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void authenticatedIdentityAllowsRealisticIdTokenLengthsButKeepsABoundedMaximum() {
+        var identity = new OidcFlowService.AuthenticatedIdentity(
+            "https://idp.example.test/realms/PLATFORM", "subject-1", "session-1",
+            NOW.minusSeconds(30), "2", "x".repeat(4_096));
+
+        assertThat(identity.idToken()).hasSize(4_096);
+        assertThatThrownBy(() -> new OidcFlowService.AuthenticatedIdentity(
+            "https://idp.example.test/realms/PLATFORM", "subject-1", "session-1",
+            NOW.minusSeconds(30), "2", "x".repeat(16_385)))
+            .isInstanceOfSatisfying(OidcFlowService.LoginRejectedException.class,
+                exception -> assertThat(exception.reason()).isEqualTo(
+                    OidcFlowService.LoginRejectedException.Reason.ID_TOKEN_SIZE_INVALID));
+    }
+
     private static final class Fixture {
         final InMemoryTransactions transactions = new InMemoryTransactions();
         final InMemoryHandoffs handoffs = new InMemoryHandoffs();
@@ -89,10 +134,14 @@ class OidcFlowServiceTest {
         final OidcFlowService service = service("https");
 
         OidcFlowService service(String scheme) {
+            return service(scheme, HOST, -1);
+        }
+
+        OidcFlowService service(String scheme, String host, int publicPort) {
             return new OidcFlowService(
                 AccountDomain.PLATFORM,
-                host -> HOST.equals(host)
-                    ? Optional.of(new OidcFlowService.TrustedEntry(HOST, AccountDomain.PLATFORM, 1L))
+                candidate -> host.equals(candidate)
+                    ? Optional.of(new OidcFlowService.TrustedEntry(host, AccountDomain.PLATFORM, 1L))
                     : Optional.empty(),
                 (state, nonce) -> new OidcFlowService.AuthorizationRequest(
                     URI.create("https://idp.example.test/authorize"), "verifier"),
@@ -105,6 +154,7 @@ class OidcFlowServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 () -> "opaque-" + (transactions.values.size() + handoffs.values.size()),
                 scheme,
+                publicPort,
                 "/auth/oidc/callback");
         }
     }

@@ -27,6 +27,10 @@ const ROUTE_CONFLICT_ERROR =
   'Backend route conflicts with reserved local route';
 const ROUTE_BOUNDARY_ERROR =
   'Backend route is outside the current account-domain boundary';
+const RETIRED_BACKEND_ROUTE_NAMES = new Set(['systemdictionarydata']);
+const RETIRED_BACKEND_ROUTE_PATHS = new Set([
+  '/system/dict/data/type/:dicttype',
+]);
 
 export const PRODUCT_ACCESS_MODE: AccessModeType = 'mixed';
 
@@ -92,6 +96,9 @@ export function assertValidBackendRoutesForPolicy(
     const isPage = route.type === 'menu';
     const isExternal = route.type === 'embedded' || route.type === 'link';
     const isLimitedDeployment = policy.accountDomain !== 'PLATFORM';
+    const isRetiredBackendRoute =
+      RETIRED_BACKEND_ROUTE_NAMES.has(routeName) ||
+      RETIRED_BACKEND_ROUTE_PATHS.has(routePath);
     const invalidComponent = isPage
       ? !policy.menuPageComponents.includes(component)
       : !isCatalog && !(isExternal && component === 'IFrameView');
@@ -99,12 +106,16 @@ export function assertValidBackendRoutesForPolicy(
       isLimitedDeployment &&
       (isExternal || Boolean(route.meta?.iframeSrc || route.meta?.link));
     const invalidPath =
-      isLimitedDeployment && !policy.routePaths.includes(routePath);
+      isLimitedDeployment &&
+      !policy.routePaths.some(
+        (allowedPath) => canonicalRoutePath(allowedPath, '/') === routePath,
+      );
     const invalidLimitedName =
       isLimitedDeployment &&
       !policy.routeNames.some((name) => name.toLowerCase() === routeName);
 
     if (
+      isRetiredBackendRoute ||
       invalidComponent ||
       invalidExternalNavigation ||
       invalidPath ||

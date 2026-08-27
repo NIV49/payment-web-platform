@@ -65,6 +65,13 @@ class Iam002KeycloakRealmTest(unittest.TestCase):
         errors = MODULE.validate_configuration(repository)
         self.assertTrue(any("audience" in error for error in errors), errors)
 
+    def test_login_client_requires_basic_and_acr_scopes(self) -> None:
+        repository = self.snapshot()
+        self.mutate_realm(repository, "PLATFORM", lambda payload:
+            payload["clients"][0].update({"defaultClientScopes": ["acr"]}))
+        errors = MODULE.validate_configuration(repository)
+        self.assertTrue(any("basic and acr" in error for error in errors), errors)
+
     def test_missing_recovery_code_factor_fails_closed(self) -> None:
         repository = self.snapshot()
 
@@ -80,12 +87,61 @@ class Iam002KeycloakRealmTest(unittest.TestCase):
         errors = MODULE.validate_configuration(repository)
         self.assertTrue(any("recovery-authn-code-form" in error for error in errors), errors)
 
+    def test_recovery_code_required_action_uses_keycloak_provider_id(self) -> None:
+        repository = self.snapshot()
+
+        def use_nonexistent_provider(payload) -> None:
+            action = next(
+                item
+                for item in payload["requiredActions"]
+                if item["alias"] == "CONFIGURE_RECOVERY_AUTHN_CODES"
+            )
+            action["alias"] = "RECOVERY_AUTHN_CODES"
+            action["providerId"] = "RECOVERY_AUTHN_CODES"
+
+        self.mutate_realm(repository, "PLATFORM", use_nonexistent_provider)
+        errors = MODULE.validate_configuration(repository)
+        self.assertTrue(any("CONFIGURE_RECOVERY_AUTHN_CODES" in error for error in errors), errors)
+
+    def test_subflow_without_authenticator_flow_marker_fails_closed(self) -> None:
+        repository = self.snapshot()
+
+        def remove_marker(payload) -> None:
+            flow = next(item for item in payload["authenticationFlows"]
+                        if item["alias"] == "iam-browser-loa2")
+            execution = next(item for item in flow["authenticationExecutions"]
+                             if item.get("flowAlias") == "iam-authentication")
+            execution.pop("authenticatorFlow", None)
+
+        self.mutate_realm(repository, "PLATFORM", remove_marker)
+        errors = MODULE.validate_configuration(repository)
+        self.assertTrue(any("authenticatorFlow=true" in error for error in errors), errors)
+
     def test_identity_provider_fails_closed(self) -> None:
         repository = self.snapshot()
         self.mutate_realm(repository, "PLATFORM", lambda payload:
             payload["identityProviders"].append({"alias": "shared"}))
         errors = MODULE.validate_configuration(repository)
         self.assertTrue(any("identity brokering" in error for error in errors), errors)
+
+    def test_invitation_marker_cannot_be_exposed_to_end_users(self) -> None:
+        repository = self.snapshot()
+
+        def expose_marker(payload) -> None:
+            component = payload["components"][
+                "org.keycloak.userprofile.UserProfileProvider"
+            ][0]
+            config = json.loads(component["config"]["kc.user.profile.config"][0])
+            marker = next(
+                item for item in config["attributes"]
+                if item["name"] == "paymentInvitationId"
+            )
+            marker["permissions"]["view"].append("user")
+            component["config"]["kc.user.profile.config"][0] = json.dumps(config)
+
+        self.mutate_realm(repository, "MERCHANT", expose_marker)
+        errors = MODULE.validate_configuration(repository)
+        self.assertTrue(any("admin-only UUID v4" in error for error in errors), errors)
 
 
 if __name__ == "__main__":

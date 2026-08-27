@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { ActionItem, TableActionProps } from './types';
 
-import { computed, ref } from 'vue';
+import { computed, ref, useTemplateRef, watch } from 'vue';
 
+import { useHoverToggle } from '@vben-core/composables';
 import { Ellipsis } from '@vben-core/icons';
 import { cn } from '@vben-core/shared/utils';
 
@@ -30,6 +31,7 @@ const props = withDefaults(defineProps<TableActionProps>(), {
   class: undefined,
   divider: false,
   dropdownActions: () => [],
+  dropdownTrigger: 'click',
   hasPermission: undefined,
   moreText: undefined,
 });
@@ -45,11 +47,18 @@ function checkVisible(item: ActionItem): boolean {
   return true;
 }
 
-const visibleActions = computed(() =>
-  (props.actions ?? []).filter((item) => checkVisible(item)),
+const permittedActions = computed(() =>
+  [...(props.actions ?? []), ...(props.dropdownActions ?? [])].filter((item) =>
+    checkVisible(item),
+  ),
 );
-const visibleDropdownActions = computed(() =>
-  (props.dropdownActions ?? []).filter((item) => checkVisible(item)),
+const visibleActions = computed(() => permittedActions.value.slice(0, 3));
+const visibleDropdownActions = computed(() => permittedActions.value.slice(3));
+const dropdownAccessibleLabel = computed(() =>
+  visibleDropdownActions.value
+    .map((item) => item.text)
+    .filter(Boolean)
+    .join(', '),
 );
 
 const alignClass = computed(
@@ -106,6 +115,36 @@ const renderedActions = computed(() => {
 });
 
 const dropdownOpen = ref(false);
+const popConfirmOpen = ref(false);
+const dropdownTriggerRef = useTemplateRef('dropdownTriggerRef');
+const dropdownContentRef = useTemplateRef('dropdownContentRef');
+const [hoverOpen, hoverWatcher] = useHoverToggle(
+  [dropdownTriggerRef, dropdownContentRef],
+  { leaveDelay: 300 },
+);
+
+watch(
+  () => props.dropdownTrigger === 'hover',
+  (enabled) => {
+    if (enabled) hoverWatcher.enable();
+    else hoverWatcher.disable();
+  },
+  { immediate: true },
+);
+watch(hoverOpen, (open) => {
+  if (props.dropdownTrigger === 'hover' && !popConfirmOpen.value) {
+    dropdownOpen.value = open;
+  }
+});
+
+function onPopConfirmOpenChange(open: boolean) {
+  popConfirmOpen.value = open;
+  if (open) {
+    dropdownOpen.value = true;
+  } else if (props.dropdownTrigger === 'hover') {
+    dropdownOpen.value = hoverOpen.value;
+  }
+}
 
 function onActionClick(action: ActionItem) {
   if (action.disabled || action.loading) return;
@@ -188,8 +227,12 @@ function onContentInteractOutside(event: Event) {
       v-if="visibleDropdownActions.length > 0"
       v-model:open="dropdownOpen"
     >
-      <DropdownMenuTrigger as-child>
-        <VbenButton class="gap-1 p-2" variant="link">
+      <DropdownMenuTrigger ref="dropdownTriggerRef" as-child>
+        <VbenButton
+          :aria-label="dropdownAccessibleLabel"
+          class="gap-1 p-2"
+          variant="link"
+        >
           <Ellipsis class="size-4" />
           <span v-if="moreText">{{ moreText }}</span>
         </VbenButton>
@@ -198,18 +241,21 @@ function onContentInteractOutside(event: Event) {
         align="end"
         @interact-outside="onContentInteractOutside"
       >
-        <template
-          v-for="(item, index) in visibleDropdownActions"
-          :key="item.key ?? index"
-        >
-          <ActionDropdownItemComp
-            :action="item"
-            @confirm="dropdownOpen = false"
-          />
-          <DropdownMenuSeparator
-            v-if="divider && index < visibleDropdownActions.length - 1"
-          />
-        </template>
+        <div ref="dropdownContentRef">
+          <template
+            v-for="(item, index) in visibleDropdownActions"
+            :key="item.key ?? index"
+          >
+            <ActionDropdownItemComp
+              :action="item"
+              @confirm="dropdownOpen = false"
+              @pop-confirm-open-change="onPopConfirmOpenChange"
+            />
+            <DropdownMenuSeparator
+              v-if="divider && index < visibleDropdownActions.length - 1"
+            />
+          </template>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   </div>

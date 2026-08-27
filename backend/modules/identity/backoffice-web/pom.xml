@@ -13,6 +13,7 @@
     <name>identity-backoffice-web</name>
     <description>Identity-owned minimal HTTP adapter for isolated backoffices</description>
     <dependencies>
+        <dependency><groupId>com.niv.payment</groupId><artifactId>system-dictionary</artifactId></dependency>
         <dependency><groupId>com.niv.payment</groupId><artifactId>identity-core</artifactId></dependency>
         <dependency><groupId>com.niv.payment</groupId><artifactId>identity-persistence-postgres</artifactId></dependency>
         <dependency><groupId>com.niv.payment</groupId><artifactId>identity-cache-redis</artifactId></dependency>

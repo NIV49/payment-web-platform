@@ -39,4 +39,22 @@ class RequestBodySizeLimitFilterTest {
         assertThat(chain.getRequest().getInputStream().readAllBytes())
             .isEqualTo("accepted".getBytes(StandardCharsets.UTF_8));
     }
+
+    @Test
+    void enabledMerchantDocumentUploadRouteIsNotReadOrRejectedByTheJsonLimit() throws Exception {
+        RequestBodySizeLimitFilter filter = new RequestBodySizeLimitFilter(
+            new ObjectMapper(), 32, true);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+            "POST", "/api/platform/merchant-document-uploads");
+        request.setContentType("multipart/form-data; boundary=test-boundary");
+        request.setContent("x".repeat(33).getBytes(StandardCharsets.UTF_8));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(chain.getRequest()).isSameAs(request);
+        assertThat(chain.getRequest().getInputStream().readAllBytes()).hasSize(33);
+    }
 }

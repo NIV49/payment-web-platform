@@ -14,6 +14,8 @@
 
     <modules>
         <module>modules/identity</module>
+        <module>modules/system-dictionary</module>
+        <module>modules/merchant</module>
         <module>applications/platform-admin-api</module>
         <module>applications/merchant-admin-api</module>
         <module>applications/agent-admin-api</module>
@@ -32,6 +34,26 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.niv.payment</groupId>
+                <artifactId>system-dictionary</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.niv.payment</groupId>
+                <artifactId>merchant-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.niv.payment</groupId>
+                <artifactId>merchant-persistence-postgres</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.niv.payment</groupId>
+                <artifactId>merchant-web</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>

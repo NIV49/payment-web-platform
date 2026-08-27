@@ -43,13 +43,31 @@ class IdentityAdministrationServiceValidationTest {
 
         assertThrows(IdentityAdministrationService.InvalidCommandException.class,
             () -> service.createUser(1L, actor,
-                new IdentityModels.UserCreateCommand("bounded", "Bounded", 1L, tooManyRoles, 1, null)));
+                new IdentityModels.UserCreateCommand(
+                    "bounded@example.test", "Bounded", 1L, tooManyRoles, 1, null)));
         assertThrows(IdentityAdministrationService.InvalidCommandException.class,
             () -> service.updateUser(1L, actor, 2L,
                 new IdentityModels.MembershipUpdateCommand(1L, tooManyRoles, 1, 0L)));
         assertThrows(IdentityAdministrationService.InvalidCommandException.class,
+            () -> service.replaceUserRoles(1L, actor, 2L, tooManyRoles, 0L));
+        List<IdentityModels.RoleMemberChange> tooManyMembers = IntStream.rangeClosed(1, 201)
+            .mapToObj(id -> new IdentityModels.RoleMemberChange(id, 0L, true))
+            .toList();
+        assertThrows(IdentityAdministrationService.InvalidCommandException.class,
+            () -> service.updateRoleMembers(1L, actor, 2L, tooManyMembers));
+        assertThrows(IdentityAdministrationService.InvalidCommandException.class,
             () -> service.createRole(1L, actor,
                 new IdentityModels.RoleCommand("Bounded", tooManyMenus, 1, null)));
+    }
+
+    @Test
+    void rejectsDuplicateUsersInOneRoleMemberBatch() {
+        List<IdentityModels.RoleMemberChange> duplicateMembers = List.of(
+            new IdentityModels.RoleMemberChange(3L, 0L, true),
+            new IdentityModels.RoleMemberChange(3L, 0L, false));
+
+        assertThrows(IdentityAdministrationService.InvalidCommandException.class,
+            () -> service.updateRoleMembers(1L, actor, 2L, duplicateMembers));
     }
 
     @Test
@@ -102,6 +120,8 @@ class IdentityAdministrationServiceValidationTest {
 
         assertThrows(IdentityAdministrationService.InvalidCommandException.class,
             () -> service.deleteUser(1L, actor, 2L, -1L));
+        assertThrows(IdentityAdministrationService.InvalidCommandException.class,
+            () -> service.replaceUserRoles(1L, actor, 2L, List.of(3L), -1L));
         assertThrows(IdentityAdministrationService.InvalidCommandException.class,
             () -> service.updateRole(1L, actor, 2L, role, -1L));
         assertThrows(IdentityAdministrationService.InvalidCommandException.class,

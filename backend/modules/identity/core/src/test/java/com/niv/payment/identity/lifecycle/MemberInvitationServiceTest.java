@@ -59,6 +59,19 @@ class MemberInvitationServiceTest {
         assertEquals(IdentityInvitationRepository.Status.PROVISION_PENDING, result.status());
     }
 
+    @Test
+    void returnsAnExistingCompletedInvitationWithoutRepeatingKeycloakProvisioning() {
+        repository.status = IdentityInvitationRepository.Status.COMPLETED;
+        repository.membershipId = 702L;
+
+        var result = service.invite(subject(true), command());
+
+        assertEquals(IdentityInvitationRepository.Status.COMPLETED, result.status());
+        assertEquals(702L, result.membershipId());
+        assertFalse(provisioner.called);
+        assertFalse(repository.attached);
+    }
+
     private static MemberInvitationCommand command() {
         return command(List.of(41L));
     }
@@ -76,13 +89,15 @@ class MemberInvitationServiceTest {
         private boolean reserved;
         private boolean attached;
         private FederatedIdentity identity;
+        private Status status = Status.RESERVED;
+        private Long membershipId;
 
         @Override
         public Reservation reserveMember(AccountDomain accountDomain, AuthorizationSubject actor,
                                          MemberInvitationCommand command) {
             reserved = true;
             return new Reservation(701, actor.tenantId(), accountDomain, command.idempotencyKey(),
-                command.displayName(), Status.RESERVED, null);
+                command.displayName(), status, membershipId);
         }
 
         @Override

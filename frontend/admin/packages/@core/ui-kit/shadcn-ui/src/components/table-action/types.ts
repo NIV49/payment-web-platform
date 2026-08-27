@@ -17,6 +17,8 @@ export interface TableActionPopConfirm {
   cancelText?: string;
   /** 确认回调；未提供时回退到 action.onClick */
   confirm?: () => void;
+  /** 补充说明 */
+  description?: string;
   /** 确认按钮文案 */
   okText?: string;
   /** 提示标题 */
@@ -65,6 +67,8 @@ export interface TableActionProps {
   divider?: boolean;
   /** “更多”下拉中的操作 */
   dropdownActions?: ActionItem[];
+  /** “更多”下拉的触发方式 */
+  dropdownTrigger?: 'click' | 'hover';
   /**
    * 权限判断函数，返回 false 则隐藏对应 auth 的操作。
    * 核心组件不依赖业务，由使用方注入（如 useAccess().hasAccessByCodes）。

@@ -188,6 +188,7 @@ JSON_SCHEMA_TYPES = frozenset(
     {"array", "boolean", "integer", "null", "number", "object", "string"}
 )
 SAFE_LITERAL_VALUES = {
+    "<redacted>",
     "cookie-session",
     "disabled",
     "false",
@@ -198,8 +199,38 @@ SAFE_LITERAL_VALUES = {
     "true",
 }
 SAFE_EMAIL_ADDRESSES = {"example@example.com", "git@github.com"}
-SAFE_EMAIL_SUFFIXES = (".example", ".invalid", ".test")
+SAFE_EMAIL_SUFFIXES = (".example", ".invalid", ".localhost", ".test")
 APPROVED_BINARY_BLOB_HASHES = {
+    "docs/assets/system-management/department.png": (
+        "6cadc75599d83426b77426c3bc0911b74c8b5d27f08c9583271e8d3df5869d7f"
+    ),
+    "docs/assets/system-management/dictionary-data.png": (
+        "5a19396ac6b40e1902e55594684312365b55e4976f07aa8a9200ad32a1faebf8"
+    ),
+    "docs/assets/system-management/dictionary.png": (
+        "ec6f60f54c20dabdd440061c44264d60c152fae1e746cab6323fdb2cff33435d"
+    ),
+    "docs/assets/system-management/menu.png": (
+        "040b13332d64720756777712e6fb308816a614922ae8ce15e2287adedf8c478b"
+    ),
+    "docs/assets/system-management/role.png": (
+        "6e8d6df702060c3058bcd24e6f716ab839f8b8cb3fe3e6b4aea7ab05e5f89ae2"
+    ),
+    "docs/assets/system-management/user.png": (
+        "d5ebcb74987123c46f09447f43b0a56567b11a35abda1bce92a89b7fd6c8cb8e"
+    ),
+    "docs/assets/payment-flows/channel-routing-flow.png": (
+        "31bfafb5cca4fc3f3d69714d25b3bd8652485307c06d99b80cc01b7e6685f4bd"
+    ),
+    "docs/assets/payment-flows/collection-fund-flow.png": (
+        "9bfd62c1b9f11fd0bfb0a9957ee47d7b65c67c0f817dd7c2d7c4a3e18af5340b"
+    ),
+    "docs/assets/payment-flows/payout-fund-flow.png": (
+        "2e4ea8d3a3249f11ef0ba5ec451ffd8fecb39c2b974c876548c72cee10bcc6cd"
+    ),
+    "docs/assets/payment-flows/platform-payment-panorama.png": (
+        "36c54a9ffec59d15e9701bdd71afb2f59d49fac00505184f936106cbf5d39d30"
+    ),
     "frontend/admin/apps/agent-admin/public/favicon.ico": (
         "ff35213ee7dd0334db69b47a91ba549040736f1d2fe1e0de164f2fa3ec89c169"
     ),
@@ -212,28 +243,42 @@ APPROVED_BINARY_BLOB_HASHES = {
 }
 APPROVED_FINDING_HASHES = {
     (
+        "docs/assets/payment-flows/platform-payment-panorama.svg",
+        46,
+        "INLINE_CREDENTIAL_PAIR",
+        "599d5a88fcc56fbe177028da6fec92e581da168e50b87c9e39ec013a8f2149a7",
+    ): "Reviewed diagram label uses a slash between API and H5 presentation names",
+    (
         "frontend/admin/pnpm-lock.yaml",
-        7474,
+        7486,
         "EMAIL_ADDRESS",
         "b0373516d594ddd199b25c3655332b354837e065c5cc232f5043189897900ca7",
     ): "Published upstream deprecation contact in the frozen pnpm lockfile",
     (
         "frontend/admin/pnpm-lock.yaml",
-        17867,
+        17879,
         "GENERIC_SECRET_ASSIGNMENT",
         "4ccec3fd47ee5162962804420d4b53c8ee5ecfc827f79ffd21e679b305742003",
     ): "Package version mapping in the frozen pnpm lockfile",
     (
         "frontend/admin/pnpm-lock.yaml",
-        17867,
+        17879,
         "YAML_SECRET_SCALAR",
         "4ccec3fd47ee5162962804420d4b53c8ee5ecfc827f79ffd21e679b305742003",
     ): "Package version mapping in the frozen pnpm lockfile",
 }
 APPROVED_FINDING_CONTEXTS = {
     (
+        "docs/assets/payment-flows/platform-payment-panorama.svg",
+        46,
+        "INLINE_CREDENTIAL_PAIR",
+    ): (
+        "exact_line",
+        "72a2b87175f54567b455a2f2d10bb27e65b757add65a03f878a69022a2b9eb12",
+    ),
+    (
         "frontend/admin/pnpm-lock.yaml",
-        7474,
+        7486,
         "EMAIL_ADDRESS",
     ): (
         "exact_line",
@@ -241,7 +286,7 @@ APPROVED_FINDING_CONTEXTS = {
     ),
     (
         "frontend/admin/pnpm-lock.yaml",
-        17867,
+        17879,
         "GENERIC_SECRET_ASSIGNMENT",
     ): (
         "exact_line",
@@ -249,7 +294,7 @@ APPROVED_FINDING_CONTEXTS = {
     ),
     (
         "frontend/admin/pnpm-lock.yaml",
-        17867,
+        17879,
         "YAML_SECRET_SCALAR",
     ): (
         "exact_line",
@@ -262,6 +307,10 @@ PLACEHOLDER_PATTERN = re.compile(
 MAVEN_ENV_PLACEHOLDER_PATTERN = re.compile(r"\$\{env\.[A-Z][A-Z0-9_]*\}")
 ENV_SAFE_DEFAULT_PLACEHOLDER_PATTERN = re.compile(
     r"\$\{(?P<variable>[A-Z][A-Z0-9_]*):(?P<default>[a-z][a-z0-9-]*)\}"
+)
+REQUIRED_ENV_PLACEHOLDER_PATTERN = re.compile(
+    r"\$\{(?P<variable>[A-Z][A-Z0-9_]*):\?"
+    r"(?P<message>[A-Za-z0-9][A-Za-z0-9 _./:-]{0,159})\}"
 )
 MASK_PATTERN = re.compile(r"(?:\*{3,}|x{3,}|•{3,})", re.IGNORECASE)
 SENSITIVE_KEY_PATTERN = (
@@ -301,6 +350,28 @@ UNQUOTED_SECRET_ASSIGNMENT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 TYPESCRIPT_SUFFIXES = frozenset({".cts", ".mts", ".ts"})
+SOURCE_CODE_SUFFIXES = frozenset(
+    {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cjs",
+        ".cts",
+        ".go",
+        ".h",
+        ".hpp",
+        ".java",
+        ".js",
+        ".kt",
+        ".kts",
+        ".mts",
+        ".mjs",
+        ".py",
+        ".rs",
+        ".ts",
+        ".vue",
+    }
+)
 SHELL_SCRIPT_SUFFIXES = frozenset({".bash", ".sh", ".zsh"})
 SHELL_TOKEN_BOUNDARIES = frozenset(" \t\r\n;&|<>()")
 MVNW_AUTH_VARIABLE = "MVNW_" + "PASSWORD"
@@ -358,6 +429,76 @@ EMAIL_ADDRESS_PATTERN = re.compile(
 )
 CN_MOBILE_NUMBER_PATTERN = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 PAYMENT_CARD_CANDIDATE_PATTERN = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
+UUID_PATTERN = re.compile(
+    r"(?<![0-9A-Fa-f])"
+    r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+    r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+    r"(?![0-9A-Fa-f])"
+)
+SOURCE_REFERENCE_PATTERN = re.compile(
+    r"(?:new\s+)?[A-Za-z_$][A-Za-z0-9_$]*"
+    r"(?:\s*(?:"
+    r"\.[A-Za-z_$][A-Za-z0-9_$]*"
+    r"|\[(?:[A-Za-z_$][A-Za-z0-9_$]*|[0-9]+|"
+    r"[\"'][A-Za-z0-9_$.-]+[\"'])\]"
+    r"))*"
+)
+SOURCE_VALUE_TRAILING_DELIMITERS = ",;)}>\"'`"
+SOURCE_PARAMETER_PREFIX_PATTERN = re.compile(
+    r"(?:\bfunction\s+[A-Za-z_$][A-Za-z0-9_$]*|"
+    r"\b[A-Za-z_$][A-Za-z0-9_$]*)\s*\([^(){}]*$"
+)
+SAFE_LOCALE_SECRET_LABELS = frozenset(
+    {"Password", "\u5bc6\u7801", "\\u5bc6\\u7801"}
+)
+SOURCE_TYPE_IDENTIFIERS = frozenset(
+    {
+        "any",
+        "boolean",
+        "double",
+        "float",
+        "int",
+        "long",
+        "never",
+        "number",
+        "object",
+        "short",
+        "string",
+        "symbol",
+        "unknown",
+        "void",
+    }
+)
+SAFE_SENSITIVE_LOOKUP_LITERALS = frozenset(
+    {
+        "access_token",
+        "auth_token",
+        "client_secret",
+        "logout_token",
+        "password",
+        "refresh_token",
+        "secret",
+        "session_token",
+        "token",
+        "totpSecret",
+    }
+)
+SOURCE_STRING_LITERAL_PATTERN = re.compile(
+    r"(?P<prefix>[fFrRbBuU]{0,2})(?P<quote>[\"'])(?P<value>.*?)(?P=quote)"
+)
+SOURCE_INTERPOLATED_REFERENCE_PATTERN = re.compile(
+    r"\{[A-Za-z_$][A-Za-z0-9_$]*"
+    r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*|"
+    r"\[[\"'][A-Za-z0-9_$.-]+[\"']\])+\}"
+)
+SOURCE_INCOMPLETE_CONSTRUCT_PATTERNS = (
+    re.compile(r"new\s+[A-Za-z_$][A-Za-z0-9_$.]*\($"),
+    re.compile(r"lambda\s+[A-Za-z_$][A-Za-z0-9_$]*\s*:\s*\($"),
+    re.compile(
+        r"[A-Za-z_$][A-Za-z0-9_$.]*\(\("
+        r"[A-Za-z_$][A-Za-z0-9_$]*\)\s*=>\s*\{$"
+    ),
+)
 HIGH_CONFIDENCE_PATTERNS = (
     (
         "PRIVATE_KEY",
@@ -500,6 +641,7 @@ def is_safe_placeholder(value: str) -> bool:
         or stripped.casefold() in SAFE_LITERAL_VALUES
         or PLACEHOLDER_PATTERN.fullmatch(stripped) is not None
         or MAVEN_ENV_PLACEHOLDER_PATTERN.fullmatch(stripped) is not None
+        or REQUIRED_ENV_PLACEHOLDER_PATTERN.fullmatch(stripped) is not None
         or env_default is not None
         and env_default.group("default") in SAFE_LITERAL_VALUES
         or MASK_PATTERN.fullmatch(stripped) is not None
@@ -512,6 +654,7 @@ def _safe_placeholder_spans(content: str) -> tuple[tuple[int, int], ...]:
         PLACEHOLDER_PATTERN,
         MAVEN_ENV_PLACEHOLDER_PATTERN,
         ENV_SAFE_DEFAULT_PLACEHOLDER_PATTERN,
+        REQUIRED_ENV_PLACEHOLDER_PATTERN,
     ):
         for match in pattern.finditer(content):
             if is_safe_placeholder(match.group(0)):
@@ -675,6 +818,232 @@ def is_safe_email(value: str) -> bool:
     return lowered in SAFE_EMAIL_ADDRESSES or domain.endswith(SAFE_EMAIL_SUFFIXES)
 
 
+def _is_safe_locale_secret_label(label: str, value: str) -> bool:
+    normalized_label = label.replace("\\", "/").casefold()
+    return (
+        "/locales/" in f"/{normalized_label}"
+        and Path(normalized_label).suffix == ".json"
+        and value in SAFE_LOCALE_SECRET_LABELS
+    )
+
+
+def _position_is_in_string_literal(line: str, position: int) -> bool:
+    quote: str | None = None
+    escaped = False
+    for character in line[:position]:
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\" and quote is not None:
+            escaped = True
+            continue
+        if quote is None:
+            if character in {"\"", "'", "`"}:
+                quote = character
+        elif character == quote:
+            quote = None
+    return quote is not None
+
+
+def _balanced_source_expression(line: str, start: int) -> str | None:
+    stack: list[str] = []
+    quote: str | None = None
+    escaped = False
+    index = start
+    while index < len(line):
+        character = line[index]
+        if escaped:
+            escaped = False
+        elif quote is not None:
+            if character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+        elif character in {"\"", "'", "`"}:
+            quote = character
+        elif character in "([{":
+            stack.append(character)
+        elif character in ")]}":
+            if not stack:
+                break
+            expected = {")": "(", "]": "[", "}": "{"}[character]
+            if stack[-1] != expected:
+                return None
+            stack.pop()
+        elif not stack and character in ",;":
+            break
+        index += 1
+    if stack or quote is not None:
+        return None
+    return line[start:index].strip()
+
+
+def _source_expression_has_safe_literals(expression: str) -> bool:
+    for literal in SOURCE_STRING_LITERAL_PATTERN.finditer(expression):
+        value = literal.group("value")
+        if (
+            value in SAFE_SENSITIVE_LOOKUP_LITERALS
+            or re.fullmatch(r"[A-Z][A-Z0-9_]*", value)
+            or re.fullmatch(
+                r"(?:[A-Z0-9_]+|\{[A-Za-z_][A-Za-z0-9_]*\})+",
+                value,
+            )
+        ):
+            continue
+        if re.search(SENSITIVE_KEY_PATTERN, value, re.IGNORECASE):
+            return False
+    return True
+
+
+def _is_safe_computed_source_expression(expression: str) -> bool:
+    if not expression or expression.startswith(("\"", "'", "`")):
+        return False
+    if expression.casefold() in SOURCE_TYPE_IDENTIFIERS:
+        return False
+    if not _source_expression_has_safe_literals(expression):
+        return False
+    if expression.startswith("(await ") and re.search(
+        r"\)\.[A-Za-z_$][A-Za-z0-9_$]*\(", expression
+    ):
+        return True
+    return (
+        re.fullmatch(
+            r"(?:await\s+)?(?:new\s+)?[A-Za-z_$][A-Za-z0-9_$]*"
+            r"(?:\s*(?:"
+            r"\.[A-Za-z_$][A-Za-z0-9_$]*"
+            r"|\[[^\]\r\n]+\]"
+            r"|\([^;\r\n]*\)"
+            r"))*",
+            expression,
+        )
+        is not None
+        or re.fullmatch(
+            r"\(await\s+[A-Za-z_$][A-Za-z0-9_$]*"
+            r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\([^;\r\n]*\))*\)"
+            r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+",
+            expression,
+        )
+        is not None
+    )
+
+
+def _is_safe_incomplete_source_construct(
+    line: str,
+    value_start: int,
+) -> bool:
+    source_tail = line[value_start:].strip()
+    if any(pattern.fullmatch(source_tail) for pattern in SOURCE_INCOMPLETE_CONSTRUCT_PATTERNS):
+        return True
+    if source_tail.startswith("new") and re.fullmatch(
+        r"new\s+[A-Za-z_$][A-Za-z0-9_$.]*\s*\[\]\s*\{\s*",
+        line[value_start:],
+    ):
+        return True
+    return False
+
+
+def _is_safe_interpolated_source_reference(
+    line: str,
+    match: re.Match[str],
+) -> bool:
+    if not _position_is_in_string_literal(line, match.start()):
+        return False
+    value = match.group("value")
+    interpolation = SOURCE_INTERPOLATED_REFERENCE_PATTERN.search(value)
+    if interpolation is None:
+        return False
+    prefix = line[match.start():match.start("value")] + value[:interpolation.start()]
+    suffix = value[interpolation.end():].strip(",;:)]}>\"'` \t\r\n")
+    return not suffix and prefix.strip().casefold() in {
+        "password:",
+        "secret:",
+        "token:",
+    }
+
+
+def _is_safe_source_reference(label: str, line: str, match: re.Match[str]) -> bool:
+    if Path(label).suffix.casefold() not in SOURCE_CODE_SUFFIXES:
+        return False
+    if _position_is_in_string_literal(line, match.start()):
+        return _is_safe_interpolated_source_reference(line, match)
+    if match.end() < len(line) and line[match.end()] in {"\"", "'", "`"}:
+        return False
+    value_start = match.start("value")
+    if _is_safe_incomplete_source_construct(line, value_start):
+        return True
+    expression = _balanced_source_expression(line, value_start)
+    assignment_prefix = line[match.start():value_start]
+    separator_is_colon = ":" in assignment_prefix and "=" not in assignment_prefix
+    if (
+        expression is not None
+        and expression.startswith("{")
+        and expression.endswith("}")
+        and ":" in assignment_prefix
+        and "=" not in assignment_prefix
+        and line[:match.start()].rstrip().endswith("(")
+        and line[value_start + len(expression):].lstrip().startswith(") =>")
+        and TYPESCRIPT_SIMPLE_TYPE_PATTERN.fullmatch(expression) is not None
+    ):
+        return True
+    if expression is not None and _is_safe_computed_source_expression(expression):
+        expression_tail = line[value_start + len(expression):].lstrip()
+        if not separator_is_colon or expression_tail.startswith((",", "}")):
+            return True
+    source_tail = line[value_start:].lstrip()
+    reference_match = SOURCE_REFERENCE_PATTERN.match(source_tail)
+    if reference_match is None:
+        return False
+    reference = reference_match.group(0)
+    remainder = source_tail[reference_match.end():].strip()
+    if remainder and remainder[0] not in SOURCE_VALUE_TRAILING_DELIMITERS:
+        return False
+
+    has_accessor = "." in reference or "[" in reference
+    if not separator_is_colon:
+        return has_accessor
+    if has_accessor:
+        return not remainder or remainder.startswith(",")
+
+    line_prefix = line[:match.start()]
+    parameter_prefix = line[:value_start].rsplit(assignment_prefix, 1)[0]
+    return (
+        reference.startswith("new ")
+        and "for (" in line_prefix
+        or SOURCE_PARAMETER_PREFIX_PATTERN.search(parameter_prefix) is not None
+        and bool(remainder)
+        and remainder[0] in {",", ")"}
+    )
+
+
+def _assignment_value_is_complete_safe_placeholder(
+    line: str,
+    match: re.Match[str],
+    spans: tuple[tuple[int, int], ...],
+) -> bool:
+    value_start = match.start("value")
+    return any(
+        start == value_start
+        and not line[end:].strip(SOURCE_VALUE_TRAILING_DELIMITERS + " \t\r\n")
+        for start, end in spans
+    )
+
+
+def _is_safe_redacted_display(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped.startswith("<redacted>"):
+        return False
+    return not stripped.removeprefix("<redacted>").strip(
+        ",;:)]}>\"'` \t\r\n"
+    )
+
+
+def _payment_card_match_is_uuid_part(
+    match: re.Match[str],
+    uuid_spans: tuple[tuple[int, int], ...],
+) -> bool:
+    return _span_is_within_safe_span(match.start(), match.end(), uuid_spans)
+
+
 def is_approved_binary_blob(path: str, content: bytes) -> bool:
     expected_digest = APPROVED_BINARY_BLOB_HASHES.get(path)
     if expected_digest is None:
@@ -738,6 +1107,23 @@ def looks_like_inline_credential(user: str, value: str) -> bool:
         or "secret" in lowered
         or (value.isdigit() and len(value) >= 4)
         or len(set(lowered)) <= 2
+    )
+
+
+def _inline_credential_match_is_arithmetic(
+    label: str,
+    line: str,
+    match: re.Match[str],
+) -> bool:
+    if Path(label).suffix.casefold() not in SOURCE_CODE_SUFFIXES:
+        return False
+    prefix = line[:match.start()].rstrip()
+    suffix = line[match.end():].lstrip()
+    return (
+        bool(prefix)
+        and prefix[-1] in "(=,+-*/%"
+        or bool(suffix)
+        and suffix[0] in "),;.+-*/%"
     )
 
 
@@ -1822,10 +2208,12 @@ def _is_sensitive_structured_key(value: object) -> bool:
     )
 
 
-def _is_safe_structured_secret(value: object) -> bool:
+def _is_safe_structured_secret(value: object, label: str = "") -> bool:
     if value is None or isinstance(value, bool):
         return True
-    return isinstance(value, str) and is_safe_placeholder(value)
+    return isinstance(value, str) and (
+        is_safe_placeholder(value) or _is_safe_locale_secret_label(label, value)
+    )
 
 
 def _contains_secret_assignment(content: str) -> bool:
@@ -2388,7 +2776,7 @@ def _scan_loaded_json(
         if (
             sensitive_container
             and not isinstance(value, (JsonObject, list))
-            and not _is_safe_structured_secret(value)
+            and not _is_safe_structured_secret(value, label)
         ):
             errors.append(f"{label}: JSON_SECRET_SCALAR")
         if isinstance(value, JsonObject):
@@ -2404,9 +2792,9 @@ def _scan_loaded_json(
                     for key, child in value
                     if (
                         isinstance(child, (JsonObject, list))
-                        or _is_safe_structured_secret(child)
+                        or _is_safe_structured_secret(child, label)
                     )
-                    and not _is_safe_structured_secret(key)
+                    and not _is_safe_structured_secret(key, label)
                 )
             if schema_sensitive_definition or schema_reference_context:
                 if any(
@@ -2507,7 +2895,7 @@ def _scan_loaded_json(
                 ]
                 if structured_values and any(
                     not isinstance(child, (JsonObject, list))
-                    and not _is_safe_structured_secret(child)
+                    and not _is_safe_structured_secret(child, label)
                     for child in structured_values
                 ):
                     errors.append(f"{label}: JSON_SECRET_SCALAR")
@@ -2517,7 +2905,7 @@ def _scan_loaded_json(
                     and not opaque_member_names
                     and not sensitive_container
                     and not isinstance(child, (JsonObject, list))
-                    and not _is_safe_structured_secret(child)
+                    and not _is_safe_structured_secret(child, label)
                 ):
                     errors.append(f"{label}: JSON_SECRET_SCALAR")
                 if (
@@ -2525,7 +2913,7 @@ def _scan_loaded_json(
                     and isinstance(key, str)
                     and _schema_value_keyword(key) is not None
                     and not isinstance(child, (JsonObject, list))
-                    and not _is_safe_structured_secret(child)
+                    and not _is_safe_structured_secret(child, label)
                 ):
                     errors.append(f"{label}: JSON_SECRET_SCALAR")
             json_text_mode = (
@@ -4045,7 +4433,10 @@ def scan_text_content(
                         match,
                         shell_like=shell_like_label,
                     )
-                    or not is_safe_placeholder(value)
+                    or not (
+                        is_safe_placeholder(value)
+                        or _is_safe_locale_secret_label(label, value)
+                    )
                 )
                 and not is_approved_finding(
                     label,
@@ -4061,6 +4452,10 @@ def scan_text_content(
         for match in UNQUOTED_SECRET_ASSIGNMENT_PATTERN.finditer(line):
             if _match_is_within_safe_placeholder(match, safe_assignment_spans):
                 continue
+            if _assignment_value_is_complete_safe_placeholder(
+                line, match, safe_assignment_spans
+            ):
+                continue
             value = match.group("value")
             if json_structured_label and value.startswith(("{", "[")):
                 continue
@@ -4070,6 +4465,8 @@ def scan_text_content(
                 not in typescript_type_member_assignments
                 and (line_number, match.start())
                 not in yaml_result.safe_root_assignments
+                and not _is_safe_source_reference(label, line, match)
+                and not _is_safe_redacted_display(checked_value)
                 and not is_safe_placeholder(checked_value)
                 and not is_approved_finding(
                     label,
@@ -4090,7 +4487,9 @@ def scan_text_content(
 
         for match in INLINE_CREDENTIAL_PAIR_PATTERN.finditer(line):
             value = match.group("value")
-            if looks_like_inline_credential(
+            if not _inline_credential_match_is_arithmetic(
+                label, line, match
+            ) and looks_like_inline_credential(
                 match.group("user"), value
             ) and not is_approved_finding(
                 label,
@@ -4141,7 +4540,11 @@ def scan_text_content(
             errors.append(f"{label}:{line_number}: CN_MOBILE_NUMBER")
 
         for match in PAYMENT_CARD_CANDIDATE_PATTERN.finditer(line):
-            if passes_luhn(match.group(0)):
+            uuid_spans = tuple(uuid_match.span() for uuid_match in UUID_PATTERN.finditer(line))
+            if (
+                not _payment_card_match_is_uuid_part(match, uuid_spans)
+                and passes_luhn(match.group(0))
+            ):
                 errors.append(f"{label}:{line_number}: PAYMENT_CARD_NUMBER")
     errors.extend(yaml_result.errors)
     errors.extend(scan_json_sensitive_scalars(label, content))

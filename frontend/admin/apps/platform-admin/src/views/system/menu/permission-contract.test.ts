@@ -13,7 +13,9 @@ import {
   getMenuActionPresentation,
 } from './permission-contract';
 
-vi.mock('#/api/request', () => ({ requestClient: {} }));
+vi.mock('@payment/backoffice-runtime/api/request', () => ({
+  requestClient: {},
+}));
 
 const menu = (
   id: string,
@@ -69,6 +71,22 @@ describe('menu permission presentation contract', () => {
     expect(
       canManageMenu(menu('2', 'menu', undefined, { systemManaged: true })),
     ).toBe(true);
+  });
+
+  it('keeps cross-domain directory rows out of every mutation path', () => {
+    const directoryMenu = menu('1', 'menu', undefined, {
+      managementMode: 'READ_ONLY',
+    } as Partial<SystemMenuApi.SystemMenu>);
+
+    expect(canManageMenu(directoryMenu)).toBe(false);
+    expect(canAppendMenuChild(directoryMenu)).toBe(false);
+    expect(
+      canPerformMenuAction(
+        directoryMenu,
+        PERMISSION_CODES.menuUpdate,
+        () => true,
+      ),
+    ).toBe(false);
   });
 
   it('removes BUTTON nodes from parent choices without mutating the tree', () => {

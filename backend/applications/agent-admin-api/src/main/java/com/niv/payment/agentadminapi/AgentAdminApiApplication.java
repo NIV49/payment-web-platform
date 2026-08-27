@@ -4,6 +4,7 @@ import com.niv.payment.permission.backoffice.BackofficeWebConfiguration;
 import com.niv.payment.permission.backoffice.BackofficeRequestTrace;
 import com.niv.payment.permission.domain.AccountDomain;
 import com.niv.payment.identity.oidc.OidcBffConfiguration;
+import com.niv.payment.identity.oidc.IdentityGovernanceQueryConfiguration;
 import com.niv.payment.identity.oidc.OidcClientCredential;
 import com.niv.payment.identity.oidc.OidcRequestTrace;
 import com.niv.payment.identity.oidc.KeycloakAdminClientCredential;
@@ -17,7 +18,8 @@ import org.springframework.core.env.Environment;
 
 @SpringBootConfiguration
 @EnableAutoConfiguration
-@Import({BackofficeWebConfiguration.class, OidcBffConfiguration.class})
+@Import({BackofficeWebConfiguration.class, IdentityGovernanceQueryConfiguration.class,
+    OidcBffConfiguration.class})
 public class AgentAdminApiApplication {
     @Bean
     AccountDomain agentAccountDomain() {

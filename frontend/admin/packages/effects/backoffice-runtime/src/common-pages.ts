@@ -1,5 +1,9 @@
 import type { ComponentRecordType } from '@vben/types';
 
 export const COMMON_BACKOFFICE_PAGE_MAP: ComponentRecordType = import.meta.glob(
-  './views/dashboard/workspace/index.vue',
+  [
+    './views/dashboard/workspace/index.vue',
+    './views/system/role/list.vue',
+    './views/system/user/list.vue',
+  ],
 );

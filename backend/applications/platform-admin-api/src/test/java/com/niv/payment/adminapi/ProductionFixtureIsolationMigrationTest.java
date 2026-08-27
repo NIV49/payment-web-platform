@@ -35,7 +35,7 @@ class ProductionFixtureIsolationMigrationTest {
     void cleanProductionMigrationKeepsTheProductCatalogButRemovesTheLocalFixture() throws Exception {
         migrateToLatest();
 
-        assertThat(rowCount("iam_permission")).isEqualTo(24);
+        assertThat(rowCount("iam_permission")).isEqualTo(45);
         assertThat(rowCount("iam_tenant")).isZero();
         assertThat(rowCount("iam_department")).isZero();
         assertThat(rowCount("iam_user")).isZero();
@@ -55,7 +55,7 @@ class ProductionFixtureIsolationMigrationTest {
         insertUnrelatedProductionData();
         insertPermissionExtension();
 
-        migrateToLatest();
+        migrateTo("31");
 
         assertThat(singleLong("SELECT count(*) FROM iam_tenant WHERE id = 1")).isZero();
         assertThat(singleLong("SELECT count(*) FROM iam_tenant WHERE id = 2 AND tenant_code = 'merchant-two'"))
@@ -68,7 +68,7 @@ class ProductionFixtureIsolationMigrationTest {
             .isOne();
         assertThat(singleLong("SELECT count(*) FROM iam_permission WHERE id = 9001 AND permission_code = 'payout:view'"))
             .isOne();
-        assertThat(rowCount("iam_permission")).isEqualTo(25);
+        assertThat(rowCount("iam_permission")).isEqualTo(33);
     }
 
     @Test
@@ -78,14 +78,14 @@ class ProductionFixtureIsolationMigrationTest {
         insertUnrelatedProductionData();
         insertPermissionExtension();
 
-        migrateToLatest();
+        migrateTo("31");
 
         assertThat(rowCount("iam_tenant")).isOne();
         assertThat(rowCount("iam_user")).isOne();
         assertThat(rowCount("iam_audit_event")).isOne();
         assertThat(rowCount("iam_permission_change_outbox")).isOne();
         assertThat(rowCount("iam_permission_change_relay_state")).isOne();
-        assertThat(rowCount("iam_permission")).isEqualTo(25);
+        assertThat(rowCount("iam_permission")).isEqualTo(33);
     }
 
     @Test
@@ -263,7 +263,7 @@ class ProductionFixtureIsolationMigrationTest {
               (6062,5062,'TENANT','TENANT_ALL'),(6063,5063,'TENANT','TENANT_ALL')
             """);
 
-        migrateToLatest();
+        migrateTo("31");
 
         assertThat(singleLong("""
             SELECT count(*) FROM iam_role_grant grant_row
@@ -288,9 +288,9 @@ class ProductionFixtureIsolationMigrationTest {
              WHERE grant_row.tenant_id=50 AND grant_row.role_id=56
                AND permission.permission_code='role:grant-update'
             """)).isZero();
-        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=55")).isEqualTo(3);
+        assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=55")).isEqualTo(4);
         assertThat(singleLong("SELECT row_version FROM iam_role WHERE id=56")).isEqualTo(3);
-        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=53")).isEqualTo(3);
+        assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=53")).isEqualTo(4);
         assertThat(singleLong("SELECT permission_version FROM iam_membership WHERE id=54")).isEqualTo(3);
         assertThat(singleLong("SELECT count(*) FROM iam_audit_event WHERE tenant_id=50 AND trace_id='migration-v14'"))
             .isEqualTo(2);
@@ -354,7 +354,7 @@ class ProductionFixtureIsolationMigrationTest {
             VALUES (9252,9153,'91'),(9253,9155,'91')
             """);
 
-        migrateToLatest();
+        migrateTo("31");
 
         assertThat(singleLong("""
             SELECT count(*) FROM iam_permission

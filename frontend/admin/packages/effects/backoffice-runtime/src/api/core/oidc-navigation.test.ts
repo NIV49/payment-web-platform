@@ -29,6 +29,14 @@ describe('oidc browser navigation', () => {
     ).toBe(
       'http://127.0.0.1:8180/realms/MERCHANT/protocol/openid-connect/logout',
     );
+    expect(
+      resolveRealmLogoutUrl(
+        'http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/logout',
+        'http://platform.localhost:15999',
+      ),
+    ).toBe(
+      'http://127.0.0.1:18080/realms/PLATFORM/protocol/openid-connect/logout',
+    );
   });
 
   it('rejects non-http and non-loopback cleartext logout targets', () => {
@@ -42,6 +50,18 @@ describe('oidc browser navigation', () => {
       resolveRealmLogoutUrl(
         'http://idp.example.test/realms/MERCHANT/logout',
         'https://merchant.example.test',
+      ),
+    ).toThrow('Invalid realm logout URL');
+    expect(() =>
+      resolveRealmLogoutUrl(
+        'http://evil-localhost.example/logout',
+        'http://platform.localhost:15999',
+      ),
+    ).toThrow('Invalid realm logout URL');
+    expect(() =>
+      resolveRealmLogoutUrl(
+        'http://localhost.example/logout',
+        'http://platform.localhost:15999',
       ),
     ).toThrow('Invalid realm logout URL');
   });
